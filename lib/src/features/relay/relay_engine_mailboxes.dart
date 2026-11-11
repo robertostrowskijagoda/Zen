@@ -229,15 +229,17 @@ final class _MailboxJudge {
 
 extension _RelayEngineMailboxes on RelayEngine {
   /// Something came from [address] at [now]: if it is a friend's device,
-  /// what it was asked is answered.
-  void _heardFrom(RelayState state, String address, int now) {
+  /// what it was asked is answered. True when a device taken for gone
+  /// ([RelayState.goneDevices]) is back: it gets everything again from now
+  /// on (the caller saves).
+  bool _heardFrom(RelayState state, String address, int now) {
     if (address.isEmpty || address == _self) {
-      return;
+      return false;
     }
     RelayReach? reach = state.reach[address];
     if (reach == null) {
       if (!_isAcceptedFriend(address)) {
-        return;
+        return false;
       }
       reach = state.reach[address] = RelayReach();
     }
@@ -245,6 +247,13 @@ extension _RelayEngineMailboxes on RelayEngine {
     if (_reachDirtySince == 0) {
       _reachDirtySince = now;
     }
+    if (state.goneDevices.remove(address) != null) {
+      logZenMessage(
+        "A friend's device taken for gone is back: it gets everything again.",
+      );
+      return true;
+    }
+    return false;
   }
 
   /// Something that wants an answer goes to [address] at [now].

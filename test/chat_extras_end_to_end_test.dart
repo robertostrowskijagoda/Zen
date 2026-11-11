@@ -638,6 +638,42 @@ void main() {
     }
   });
 
+  test('in a group a reaction to one\'s own message and its deletion name '
+      'this device as the author, and reach the members', () async {
+    final _Mesh mesh = await _buildMesh();
+    final _Device a = mesh.devices[alice]!;
+    final GroupProfile group = await _group(mesh);
+    final String key = 'group:${group.id}';
+    await a.controller.sendGroupMessage(groupId: group.id, text: 'Moje');
+    await mesh.settle();
+    final ChatMessage mine = await _sentText(a, key, 'Moje');
+    await a.controller.reactToMessage(
+      conversationKey: key,
+      messageId: mine.id,
+      emoji: '🔥',
+    );
+    await mesh.settle();
+    for (final String member in <String>[bob, carol]) {
+      expect(
+        (await mesh.devices[member]!.message(key, mine.id))!.reactions,
+        <String, String>{alice: '🔥'},
+        reason: member,
+      );
+    }
+    await a.controller.deleteMessageForEveryone(
+      conversationKey: key,
+      messageId: mine.id,
+    );
+    await mesh.settle();
+    for (final String member in <String>[bob, carol]) {
+      expect(
+        (await mesh.devices[member]!.message(key, mine.id))!.isDeleted,
+        isTrue,
+        reason: member,
+      );
+    }
+  });
+
   test('a poll in a group: everyone sees it, votes as reactions, one '
       'vote per person, changed and taken back', () async {
     final _Mesh mesh = await _buildMesh();

@@ -277,3 +277,96 @@ func TestPQMediaSealsConcurrentlyWithSignals(t *testing.T) {
 		t.Fatalf("%d signals arrived", len(got))
 	}
 }
+
+// A key frame of the camera crosses the relay whole: a burst of full
+// video packets (a 960 x 540 key frame is some 80 of them), each of the
+// largest size WebRTC sends, and the RTCP that asks for the next one (PLI,
+// NACK, transport-wide feedback) reach the local WebRTC as they were sent,
+// in order. Admitted sockets have no size limit on what they send either.
+func TestRelayCarriesAKeyFrameAndItsFeedback(t *testing.T) {
+	_, a, aIP, b, _ := pqTestPair(t)
+	receiverNode := pqBridgeNode(b)
+	senderNode := pqBridgeNode(a)
+
+	relayConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relayConn.Close()
+	webrtc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer webrtc.Close()
+	_ = webrtc.SetReadBuffer(4 << 20)
+	target := webrtc.LocalAddr().(*net.UDPAddr)
+	const callID = "call-1731300000000-video"
+	receiverNode.relays[callID] = &relayState{
+		callID:       callID,
+		remoteIP:     aIP,
+		conn:         relayConn,
+		localTargets: map[string]*net.UDPAddr{target.String(): target},
+	}
+
+	var sent [][]byte
+	for i := range 90 {
+		packet := bytes.Repeat([]byte{byte(i)}, 1200)
+		packet[0], packet[1] = 0x90, 0x60 // RTP v2 with an extension, PT 96
+		sent = append(sent, packet)
+	}
+	sent = append(sent,
+		// PLI (RTCP PSFB FMT 1), generic NACK (RTPFB FMT 1), transport-cc.
+		[]byte{0x81, 0xce, 0x00, 0x02, 1, 2, 3, 4, 5, 6, 7, 8},
+		[]byte{0x81, 0xcd, 0x00, 0x03, 1, 2, 3, 4, 5, 6, 7, 8, 0, 9, 0, 0},
+		append([]byte{0x8f, 0xcd, 0x00, 0x0a}, bytes.Repeat([]byte{7}, 40)...),
+	)
+
+	received := make(chan []byte, len(sent))
+	go func() {
+		buffer := make([]byte, 2048)
+		for range sent {
+			_ = webrtc.SetReadDeadline(time.Now().Add(2 * time.Second))
+			count, _, err := webrtc.ReadFromUDP(buffer)
+			if err != nil {
+				close(received)
+				return
+			}
+			received <- bytes.Clone(buffer[:count])
+		}
+		close(received)
+	}()
+	for _, packet := range sent {
+		frame, err := buildRelayFrame(callID, packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := senderNode.sealRelayFrame(receiverNode.pq.local, frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receiverNode.handleRelayPacket(aIP, sealed)
+	}
+	index := 0
+	for got := range received {
+		if !bytes.Equal(got, sent[index]) {
+			t.Fatalf("datagram %d arrived as %d bytes, sent %d", index, len(got), len(sent[index]))
+		}
+		index++
+	}
+	if index != len(sent) {
+		t.Fatalf("%d of %d datagrams reached WebRTC", index, len(sent))
+	}
+
+	// The other way: once the call's socket is admitted, a full video
+	// packet and a short RTCP one from it both go to the peer.
+	relay := admittedRelay(callID)
+	local := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51000}
+	if relay.admitLocalDatagram(local, stunBindingRequestFor("peer:mine")) != relayAdmit {
+		t.Fatal("the call's WebRTC socket must be admitted")
+	}
+	for _, packet := range [][]byte{sent[0], sent[len(sent)-3]} {
+		if relay.admitLocalDatagram(local, packet) != relayAdmit {
+			t.Fatalf("a %d byte datagram of the admitted socket was refused", len(packet))
+		}
+	}
+}

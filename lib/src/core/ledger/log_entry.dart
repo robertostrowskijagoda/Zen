@@ -21,10 +21,33 @@ const int kMaxEntryBytes = 64 * 1024;
 /// later drop what came before (`LedgerStore.pruneBefore`) and logs stop
 /// growing for ever. The body carries nothing that must be understood
 /// (readers of a space skip a kind they do not know).
+///
+/// A checkpoint may say (from 1.16.5) how many entries right after it carry
+/// everything of the log still valid from before it: `n` in its body
+/// ([rebaseCountOf]). Once those are held, every holder may drop what came
+/// before; a checkpoint without it is dropped from only by its own writer's
+/// devices (the state log in `own`). Builds before 1.16.5 ignore `n`.
 const String kLedgerCheckpointKind = 'checkpoint';
+
+/// Most entries a checkpoint may say carry the state from before it: fewer
+/// than a store keeps waiting past a gap (`LedgerStore.maxPendingPerLog`),
+/// so a holder behind can always take them all before it moves.
+const int kMaxRebaseEntries = 400;
 
 /// Whether [entry] is its writer's checkpoint ([kLedgerCheckpointKind]).
 bool isLedgerCheckpoint(LogEntry entry) => entry.kind == kLedgerCheckpointKind;
+
+/// How many entries right after the checkpoint [entry] carry everything
+/// still valid from before it, by its writer's word (`n`); `null` for any
+/// other entry and for a checkpoint that does not say (see
+/// [kLedgerCheckpointKind]).
+int? rebaseCountOf(LogEntry entry) {
+  if (!isLedgerCheckpoint(entry)) {
+    return null;
+  }
+  final Object? n = entry.body['n'];
+  return n is int && n >= 0 && n <= kMaxRebaseEntries ? n : null;
+}
 
 const int kMaxSpaceLength = 200;
 const int kMaxKindLength = 40;

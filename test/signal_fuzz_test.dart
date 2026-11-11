@@ -66,6 +66,7 @@ const List<String> _types = <String>[
   'busy',
   'hangup',
   'call_end',
+  'call_missed',
   'group_invite',
   'group_invite_ack',
   'group_message',
@@ -149,6 +150,9 @@ const List<String> _keys = <String>[
   kMentionsKey,
   kPollKey,
   kLocationKey,
+  kChangeAuthorKey,
+  kGroupAddedKey,
+  kGroupLeftKey,
 ];
 
 /// The messages of friends the frames aim at (by id).
@@ -208,7 +212,9 @@ Object? _value(Random r, int depth) {
     case 2:
       return r.nextBool();
     case 3:
-      return r.nextDouble() * 1e12;
+      // Now and then a number only JSON text from the wire holds (1e400
+      // reads as infinity) or one with no exact integer.
+      return r.nextInt(4) == 0 ? _number(r) : r.nextDouble() * 1e12;
     case 4:
       // A known address, ours or a friend's, or a group's.
       return <String>[_friend, _stranger, _groupId, 'self', '', ..._targets][r
@@ -283,6 +289,11 @@ Map<String, dynamic> _aimed(Random r) => <String, dynamic>{
     ][r.nextInt(5)],
   if (r.nextInt(3) == 0) 'messageId': _targets[r.nextInt(_targets.length)],
   if (r.nextBool()) 'emoji': kPollVotes[r.nextInt(kPollVotes.length)],
+  // The author of the message meant: the friend's, another's, or anything.
+  if (r.nextBool())
+    kChangeAuthorKey: r.nextInt(4) == 0
+        ? _value(r, 3)
+        : <String>[_friend, _other, _stranger][r.nextInt(3)],
   if (r.nextBool()) 'text': 'zmienione ${r.nextInt(1000)}',
   if (r.nextBool())
     kLocationKey: r.nextBool()

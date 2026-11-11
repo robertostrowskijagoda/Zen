@@ -82,6 +82,9 @@ final class SignalRoutingPolicy {
           queueNavigation: false,
         );
       case ZenSignalType.typing:
+        // Shown only on the screen; its end is taken in every state, and
+        // what is shown goes after a few seconds without a word (the hub's
+        // typingShownForProvider).
         return SignalHandlingPlan(
           priority: priority,
           persist: false,
@@ -90,9 +93,11 @@ final class SignalRoutingPolicy {
           queueNavigation: false,
         );
       case ZenSignalType.messageRead:
+        // Applied to the chat the moment it arrives, in every state; a
+        // queue copy would change nothing once Zen is back on the screen.
         return SignalHandlingPlan(
           priority: priority,
-          persist: true,
+          persist: false,
           deliverToUi: lifecycle.isInteractive,
           showSystemNotification: false,
           queueNavigation: false,

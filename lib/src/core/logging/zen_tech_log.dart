@@ -150,15 +150,33 @@ abstract final class ZenTechLog {
 
   /// The file the bridge writes a fatal Go error of this process to
   /// (native/yggdrasil_bridge/crash_output.go), next to the diagnostics
-  /// log; `null` before the log is attached. Android records such a crash
-  /// only as "signal 11", with no stack.
+  /// log; `null` before the log is attached, and while the log is quiet
+  /// (an account that is not on the list is open): the file is the
+  /// device's, and what a crash puts in it (addresses, the time) would be
+  /// copied into the log of the next ordinary start. Android records such a
+  /// crash only as "signal 11", with no stack.
   static String? get goCrashPath {
     final File? log = ZenDiagnosticsLog.file;
-    if (log == null) {
+    if (log == null || ZenDiagnosticsLog.quiet) {
       return null;
     }
     return '${log.parent.path}${Platform.pathSeparator}'
         '${ZenDiagnosticsLog.filePrefix}-go-crash';
+  }
+
+  /// What the bridge is told to write a fatal Go error to, at every node
+  /// start: [goCrashPath] (`null` before the log is attached: none is
+  /// named), and while the log is quiet the system's null device, so that
+  /// nothing is left on disk. A path is named even then, not none: the
+  /// bridge keeps one crash output for the whole process, and an empty name
+  /// would leave the device's file, set by an earlier start of an ordinary
+  /// account, in force during the hidden session. The next start of an
+  /// ordinary account names the device's file again.
+  static String? get goCrashOutput {
+    if (ZenDiagnosticsLog.quiet) {
+      return Platform.isWindows ? 'NUL' : '/dev/null';
+    }
+    return goCrashPath;
   }
 
   /// The most lines of a Go crash written to the log.

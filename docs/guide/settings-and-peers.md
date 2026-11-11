@@ -35,8 +35,9 @@ Every setting is in one place only. The list, top to bottom:
 | Section | What's inside |
 |---|---|
 | *Run the setup again* | the first-start steps again, each with what is set now |
+| (top) | **Passwords** (*Logins and passwords for sites and apps*: your password manager, which asks who you are each time it opens; see [Passwords](passwords.md)) |
 | (top) | **Invite** (your QR code, *Copy invitation* and *Copy code only*, scanning someone's code, sending Zen to a friend), **About** (version, about how many people use Zen and how many are in the pyramid, what Zen is, security and privacy, licences, documents with the date you accepted them, contact with *Report a problem*, support, Zen on GitHub and on Discord) |
-| Account and recovery | **Account and recovery** (key copy, recovery circle, copy with friends, full account copy, second device), **Accounts on this device** (with *Receive in the background*), **Devices** |
+| Account and recovery | **Account and recovery** (key copy, key with close friends and the account password, copy with friends, full account copy, second device), **Accounts on this device** (with *Receive in the background*), **Devices** |
 | Privacy and security | **Security** (app password, emergency wipe password, fingerprint or face, auto-lock, use without a password, the disguised icon on Android), **Contact and visibility** (*Show when I last opened the app*, on by default; who may write to you without being a friend and what a first message costs; who may invite you to groups), **Blocked** |
 | Messages and calls | **Notifications and sounds** (everything about notifications, see below), **Call recordings**, **GIFs** (the *GIF search* switch and your own KLIPY key) |
 | Network | **Offline mailboxes**, **Network and service** (technical info, [offline links](offline-links.md) with *Looking around in the background* on Android under Bluetooth, the bridge on a computer), **Public peers** |
@@ -103,10 +104,18 @@ skips its turn below 15 % battery, in battery saver and while the phone
 sleeps, unless it is charging.
 
 **Battery.** After 5 minutes in the background an Android phone only
-receives (no presence pings, scans or sync), lock or no lock; *Auto-lock*
-says so when it is set to *Never*, on close, on restart or longer than 5
-minutes. Presence pings go only to friends and only while Zen is on the
-screen. A computer on battery stops being a bridge for others and keeps
+receives (no scans or sync), lock or no lock; *Auto-lock* says so when it
+is set to *Never*, on close, on restart or longer than 5 minutes. Presence
+pings go only to friends. While Zen is on the screen it pings every 2
+minutes a friend who is online, every 4 minutes one whose Zen is in the
+background, and every 6 minutes one whose phone said it is going to sleep
+or who has not been heard from for a while. In the background the small
+Android service asks the friends who see your status every 10 minutes,
+on the clock's ten-minute marks, so a locked friend's phone answers on a
+wake it has anyway: a friend whose status was already swapped in those 10
+minutes is skipped, one not heard from for half an hour is asked only
+every third time, and a wake with no network at all does not
+wait for a link. A computer on battery stops being a bridge for others and keeps
 only 4 public peers; plugged in, it goes back to normal.
 
 **GIFs.** The GIF button in chats searches KLIPY, an outside company (the
@@ -144,7 +153,7 @@ cannot read it.
   connect within 8 seconds is replaced by the next one. So the links are
   back within seconds, also when the next peer in line is down too. A
   link that dies without a word (a mobile network that forgot it) is
-  noticed on the phone's next wake, about every quarter of an hour: each
+  noticed on the phone's next wake, about every ten minutes: each
   wake sends its peer a tiny packet, and a peer that does not answer
   within 3 seconds is replaced. With
   no network at all the phone tries again in waves, less and less often

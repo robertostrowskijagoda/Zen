@@ -103,8 +103,9 @@ case "$mode" in
     run_start_test --dart-define=ZEN_OLD_NODE_CONFIG_SHA="$node"
     files_of_app > after.txt
     # The decoy folders of 1.16.3 and earlier (random <24 hex>.bin files in
-    # an account folder's settings and data, nothing else) are planted
-    # again in an account's look when Zen starts (account_decoys.dart,
+    # an account folder's settings and data, nothing else) are written anew
+    # in an account's look: by 1.16.4 when Zen starts, from 1.16.5 at a
+    # later start, one decoy at a time (account_decoys.dart,
     # hasEarlierLook); no account ever has such a file.
     missing=$(cut -d ' ' -f 2- before.txt | while read -r f; do
       if echo "$f" |

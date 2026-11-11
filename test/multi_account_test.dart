@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app_bootstrap.dart';
 import 'package:zen/src/app/persistent_stores.dart';
@@ -372,6 +374,147 @@ void main() {
       expect(costs, hasLength(2));
     });
 
+    test('a wrong ID makes the same calls to the secret store, of the same '
+        'kinds and in the same order, with the derivations in the same '
+        'places, as a wrong password for an account that is there', () async {
+      // Each call to the system's secret store costs time of its own (on a
+      // computer it reads and decrypts the whole store): a count that
+      // differs tells whether an ID exists.
+      final List<String> calls = <String>[];
+      final SecureStorageCredentialsStore store = SecureStorageCredentialsStore(
+        _MemoryKeychain(calls, 'keychain'),
+        _MemoryKeychain(calls, 'earlier keychain'),
+      );
+      final ZenAccountRegistry accounts = ZenAccountRegistry(
+        instanceDirectory: () async => base,
+        secrets: store,
+        random: Random(7),
+      );
+      AppSecurityService securityOf(ZenAccountScope scope) =>
+          LocalAppSecurityService(
+            credentialsStore: store.forAccount(scope.secret),
+            passwordIterations: 10,
+            keyVault: const SharedKeyVault(NoKeyVault()),
+          );
+      final ZenAccountScope plain = await accounts.create();
+      final ZenAccountScope withPanic = await accounts.create();
+      for (final ZenAccountScope scope in <ZenAccountScope>[plain, withPanic]) {
+        final AppSecurityService own = securityOf(scope);
+        await own.initialize(settings: const AppSettings());
+        await own.setPassword('haslo-konta');
+        if (scope == withPanic) {
+          await own.setPanicPassword('alarm-alarm');
+        }
+      }
+      final UnlockThrottle guesses = UnlockThrottle.otherAccounts(
+        store: store.forDevice(),
+        monotonic: () => Duration.zero,
+      );
+      debugOnPasswordDerivation = (PasswordCost cost) =>
+          calls.add('derivation ${cost.memoryKiB}');
+      addTearDown(() {
+        debugOnPasswordDerivation = null;
+        debugDefaultTargetPlatformOverride = null;
+        SecureStorageCredentialsStore.debugForgetKeychainMove();
+      });
+
+      Future<List<String>> attempt(
+        String typed, {
+        ZenAccountScope current = ZenAccountScope.defaultAccount,
+      }) async {
+        // Each attempt from a count of none.
+        await guesses.clear();
+        calls.clear();
+        final ZenAccountUnlockResult result = await unlockOtherZenAccount(
+          typed: typed,
+          password: 'zle-haslo-123',
+          current: current,
+          registry: accounts,
+          security: securityOf,
+          throttle: guesses,
+        );
+        expect(result.outcome, ZenAccountUnlock.refused);
+        return List<String>.of(calls);
+      }
+
+      for (final TargetPlatform? platform in <TargetPlatform?>[
+        null,
+        TargetPlatform.android,
+        TargetPlatform.iOS,
+        TargetPlatform.macOS,
+      ]) {
+        debugDefaultTargetPlatformOverride = platform;
+        SecureStorageCredentialsStore.debugForgetKeychainMove();
+        // iOS moves its items once per start, before anything else.
+        await store.read('zen_rewrite_warm_up');
+        final List<String> there = await attempt(plain.id!);
+        expect(
+          there.where((String c) => c.startsWith('derivation')),
+          hasLength(2),
+        );
+        expect(there.where((String c) => c.contains('read')), isNotEmpty);
+        final Map<String, List<String>> others = <String, List<String>>{
+          'with an emergency wipe password': await attempt(withPanic.id!),
+          'a wrong ID': await attempt(newAccountId(Random(99))),
+          'not an ID': await attempt('nie-id'),
+          'the account open now': await attempt(plain.id!, current: plain),
+        };
+        others.forEach((String what, List<String> seen) {
+          expect(seen, there, reason: '$what ($platform)');
+        });
+      }
+    });
+
+    test('a guess at another account is counted before its password is '
+        'checked: Zen closed during the check leaves it counted', () async {
+      final ZenAccountScope a = await registry.create();
+      final AppSecurityService own = securityFor(a);
+      await own.initialize(settings: const AppSettings());
+      await own.setPassword('haslo-konta-a');
+      UnlockThrottle started() => UnlockThrottle.otherAccounts(
+        store: secrets.forDevice(),
+        monotonic: () => Duration.zero,
+      );
+      String? count() => keychain.items[UnlockThrottle.otherAccountsStorageKey];
+      addTearDown(() => debugOnPasswordDerivation = null);
+
+      // Zen closed as the first derivation starts.
+      debugOnPasswordDerivation = (PasswordCost _) =>
+          throw StateError('Zen was closed');
+      for (final String typed in <String>[a.id!, newAccountId(Random(3))]) {
+        await expectLater(
+          unlockOtherZenAccount(
+            typed: typed,
+            password: 'zgadywane',
+            current: ZenAccountScope.defaultAccount,
+            registry: registry,
+            security: securityFor,
+            throttle: started(),
+          ),
+          throwsStateError,
+        );
+      }
+      expect(count(), startsWith('2;'));
+
+      // The right password: counted during its check, then taken back, the
+      // entry as it was.
+      final List<String?> duringCheck = <String?>[];
+      debugOnPasswordDerivation = (PasswordCost _) => duringCheck.add(count());
+      final String? before = count();
+      final ZenAccountUnlockResult right = await unlockOtherZenAccount(
+        typed: a.id!,
+        password: 'haslo-konta-a',
+        current: ZenAccountScope.defaultAccount,
+        registry: registry,
+        security: securityFor,
+        throttle: started(),
+      );
+      expect(right.outcome, ZenAccountUnlock.opened);
+      expect(duringCheck, hasLength(2));
+      expect(duringCheck, everyElement(startsWith('3;')));
+      expect(count(), before);
+    });
+
     test('guesses at another account are counted for the device, apart '
         'from the lock screen, and no unlock clears the count', () async {
       final ZenAccountScope a = await registry.create();
@@ -633,23 +776,36 @@ void main() {
 }
 
 final class _MemoryKeychain implements SecureKeyValueBackend {
+  /// With [calls]: every call is noted there as `<name> <kind>`.
+  _MemoryKeychain([this.calls, this.name = 'keychain']);
+
   final Map<String, String> items = <String, String>{};
+  final List<String>? calls;
+  final String name;
 
   @override
-  Future<String?> read(String key) async => items[key];
+  Future<String?> read(String key) async {
+    calls?.add('$name read');
+    return items[key];
+  }
 
   @override
   Future<void> write(String key, String value) async {
+    calls?.add('$name write');
     items[key] = value;
   }
 
   @override
   Future<void> delete(String key) async {
+    calls?.add('$name delete');
     items.remove(key);
   }
 
   @override
-  Future<Map<String, String>> readAll() async => Map<String, String>.of(items);
+  Future<Map<String, String>> readAll() async {
+    calls?.add('$name read all');
+    return Map<String, String>.of(items);
+  }
 }
 
 final class _PassThrough implements BinaryCompressor {

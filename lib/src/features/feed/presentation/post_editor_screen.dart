@@ -20,8 +20,10 @@ import 'package:zen/src/features/feed/rich_text.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/media/audio_clip_player.dart';
 import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
+import 'package:zen/src/features/media/platform_picture.dart';
 import 'package:zen/src/features/shell/composer_drafts.dart';
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/presentation/mention_field.dart';
@@ -221,10 +223,15 @@ String _mimeFor(String name) {
 }
 
 /// A picked picture ready for a post or the gallery: a GIF stays an
-/// animated GIF (without metadata, see `gif_files.dart`), anything else
-/// becomes a fresh JPEG ([sanitizePhoto]). Throws [ArgumentError] with the
-/// reason to show when it cannot go.
-Future<DraftMedia> pictureForPost(Uint8List bytes) async {
+/// animated GIF (without metadata, see `gif_files.dart`), and so does an
+/// animated WebP or PNG ([gifIfAnimated]); anything else becomes a fresh
+/// JPEG ([sanitizePhoto]), a HEIC photo after the phone's own decoder read
+/// it ([readablePicture]). Throws [ArgumentError] with the reason to show
+/// when it cannot go.
+Future<DraftMedia> pictureForPost(Uint8List picked) async {
+  final Uint8List bytes = await gifIfAnimated(
+    await readablePicture(picked, maxSide: kMaxImageSide) ?? picked,
+  );
   final PickedGif gif = preparePickedGif(bytes);
   switch (gif.status) {
     case PickedGifStatus.ready:

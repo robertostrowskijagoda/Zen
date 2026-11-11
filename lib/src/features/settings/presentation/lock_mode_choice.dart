@@ -43,7 +43,14 @@ bool locksLater(AppSettings from, AppSettings to) {
 /// choice that locks later than now ([locksLater]) asks who is there first
 /// ([confirmSensitiveAccess]); one that locks sooner does not.
 class LockModeSettingChoice extends ConsumerWidget {
-  const LockModeSettingChoice({super.key});
+  const LockModeSettingChoice({this.confirmsLaterLock = true, super.key});
+
+  /// Whether a choice that locks later asks for the app password first.
+  /// Off only in the setup of a first start: the password was set a moment
+  /// ago and no lock was chosen yet, so there is nothing to protect from
+  /// whoever holds the phone. "Nigdy" with an app password asks anyway (its
+  /// dialog needs the password to keep the key).
+  final bool confirmsLaterLock;
 
   /// With an app password, "Nigdy" keeps the data key in the system's
   /// secret store so Zen opens without the password after a restart: the
@@ -94,14 +101,15 @@ class LockModeSettingChoice extends ConsumerWidget {
   }
 
   /// Before a change from [from] to [to]: true when it locks no later, or
-  /// the person confirmed it (nothing to ask without an app password).
-  static Future<bool> _mayLockLater(
+  /// the person confirmed it (nothing to ask without an app password, or
+  /// where [confirmsLaterLock] is off).
+  Future<bool> _mayLockLater(
     BuildContext context,
     AppSecurityService security, {
     required AppSettings from,
     required AppSettings to,
   }) async {
-    if (!security.hasPassword || !locksLater(from, to)) {
+    if (!confirmsLaterLock || !security.hasPassword || !locksLater(from, to)) {
       return true;
     }
     return context.mounted &&
@@ -112,7 +120,7 @@ class LockModeSettingChoice extends ConsumerWidget {
   }
 
   /// Applies [to] through [apply] once [_mayLockLater] lets it.
-  static Future<void> _change(
+  Future<void> _change(
     BuildContext context,
     AppSecurityService security, {
     required AppSettings from,

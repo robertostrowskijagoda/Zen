@@ -8,6 +8,9 @@ import 'package:zen/src/features/media/crop_region.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
+import 'package:zen/src/features/media/media_temp_folder.dart'
+    show mediaTemporaryDirectory;
+import 'package:zen/src/features/profile/own_profile_images.dart';
 
 /// Security validator and sanitizer for user profile avatar images.
 /// Protects against malicious polyglots, oversized image payloads, decompression bombs,
@@ -97,11 +100,13 @@ final class AvatarSanitizer {
     return false;
   }
 
-  /// Validates the source file and safely copies it into the sandboxed avatars directory.
-  /// Returns the sanitized local file path on success, or throws a [FormatException] on failure.
+  /// Validates the source file and stages the sanitized copy as a plain file
+  /// in the private temporary media folder ([stagePlainProfileImage]), where
+  /// the profile editor shows it until saving seals it into the vault.
+  /// Returns that path on success, or throws a [FormatException] on failure.
   static Future<String> validateAndStoreAvatar({
     required String sourcePath,
-    required Directory storageDir,
+    Future<Directory> Function() folder = mediaTemporaryDirectory,
   }) async {
     final File sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
@@ -110,7 +115,7 @@ final class AvatarSanitizer {
 
     return validateAndStoreAvatarBytes(
       rawBytes: await sourceFile.readAsBytes(),
-      storageDir: storageDir,
+      folder: folder,
     );
   }
 
@@ -118,7 +123,7 @@ final class AvatarSanitizer {
   /// person framed: [makeAvatarImage]).
   static Future<String> validateAndStoreAvatarBytes({
     required Uint8List rawBytes,
-    required Directory storageDir,
+    Future<Directory> Function() folder = mediaTemporaryDirectory,
   }) async {
     if (rawBytes.isEmpty) {
       throw FormatException(t('Plik awatara jest pusty.'));
@@ -158,25 +163,15 @@ final class AvatarSanitizer {
       kept = clean;
     }
 
-    // Prepare sandbox avatars directory
-    final Directory avatarSandbox = Directory(
-      '${storageDir.path}${Platform.pathSeparator}avatars',
+    // The only plain copy lives in the private temporary media folder
+    // (owner-only, emptied at every start), never under the account folder.
+    // The extension follows the magic header.
+    return stagePlainProfileImage(
+      kept,
+      prefix: 'avatar_',
+      extension: _extensionForHeader(rawBytes),
+      folder: folder,
     );
-    if (!await avatarSandbox.exists()) {
-      await avatarSandbox.create(recursive: true);
-    }
-
-    // Determine safe extension based on magic header
-    final String safeExt = _extensionForHeader(rawBytes);
-    final String safeFileName =
-        'avatar_${DateTime.now().microsecondsSinceEpoch}$safeExt';
-    final String targetPath =
-        '${avatarSandbox.path}${Platform.pathSeparator}$safeFileName';
-
-    // Write sanitized file
-    await File(targetPath).writeAsBytes(kept, flush: true);
-
-    return targetPath;
   }
 
   static String _extensionForHeader(Uint8List bytes) {
@@ -232,20 +227,22 @@ const int kAvatarGifSide = 512;
 /// smaller).
 const int kMaxAvatarSourceBytes = 20 * 1024 * 1024;
 
-/// The part [region] of the picture [bytes] (framed by the person, made
+/// The part [region] of the picture [picked] (framed by the person, made
 /// square) as one's photo: a JPEG at most [kAvatarSide] a side (a PNG when
 /// it has see-through parts), turned upright and without its metadata
-/// (no EXIF, no GPS); a GIF stays animated ([kAvatarGifSide]). `null` when
-/// it is not a picture this app handles. Pure and slow for a big picture:
-/// run it in an isolate.
+/// (no EXIF, no GPS); a GIF stays animated ([kAvatarGifSide]), and so does
+/// an animated WebP or PNG, made a GIF first ([animatedPictureAsGif]).
+/// `null` when it is not a picture this app handles. Pure and slow for a
+/// big picture: run it in an isolate.
 Uint8List? makeAvatarImage((Uint8List, CropRegion?) job) {
-  final Uint8List bytes = job.$1;
+  final Uint8List picked = job.$1;
   final CropRegion? region = job.$2;
-  if (bytes.length > kMaxAvatarSourceBytes ||
-      !AvatarSanitizer.isValidImageBytes(bytes) ||
-      AvatarSanitizer.hasDangerousHeader(bytes)) {
+  if (picked.length > kMaxAvatarSourceBytes ||
+      !AvatarSanitizer.isValidImageBytes(picked) ||
+      AvatarSanitizer.hasDangerousHeader(picked)) {
     return null;
   }
+  final Uint8List bytes = animatedPictureAsGif(picked) ?? picked;
   if (looksLikeGif(bytes)) {
     return shrinkGif(
       bytes,

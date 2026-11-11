@@ -207,7 +207,10 @@ const Duration kAndroidBackgroundHeartbeatInterval = Duration(seconds: 5);
 /// monotonic clock that stands still while the phone sleeps (both isolates'
 /// timers do too): after a long sleep the service never mistakes the app's
 /// silence for its end. The end itself comes as a signal (ZenPower
-/// "appGone", when the app's engine goes).
+/// "appGone", when the app's engine goes). With the screen off, where the
+/// phone is awake only for the watchdog's short wakes, two of its probes
+/// left unanswered in a row decide sooner
+/// ([kAndroidWatchdogUnansweredWakes]).
 const Duration kAndroidBackgroundHeartbeatTimeout = Duration(seconds: 20);
 
 /// How often the parked service wakes the phone to look at the heartbeats
@@ -244,6 +247,26 @@ const String _kHeartbeatEngineKey = 'engine';
 /// How long the parked service waits for an answer to its probe before it
 /// takes the node over.
 const Duration kAndroidBackgroundProbeWait = Duration(seconds: 3);
+
+/// Watchdog wakes in a row whose probe the app left unanswered, with no
+/// heartbeat in between, after which the parked service takes the node
+/// over, however short the app's silence still is
+/// ([kAndroidBackgroundHeartbeatTimeout]).
+///
+/// With the screen off the phone sleeps between the wakes, and the silence
+/// is counted only while it is awake: a wake whose probe goes unanswered
+/// adds the probe's wait to it and no more, so the timeout alone took
+/// about seven wakes, seven minutes without messages or calls, to give up
+/// on a hung app. An app that runs its node answers a probe within
+/// moments; two missed a wake apart mean its isolate stood still through
+/// both waits and everything between them. One missed answer, followed by
+/// a heartbeat, counts for nothing.
+const int kAndroidWatchdogUnansweredWakes = 2;
+
+/// How long a watchdog wake that set off a takeover keeps the phone awake
+/// for it, past the probe's wait: the service's node gets going within the
+/// wake instead of waiting for the next thing that wakes the phone.
+const Duration kAndroidWatchdogTakeoverHold = Duration(seconds: 3);
 
 /// The foreground service's options. Its repeat event, every
 /// [kAndroidBackgroundHeartbeatInterval], drives the watchdog that looks at
@@ -1747,6 +1770,16 @@ final class _AndroidBackgroundRuntimeBridgeState
       }
       _handoffActive = false;
       ZenTechLog.handover('app', ok: true, took: restore.elapsed);
+      // The service wrote what it heard of friends last as it stopped; an
+      // unlock started the core before that, so it is read again.
+      for (final ZenModule module in ref.read(zenCoreProvider).modules) {
+        if (module is RuntimeSignalModule) {
+          unawaitedLogged(
+            module.takeKeptPresence(),
+            context: 'Taking the statuses the service kept failed',
+          );
+        }
+      }
       // What the service took in and handed out as a mailbox for friends.
       await _mailboxKitWriter?.takeHeld();
       if (!mounted) {
@@ -2566,7 +2599,9 @@ void _androidBackgroundRuntimeTaskEntryPoint() {
 /// The service's task handler with [notices] instead of the system
 /// notifications, so tests can see what the service tells the person.
 /// [openSession]: what opens the node session instead of
-/// [LockedReceiverSession.open].
+/// [LockedReceiverSession.open]. [stopwatch]: the clock the app's silence
+/// is counted on, instead of the monotonic one (a phone that sleeps on a
+/// virtual clock).
 @visibleForTesting
 TaskHandler buildAndroidBackgroundTaskHandlerForTesting({
   required RuntimeSystemNotificationService notices,
@@ -2574,10 +2609,12 @@ TaskHandler buildAndroidBackgroundTaskHandlerForTesting({
     AndroidBackgroundBootstrapPayload payload,
   )?
   openSession,
+  Stopwatch Function()? stopwatch,
 }) {
   return _ZenRewriteAndroidBackgroundTaskHandler(
     noticeService: () => notices,
     openSession: openSession,
+    stopwatch: stopwatch,
   );
 }
 
@@ -2588,14 +2625,20 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       AndroidBackgroundBootstrapPayload payload,
     )?
     openSession,
+    Stopwatch Function()? stopwatch,
   }) : _noticeServiceFactory = noticeService,
-       _openSession = openSession;
+       _openSession = openSession,
+       _stopwatch = stopwatch ?? Stopwatch.new;
 
   /// Opens the node session instead of [LockedReceiverSession.open] (tests).
   final Future<LockedReceiverSession?> Function(
     AndroidBackgroundBootstrapPayload payload,
   )?
   _openSession;
+
+  /// A new stopwatch on the monotonic clock, which stands still while the
+  /// phone sleeps (tests: a virtual phone's).
+  final Stopwatch Function() _stopwatch;
 
   final Completer<AndroidBackgroundBootstrapPayload> _bootstrapCompleter =
       Completer<AndroidBackgroundBootstrapPayload>();
@@ -2642,6 +2685,10 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
 
   /// Completes when a heartbeat comes during a watchdog wake.
   Completer<void>? _heardOnWake;
+
+  /// Watchdog wakes in a row whose probe the app left unanswered; any
+  /// heartbeat starts the count again ([kAndroidWatchdogUnansweredWakes]).
+  int _unansweredWakes = 0;
 
   /// The node runs here because this service took it over (no heartbeat,
   /// or the app's engine went), not because the app asked: the app is told
@@ -2843,10 +2890,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         desired.mode != AndroidBackgroundRuntimeMode.standby) {
       return;
     }
-    final Stopwatch? since = _sinceAppHeartbeat;
-    if (!appGone &&
-        since != null &&
-        since.elapsed < kAndroidBackgroundHeartbeatTimeout) {
+    final bool unanswered = _unansweredWakes >= kAndroidWatchdogUnansweredWakes;
+    if (!appGone && !unanswered && !_appSilentLong) {
       return;
     }
     if (!appGone) {
@@ -2855,7 +2900,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       // that does not answer is taken for gone.
       final Stopwatch? probe = _probe;
       if (probe == null) {
-        _probe = Stopwatch()..start();
+        _probe = _stopwatch()..start();
         _sendProbe();
         _probeTimer?.cancel();
         _probeTimer = Timer(kAndroidBackgroundProbeWait, _checkStandbyWatchdog);
@@ -2870,6 +2915,10 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       appGone
           ? 'The app is gone while parked — the service is taking the '
                 'runtime node over.'
+          : unanswered
+          ? 'The app answered none of $_unansweredWakes watchdog probes in a '
+                'row while parked — the service is taking the runtime node '
+                'over.'
           : 'No app heartbeat for '
                 '${kAndroidBackgroundHeartbeatTimeout.inSeconds}s while parked '
                 '— the service is taking the runtime node over.',
@@ -2881,10 +2930,18 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     );
   }
 
+  /// The app has not reported in for [kAndroidBackgroundHeartbeatTimeout]
+  /// of the time the phone was awake (or never did).
+  bool get _appSilentLong {
+    final Stopwatch? since = _sinceAppHeartbeat;
+    return since == null || since.elapsed >= kAndroidBackgroundHeartbeatTimeout;
+  }
+
   void _noteAppAlive() {
-    (_sinceAppHeartbeat ??= Stopwatch())
+    (_sinceAppHeartbeat ??= _stopwatch())
       ..reset()
       ..start();
+    _unansweredWakes = 0;
     _endProbe();
     final Completer<void>? heard = _heardOnWake;
     if (heard != null && !heard.isCompleted) {
@@ -2922,7 +2979,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         standbyWatchdogEvery(appOnScreen: _appOnScreen),
         _watchOnWake,
         // The probe's answer, and a moment for a takeover it sets off.
-        hold: kAndroidBackgroundProbeWait + const Duration(seconds: 3),
+        hold: kAndroidBackgroundProbeWait + kAndroidWatchdogTakeoverHold,
         whileIdle: !_appOnScreen,
       );
     } else {
@@ -2934,15 +2991,18 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// A watchdog wake: the app is asked at once ([watchdogWakeAsks]; its
   /// heartbeat timer stood still while the phone slept, like the service's
   /// clock), then the heartbeats are looked at and the phone may sleep
-  /// again. An app silent for long ([kAndroidBackgroundHeartbeatTimeout])
-  /// that did not answer this probe in its time is taken for gone now: the
-  /// probe the look would send is the one it did not answer.
+  /// again. An app that did not answer this probe in its time is taken for
+  /// gone now when it also left the probe of the wake before unanswered
+  /// ([kAndroidWatchdogUnansweredWakes]) or has been silent for long
+  /// ([kAndroidBackgroundHeartbeatTimeout]): the probe the look would send
+  /// is the one it did not answer. The wake that sets the takeover off
+  /// keeps the phone awake for it a moment more.
   Future<void> _watchOnWake() async {
     if (_destroyed) {
       return;
     }
     final Completer<void> heard = _heardOnWake = Completer<void>();
-    final Stopwatch asked = Stopwatch()..start();
+    final Stopwatch asked = _stopwatch()..start();
     final bool answered = await watchdogWakeAsks(
       probe: _sendProbe,
       answered: heard.future,
@@ -2950,15 +3010,24 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     if (identical(_heardOnWake, heard)) {
       _heardOnWake = null;
     }
-    final Stopwatch? since = _sinceAppHeartbeat;
+    if (!answered) {
+      _unansweredWakes += 1;
+    }
     final bool silent =
-        since == null || since.elapsed >= kAndroidBackgroundHeartbeatTimeout;
+        _appSilentLong || _unansweredWakes >= kAndroidWatchdogUnansweredWakes;
     if (!answered && silent && _probe == null) {
       _probe = asked;
     }
+    final AndroidBackgroundBootstrapPayload? before = _desired;
     _checkStandbyWatchdog();
     if (identical(_probe, asked)) {
       _endProbe();
+    }
+    if (!identical(_desired, before)) {
+      await _transitions.timeout(
+        kAndroidWatchdogTakeoverHold,
+        onTimeout: () {},
+      );
     }
   }
 

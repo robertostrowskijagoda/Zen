@@ -30,7 +30,7 @@ class HealthItem {
   });
 
   /// Stable name: `network`, `peers`, `background`, `notifications`,
-  /// `battery`, `clock`, `storage`.
+  /// `battery`, `clock`, `storage`, `contacts`.
   final String id;
   final HealthLevel level;
   final String title;
@@ -65,6 +65,7 @@ class HealthInputs {
     this.clockSkew,
     this.clockPeers = 0,
     this.storage,
+    this.contactsBackupFailing = false,
   });
 
   final HealthNetState net;
@@ -88,6 +89,10 @@ class HealthInputs {
   final Duration? clockSkew;
   final int clockPeers;
   final StorageInfo? storage;
+
+  /// The newest backup of friends and groups could not be saved with
+  /// friends (`ContactsBackupNotice`).
+  final bool contactsBackupFailing;
 }
 
 @immutable
@@ -136,6 +141,7 @@ HealthReport buildHealthReport(HealthInputs i) {
     if (i.isAndroid) _battery(i),
     _clock(i),
     _storage(i),
+    if (i.contactsBackupFailing) _contactsBackup(),
   ]);
 }
 
@@ -400,6 +406,16 @@ HealthItem _storage(HealthInputs i) {
     detail: t('Wolne miejsce: {free}.', {'free': free}),
   );
 }
+
+HealthItem _contactsBackup() => HealthItem(
+  id: 'contacts',
+  level: HealthLevel.warn,
+  title: t('Kopia listy znajomych'),
+  detail: t(
+    'Nie udało się zapisać u znajomych kopii listy znajomych i grup. '
+    'Zen spróbuje znowu przy następnej zmianie listy.',
+  ),
+);
 
 /// "1,4 GB", "230 MB".
 String formatBytes(int bytes) {

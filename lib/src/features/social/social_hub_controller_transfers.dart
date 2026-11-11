@@ -45,6 +45,52 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     );
   }
 
+  /// The message [messageId] of the chat with [peerAddress], if it is here.
+  Future<ChatMessage?> _incomingFileMessage(
+    String peerAddress,
+    String messageId,
+  ) async => (await _messageTimelineStore.load(
+    peerAddress,
+  )).where((ChatMessage m) => m.id == messageId).firstOrNull;
+
+  /// Whether a file of message [messageId] from [peerAddress] arriving now
+  /// is for a message no longer here to take it (deleted for everyone,
+  /// deleted from this device, its chat cleared, disappeared).
+  Future<bool> _incomingFileUnwanted(
+    String peerAddress,
+    String messageId,
+  ) async {
+    final String key =
+        state.friendByAddress(peerAddress)?.address ??
+        PeerShareCodec.normalizeAddress(peerAddress);
+    if (_isRememberedGone(key, messageId)) {
+      return true;
+    }
+    final ChatMessage? here = await _incomingFileMessage(
+      peerAddress,
+      messageId,
+    );
+    return here != null && here.isDeleted;
+  }
+
+  /// A file that came whole for a message no longer here to take it
+  /// (deleted for everyone, deleted from this device or its chat cleared
+  /// while it came): it goes at once, it is kept for nobody.
+  Future<bool> _dropLateFile(
+    String peerAddress,
+    String messageId,
+    StoredAttachment stored,
+  ) async {
+    if (!await _incomingFileUnwanted(peerAddress, messageId)) {
+      return false;
+    }
+    if (isMediaVaultPath(stored.path)) {
+      await _mediaVault.delete(stored.path);
+    }
+    await _transferStore.deleteIncoming(peerAddress, messageId);
+    return true;
+  }
+
   @override
   Future<void> _persistIncomingAttachmentPlaceholder({
     required ZenSignal signal,
@@ -53,6 +99,18 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     final String messageId = signal.messageId?.trim().isNotEmpty == true
         ? signal.messageId!.trim()
         : 'incoming-transfer-$timestamp-${signal.sender}';
+    final ChatMessage? here = await _incomingFileMessage(
+      signal.sender,
+      messageId,
+    );
+    if ((here != null && (here.isDeleted || here.hasAttachment)) ||
+        (here == null &&
+            await _incomingFileUnwanted(signal.sender, messageId))) {
+      // Deleted (for everyone, or from this device, or with its chat), or
+      // its file is here whole already: an announcement again brings
+      // nothing back and starts no transfer that would never end.
+      return;
+    }
     await _upsertTimelineMessage(
       peerAddress: signal.sender,
       messageId: messageId,
@@ -179,6 +237,35 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
       return;
     }
 
+    final ChatMessage? here = await _incomingFileMessage(
+      signal.sender,
+      messageId,
+    );
+    final bool whole = here != null && !here.isDeleted && here.hasAttachment;
+    if (whole ||
+        (here != null && here.isDeleted) ||
+        (here == null &&
+            await _incomingFileUnwanted(signal.sender, messageId))) {
+      // A chunk of a file that is here whole already (its acknowledgement
+      // got lost: the sender sends it again), or of a message deleted for
+      // everyone, deleted from this device or cleared with its chat. It is
+      // only acknowledged, so the sender stops; it is not stored again, and
+      // it brings back no message that would show "Transfer w toku" for
+      // ever.
+      if (!whole) {
+        await _transferStore.deleteIncoming(signal.sender, messageId);
+      }
+      unawaitedLogged(
+        _sendAttachmentChunkAck(
+          peerAddress: signal.sender,
+          messageId: messageId,
+          chunkIndex: chunkIndex,
+        ),
+        context: 'Acknowledging a chunk again',
+      );
+      return;
+    }
+
     await _persistIncomingAttachmentPlaceholder(
       signal: signal,
       timestamp: timestamp,
@@ -237,10 +324,16 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
       mimeType: signal.mimeType ?? updated.mimeType,
       fileName: signal.fileName ?? updated.fileName,
     );
+    if (await _dropLateFile(signal.sender, messageId, stored)) {
+      return;
+    }
     await _upsertTimelineMessage(
       peerAddress: signal.sender,
       messageId: messageId,
       build: (ChatMessage? existing) {
+        if (existing != null && existing.isDeleted) {
+          return existing;
+        }
         final ChatMessage base =
             existing ??
             ChatMessage(
@@ -324,6 +417,10 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
       peerAddress: signal.sender,
       messageId: messageId,
       build: (ChatMessage? existing) {
+        if (existing != null && existing.isDeleted) {
+          // Deleted for everyone meanwhile: it stays a deleted message.
+          return existing;
+        }
         final ChatMessage base =
             existing ??
             ChatMessage(
@@ -387,15 +484,62 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     }
     _lastIncomingTransferSweepMillis = now;
     try {
-      await _transferStore.deleteStaleIncoming(
-        olderThanMillis: now - kIncomingAttachmentTransferExpiry.inMilliseconds,
-      );
+      final int olderThan =
+          now - kIncomingAttachmentTransferExpiry.inMilliseconds;
+      if (await _transferStore.deleteStaleIncoming(olderThanMillis: olderThan) >
+          0) {
+        await _giveUpSweptIncomingFiles(olderThan);
+      }
     } catch (error, stackTrace) {
       logZenError(
         'Sweeping stale incoming transfers failed',
         error,
         stackTrace,
       );
+    }
+  }
+
+  /// After unfinished incoming transfers were swept: a friend's file
+  /// message still waiting for its file, sent before [olderThanMillis] and
+  /// with no transfer left to bring it, says the file will not come
+  /// instead of "Transfer w toku" for ever.
+  Future<void> _giveUpSweptIncomingFiles(int olderThanMillis) async {
+    for (final FriendProfile friend in state.friends.values.toList()) {
+      if (!ref.mounted) {
+        return;
+      }
+      final String peer = friend.address;
+      final List<String> stuck = <String>[
+        for (final ChatMessage m in await _messageTimelineStore.load(peer))
+          if (m.direction == ChatMessageDirection.incoming &&
+              !m.isDeleted &&
+              m.type != ChatMessageType.text &&
+              !m.hasAttachment &&
+              !m.attachmentUnavailable &&
+              m.deliveryState == ChatMessageDeliveryState.sending &&
+              m.sentAtMillis < olderThanMillis)
+            m.id,
+      ];
+      final List<String> gone = <String>[
+        for (final String id in stuck)
+          if (await _transferStore.loadIncoming(peer, id) == null) id,
+      ];
+      if (gone.isEmpty) {
+        continue;
+      }
+      await _messageTimelineStore.update(
+        peer,
+        (List<ChatMessage> all) => <ChatMessage>[
+          for (final ChatMessage m in all)
+            gone.contains(m.id) && !m.hasAttachment
+                ? m.copyWith(
+                    attachmentUnavailable: true,
+                    deliveryState: ChatMessageDeliveryState.failed,
+                  )
+                : m,
+        ],
+      );
+      _bumpTimelineRevision();
     }
   }
 
@@ -415,6 +559,16 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
       messageId,
     );
     if (_activeRealtimeTransfers.containsKey(key)) {
+      return;
+    }
+    final ChatMessage? here = await _incomingFileMessage(
+      signal.sender,
+      messageId,
+    );
+    if ((here != null && (here.isDeleted || here.hasAttachment)) ||
+        (here == null &&
+            await _incomingFileUnwanted(signal.sender, messageId))) {
+      // Deleted, or whole here already: left unanswered, nothing comes back.
       return;
     }
     final String peerPrefix = AttachmentTransferStore.peerScopePrefix(
@@ -544,10 +698,17 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     if (!ref.mounted) {
       return;
     }
+    if (await _dropLateFile(signal.sender, messageId, stored)) {
+      await _closeRealtimeTransferSession(signal.sender, messageId);
+      return;
+    }
     await _upsertTimelineMessage(
       peerAddress: signal.sender,
       messageId: messageId,
       build: (ChatMessage? existing) {
+        if (existing != null && existing.isDeleted) {
+          return existing;
+        }
         final ChatMessage base =
             existing ??
             ChatMessage(
@@ -693,6 +854,10 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
           peerAddress: peerAddress,
           messageId: messageId,
           build: (ChatMessage? existing) {
+            if (existing != null && existing.isDeleted) {
+              // Deleted for everyone meanwhile: it stays a deleted message.
+              return existing;
+            }
             final ChatMessage base =
                 existing ??
                 ChatMessage(
@@ -756,6 +921,10 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
           peerAddress: peerAddress,
           messageId: messageId,
           build: (ChatMessage? existing) {
+            if (existing != null && existing.isDeleted) {
+              // Deleted for everyone meanwhile: it stays a deleted message.
+              return existing;
+            }
             final ChatMessage base =
                 existing ??
                 ChatMessage(
@@ -786,6 +955,11 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
         return;
       }
       if (result == AttachmentTransferDispatchResult.sendFailed) {
+        if (await transferStore.loadOutgoing(peerAddress, messageId) == null) {
+          // Stopped here on purpose (deleted for everyone, its chat
+          // cleared): the friend knows from the deletion, nothing failed.
+          return;
+        }
         await _sendAttachmentTransferCancel(
           peerAddress: peerAddress,
           messageId: messageId,
@@ -857,10 +1031,22 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     if (!handed || !ref.mounted) {
       return handed;
     }
+    if (await _transferStore.loadOutgoing(
+          transfer.peerAddress,
+          transfer.messageId,
+        ) ==
+        null) {
+      // Deleted for everyone, or its chat cleared, while it was handed
+      // over: the message does not come back here.
+      return true;
+    }
     await _upsertTimelineMessage(
       peerAddress: transfer.peerAddress,
       messageId: transfer.messageId,
       build: (ChatMessage? existing) {
+        if (existing != null && existing.isDeleted) {
+          return existing;
+        }
         final ChatMessage base =
             existing ??
             ChatMessage(

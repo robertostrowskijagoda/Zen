@@ -129,6 +129,28 @@ final class UserProfileController extends Notifier<UserProfile> {
     _hydrated = true;
     if (persisted != null) {
       state = persisted;
+      await _clearLegacyImages(persisted);
+    }
+  }
+
+  /// Seals and removes the plain photo and cover files that versions up to
+  /// 1.16.4 left in the account folder. Only for a profile that was read:
+  /// when it could not be, nothing is known to be unused.
+  Future<void> _clearLegacyImages(UserProfile loaded) async {
+    try {
+      await ref.read(legacyProfileImageTidierProvider)(loaded, (
+        UserProfile sealed,
+      ) async {
+        // Never over a change made while this ran.
+        if (!ref.mounted || !identical(state, loaded)) {
+          return false;
+        }
+        await ref.read(userProfileStoreProvider).save(sealed);
+        state = sealed;
+        return true;
+      });
+    } on Object catch (error, stackTrace) {
+      logZenError('Clearing older profile pictures failed', error, stackTrace);
     }
   }
 

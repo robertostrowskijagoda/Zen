@@ -148,10 +148,11 @@ bool photoSizeAllowed(
   }
 }
 
-/// Re-encodes [bytes] as a small JPEG: turned upright, scaled down to
+/// Re-encodes [picked] as a small JPEG: turned upright, scaled down to
 /// [maxSide], without EXIF/GPS. A GIF stays an animated GIF instead, made
 /// small enough by `shrinkGif` (at most [gifSide] px a side and
-/// [maxBytes]). `null` for anything that is not a picture this app is
+/// [maxBytes]); an animated WebP or PNG picked here is made such a GIF
+/// too (`animatedPictureAsGif`). `null` for anything that is not a picture this app is
 /// willing to handle. The same function cleans photos that come from other
 /// phones (with the stricter [kMaxRemotePhotoSide] /
 /// [kMaxRemotePhotoPixels] / [kMaxRemotePhotoInputBytes] limits, and
@@ -160,7 +161,7 @@ bool photoSizeAllowed(
 /// blocks), so odd bytes never reach the disk or the UI's decoder. Pure:
 /// run it with `compute`.
 Uint8List? compressSharedPhoto(
-  Uint8List bytes, {
+  Uint8List picked, {
   int maxSide = kEventPhotoSide,
   int gifSide = kEventGifSide,
   int quality = 72,
@@ -170,13 +171,18 @@ Uint8List? compressSharedPhoto(
   int maxInputPixels = _maxPixels,
   bool remote = false,
 }) {
-  if (bytes.isEmpty || bytes.length > maxInputBytes) {
+  if (picked.isEmpty || picked.length > maxInputBytes) {
     return null;
   }
-  if (!AvatarSanitizer.isValidImageBytes(bytes) ||
-      AvatarSanitizer.hasDangerousHeader(bytes)) {
+  if (!AvatarSanitizer.isValidImageBytes(picked) ||
+      AvatarSanitizer.hasDangerousHeader(picked)) {
     return null;
   }
+  // A picture picked here that is an animated WebP or PNG is made a GIF and
+  // keeps playing; one from another phone is never converted.
+  final Uint8List bytes = remote
+      ? picked
+      : animatedPictureAsGif(picked) ?? picked;
   if (looksLikeGif(bytes)) {
     // Never flattened to its first frame.
     return remote

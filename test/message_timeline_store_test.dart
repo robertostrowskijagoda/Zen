@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
@@ -161,6 +163,81 @@ void main() {
       final List<ChatMessage> restored = await store.load('corrupted_peer');
       expect(restored, isEmpty);
     });
+
+    test(
+      'a group file\'s reference is stored with its known fields only: '
+      'a number JSON cannot write (1e400) does not lose the message',
+      () async {
+        final FileMessageTimelineStore store = FileMessageTimelineStore.onDisk(
+          MemoryLedgerDisk(),
+        );
+        ChatMessage photo(String id, String media) => ChatMessage(
+          id: id,
+          sender: '200::2',
+          text: 'zdjecie',
+          sentAtMillis: 1,
+          direction: ChatMessageDirection.incoming,
+          type: ChatMessageType.image,
+          pendingMedia: <String, dynamic>{
+            ...jsonDecode(media) as Map<String, dynamic>,
+            'src': '200::2',
+          },
+        );
+        await store.append('group:g', photo('m1', '{"h":"abc","n":1e400}'));
+        await store.append(
+          'group:g',
+          photo('m2', '{"id":"blk","k":"K","n":-1e400,"ms":1e400,"x":[1e400]}'),
+        );
+        final List<ChatMessage> kept = await FileMessageTimelineStore.onDisk(
+          store.disk,
+        ).load('group:g');
+        expect(kept.map((ChatMessage m) => m.id), <String>['m1', 'm2']);
+        // Without an id nothing could fetch it: no reference is kept.
+        expect(kept.first.pendingMedia, isNull);
+        expect(kept.last.pendingMedia, <String, dynamic>{
+          'id': 'blk',
+          'k': 'K',
+          'src': '200::2',
+        });
+      },
+    );
+  });
+
+  test('chatMediaRefFromJson keeps the known fields of their own type', () {
+    expect(chatMediaRefFromJson(null), isNull);
+    expect(chatMediaRefFromJson(<String, dynamic>{'k': 'K'}), isNull);
+    expect(chatMediaRefFromJson(<String, dynamic>{'id': ''}), isNull);
+    expect(chatMediaRefFromJson(<String, dynamic>{'id': 'x' * 257}), isNull);
+    expect(
+      chatMediaRefFromJson(<String, dynamic>{
+        'id': 'blk',
+        'k': 'K',
+        'n': 'N',
+        'mime': 'video/mp4',
+        'ms': 1500,
+        'src': '200::2',
+        'extra': 'x',
+      }),
+      <String, dynamic>{
+        'id': 'blk',
+        'k': 'K',
+        'n': 'N',
+        'mime': 'video/mp4',
+        'ms': 1500,
+        'src': '200::2',
+      },
+    );
+    expect(
+      chatMediaRefFromJson(<String, dynamic>{
+        'id': 'blk',
+        'k': 'K' * 129,
+        'n': 12,
+        'mime': null,
+        'ms': 24 * 3600 * 1000,
+        'src': <String>['200::2'],
+      }),
+      <String, dynamic>{'id': 'blk'},
+    );
   });
 }
 

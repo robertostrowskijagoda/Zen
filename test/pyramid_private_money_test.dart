@@ -181,6 +181,60 @@ void main() {
     expect(w['S'].ledgerBalanceOf(z), 60);
   });
 
+  test('a number of a payer who is not a treasurer, split three, three and '
+      'one between orders, is released by most treasurers; the order still '
+      'waiting goes out again and counts on the payee\'s phone too', () async {
+    final PyramidWorld w = await world();
+    final String y = w['Y'].myKey!;
+    final String z = w['Z'].myKey!;
+    await w.fund('Y', 10000);
+    expect(w['S'].state!.treasurers, hasLength(7));
+    void online(List<String> who, bool on) {
+      for (final String n in who) {
+        w.net.setOnline(w.net[n], on);
+      }
+    }
+
+    w.net.holdForOffline = false;
+    // A1, A2, B1 sign the first (S, A, B, X away), S, A, B the second (A1,
+    // A2, B1, X away), X the third: none can reach four of seven.
+    online(<String>['S', 'A', 'B', 'X'], false);
+    final PyramidRecord? first = await w['Y'].pay(z, 100);
+    await w.net.run();
+    w['Y'].cancelPending(first!.id);
+    online(<String>['S', 'A', 'B'], true);
+    online(<String>['A1', 'A2', 'B1'], false);
+    final PyramidRecord? second = await w['Y'].pay(z, 100);
+    await w.net.run();
+    w['Y'].cancelPending(second!.id);
+    online(<String>['S', 'A', 'B'], false);
+    online(<String>['X'], true);
+    final PyramidRecord? third = await w['Y'].pay(z, 100);
+    await w.net.run();
+    expect(third!.integer('seq'), first.integer('seq'));
+    expect(w['Y'].pendingPayments.single.tsigs, hasLength(1));
+    online(<String>['S', 'A', 'B', 'A1', 'A2', 'B1'], true);
+    w.net.holdForOffline = true;
+    for (int d = 0; d < 4; d++) {
+      await w.net.advance(const Duration(hours: 12));
+      await w.duties(rounds: 2);
+      await w.sync();
+    }
+    expect(w['Y'].pendingPayments, isEmpty);
+    expect(w['Z'].balance, 100);
+    expect(w['Z'].myEntries.single.to, z);
+    for (final String t in <String>['S', 'A', 'B', 'A1', 'A2', 'B1', 'X']) {
+      expect(w[t].ledgerBalanceOf(z), 100, reason: t);
+      expect(w[t].ledgerBalanceOf(y), 9900, reason: t);
+      expect(w[t].ledgerCheaters, isEmpty, reason: t);
+    }
+    // The next number is free.
+    final PyramidRecord? next = await w['Y'].pay(z, 50);
+    expect(next!.integer('seq'), first.integer('seq') + 1);
+    await w.net.run();
+    expect(w['Z'].balance, 150);
+  });
+
   testWidgets('the wallet shows the confirmed statement and a treasurer who '
       'states another balance, with a dispute for the court', (
     WidgetTester tester,

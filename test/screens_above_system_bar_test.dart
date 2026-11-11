@@ -43,6 +43,11 @@ import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_door_screen.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
+import 'package:zen/src/features/passwords/password_entry.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
+import 'package:zen/src/features/passwords/presentation/password_entry_screen.dart';
+import 'package:zen/src/features/passwords/presentation/password_form_screen.dart';
+import 'package:zen/src/features/passwords/presentation/password_vault_screen.dart';
 import 'package:zen/src/features/profile/presentation/gallery_add_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
@@ -379,6 +384,26 @@ final class _NoRelayPeers implements RelayPeerSource {
 
   @override
   List<RelayFriend> groupContacts() => const <RelayFriend>[];
+}
+
+/// A vault of fourteen passwords: a list longer than the small phone.
+Future<PasswordVaultService> _passwords(WidgetTester tester) async {
+  final PasswordVaultService vault = PasswordVaultService(
+    disk: MemoryLedgerDisk(),
+  );
+  await tester.runAsync(() async {
+    for (int i = 0; i < 14; i++) {
+      await vault.add(
+        PasswordFields(
+          name: 'Strona $i',
+          login: 'ania$i@example.com',
+          password: 'haslo-$i',
+          address: 'https://strona$i.example.com',
+        ),
+      );
+    }
+  });
+  return vault;
 }
 
 /// Opens [open] over an empty page as soon as it is on the screen: a sheet
@@ -736,6 +761,49 @@ void main() {
         tester,
         const MeetHubScreen(),
         overrides: _meetOverrides(meet),
+      );
+      await _expectAboveSystemBar(tester);
+    },
+    '"Hasla"': (WidgetTester tester) async {
+      final PasswordVaultService vault = await _passwords(tester);
+      await _pumpOnPhone(
+        tester,
+        const PasswordVaultScreen(),
+        overrides: <Override>[
+          passwordVaultServiceProvider.overrideWithValue(vault),
+        ],
+      );
+      await _expectAboveSystemBar(tester);
+    },
+    '"Haslo" (with earlier passwords)': (WidgetTester tester) async {
+      final PasswordVaultService vault = await _passwords(tester);
+      final PasswordEntry first = vault.entries.first;
+      await tester.runAsync(() async {
+        for (int i = 0; i < 4; i++) {
+          await vault.edit(
+            first.id,
+            PasswordFields(name: first.name, password: 'zmiana-$i'),
+          );
+        }
+      });
+      await _pumpOnPhone(
+        tester,
+        PasswordEntryScreen(entryId: first.id),
+        overrides: <Override>[
+          passwordVaultServiceProvider.overrideWithValue(vault),
+        ],
+      );
+      await _expectAboveSystemBar(tester);
+    },
+    '"Dodaj haslo"': (WidgetTester tester) async {
+      await _pumpOnPhone(
+        tester,
+        const PasswordFormScreen(),
+        overrides: <Override>[
+          passwordVaultServiceProvider.overrideWithValue(
+            PasswordVaultService(disk: MemoryLedgerDisk()),
+          ),
+        ],
       );
       await _expectAboveSystemBar(tester);
     },

@@ -5,18 +5,21 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/unmetered_network.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_handoff.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
@@ -28,6 +31,7 @@ import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 import 'support/counting_kem.dart';
@@ -628,13 +632,20 @@ void main() {
         ZenWake.nowMillis = () => DateTime.now().millisecondsSinceEpoch;
       });
 
+      /// How often the receiver asked the node for a link.
+      int looks = 0;
+
       /// Starts the receiver; the node tells [links] in turn whether it has
-      /// a link (the last one stays).
+      /// a link (the last one stays). [network]: whether the phone is on
+      /// any network at all.
       Future<void> start(
         List<bool> answers, {
         Duration relinkWait = const Duration(seconds: 10),
+        Duration relinkStep = const Duration(milliseconds: 5),
+        bool network = true,
       }) async {
         links = List<bool>.of(answers);
+        looks = 0;
         final BackgroundCapability capability = await publishFor(_masterKey());
         transport = MemorySignalTransport();
         notices = MemoryRuntimeSystemNotificationService();
@@ -647,10 +658,13 @@ void main() {
           ),
           notices: notices,
           pollAnswerGrace: const Duration(milliseconds: 100),
-          relinkStep: const Duration(milliseconds: 5),
+          relinkStep: relinkStep,
           relinkWait: relinkWait,
-          meshLinked: () async =>
-              links.length > 1 ? links.removeAt(0) : links.single,
+          meshLinked: () async {
+            looks++;
+            return links.length > 1 ? links.removeAt(0) : links.single;
+          },
+          onNetwork: () async => network,
         );
         await receiver.start();
       }
@@ -705,6 +719,72 @@ void main() {
           false,
         ], relinkWait: const Duration(milliseconds: 50));
         expect(await wakeAndCount(), 1);
+      });
+
+      test('on no network at all the wake does not wait for a link', () async {
+        // The wait as on a phone (10 s, a look every 0.5 s), in short.
+        const Duration wait = Duration(milliseconds: 200);
+        const Duration step = Duration(milliseconds: 10);
+        // On a network without a link (the node redials): it looks for one
+        // until the wait is over, the phone held awake meanwhile.
+        await start(<bool>[false], relinkWait: wait, relinkStep: step);
+        expect(await wakeAndCount(), 1);
+        // Up to 1 + wait / step; fewer when a busy machine is slow.
+        expect(looks, greaterThan(2));
+        await receiver.stop();
+        // Flight mode, no signal: no link can come; the wake ends at once
+        // (before, it waited as above: 10 s held awake on each such wake).
+        await start(
+          <bool>[false],
+          relinkWait: wait,
+          relinkStep: step,
+          network: false,
+        );
+        expect(await wakeAndCount(), 1);
+        expect(looks, 1, reason: 'only the look before the poll');
+      });
+
+      test('the network is told by the interfaces\' addresses: a loopback or '
+          'link-local one alone is none', () async {
+        NetInterfaceInfo iface(String name, List<String> addresses) =>
+            NetInterfaceInfo(name, <InternetAddress>[
+              for (final String a in addresses) InternetAddress(a),
+            ]);
+        Future<bool> on(List<NetInterfaceInfo> list) =>
+            onAnyNetwork(lister: () async => list);
+        expect(await on(<NetInterfaceInfo>[]), isFalse);
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('lo', <String>['127.0.0.1', '::1']),
+            iface('wlan0', <String>['fe80::1']),
+            iface('dummy0', <String>['fe80::2']),
+          ]),
+          isFalse,
+        );
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('rmnet_data0', <String>['10.12.0.7']),
+          ]),
+          isTrue,
+        );
+        // Wi-Fi Direct's group has an address of its own.
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('p2p-wlan0-0', <String>['192.168.49.1']),
+          ]),
+          isTrue,
+        );
+        expect(
+          await on(<NetInterfaceInfo>[
+            iface('wlan0', <String>['2001:db8::5']),
+          ]),
+          isTrue,
+        );
+        // A list that cannot be read: as if on a network (it waits).
+        expect(
+          await onAnyNetwork(lister: () async => throw StateError('no list')),
+          isTrue,
+        );
       });
     });
 
@@ -870,6 +950,52 @@ void main() {
         expect(notices.audibleAlertCount, 1);
       });
 
+      test('a message deleted or edited by its sender takes its notice '
+          'down; another message\'s change does not', () async {
+        await startReceiver(await publishFor(_masterKey()), noticeKit: kit());
+        await receive(_ada, <String, dynamic>{...direct, 'msgId': 'm-1'});
+        expect(notices.activeNotifications.single.body, 'Spotkajmy się o 18');
+        await receive(_ada, const <String, dynamic>{
+          'type': 'msg_delete',
+          '_rid': 'd0',
+          'msgId': 'm-other',
+        });
+        expect(notices.activeNotifications, hasLength(1));
+        await receive(_ada, const <String, dynamic>{
+          'type': 'msg_delete',
+          '_rid': 'd1',
+          'msgId': 'm-1',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        expect(receiver.keptCount, 3, reason: 'the app gets them all');
+
+        await receive(_member, <String, dynamic>{...inGroup, 'msgId': 'g-1'});
+        expect(notices.activeNotifications, hasLength(1));
+        await receive(_member, const <String, dynamic>{
+          'type': 'msg_edit',
+          '_rid': 'e1',
+          'groupId': 'g1',
+          'msgId': 'g-1',
+          'text': 'Kto idzie jutro?',
+        });
+        expect(notices.activeNotifications, isEmpty);
+      });
+
+      test(
+        'the notice of a disappearing message goes when it expires',
+        () async {
+          await startReceiver(await publishFor(_masterKey()), noticeKit: kit());
+          await receive(_ada, <String, dynamic>{
+            ...direct,
+            'msgId': 'm-2',
+            'ttl': 1,
+          });
+          expect(notices.activeNotifications, hasLength(1));
+          await Future<void>.delayed(const Duration(milliseconds: 1300));
+          expect(notices.activeNotifications, isEmpty);
+        },
+      );
+
       test('"Nadawca i treść": who and what, in a group too', () async {
         RuntimeSystemNotification notice = await noticeFor(kit(), _ada, direct);
         expect(notice.title, 'Ada');
@@ -883,18 +1009,19 @@ void main() {
       test(
         'a group message names only members, never by the name they sent',
         () async {
-          // Not a member of the group: only that something came.
-          RuntimeSystemNotification notice = await noticeFor(
-            kit(),
-            _bob,
-            <String, dynamic>{...inGroup, '_rid': 'p3', 'senderName': 'Ada'},
-          );
-          expect(notice.title, 'Nowa wiadomość');
-          expect('${notice.title} ${notice.body}', isNot(contains('Ada')));
-          expect('${notice.title} ${notice.body}', isNot(contains('Kto')));
+          // Not a member of the group: the app drops it, so no notice
+          // either (it is kept for the app all the same).
+          await startReceiver(await publishFor(_masterKey()), noticeKit: kit());
+          await receive(_bob, <String, dynamic>{
+            ...inGroup,
+            '_rid': 'p3',
+            'senderName': 'Ada',
+          });
+          expect(notices.activeNotifications, isEmpty);
+          expect(receiver.keptCount, 1);
           await receiver.stop();
           // A member the kit has no name for: never the name it chose.
-          notice = await noticeFor(
+          final RuntimeSystemNotification notice = await noticeFor(
             LockedNoticeKit(
               names: const <String, String>{'group:g1': 'Ekipa', _ada: 'Ada'},
               members: names.members,
@@ -994,9 +1121,24 @@ void main() {
           sounds: false,
         );
         await startReceiver(await publishFor(_masterKey()), noticeKit: muted);
+        final List<bool> rings = <bool>[];
+        final List<String> cards = <String>[];
+        receiver.ringForCall = (bool on) async => rings.add(on);
+        receiver.showCallCard = (String from) async => cards.add(from);
         await receive(_member, inGroup);
         await receive(_bob, const <String, dynamic>{'type': 'friend_request'});
         await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+        expect(notices.activeNotifications, isEmpty);
+        // "Połączenia" off: the phone does not ring and shows no call card
+        // either, as the app with Zen in the background; nor a missed call
+        // once the invites stop.
+        expect(rings, isEmpty);
+        expect(cards, isEmpty);
+        await receive(_bob, const <String, dynamic>{
+          'type': 'call_end',
+          'callId': 'c',
+        });
+        expect(rings, isEmpty);
         expect(notices.activeNotifications, isEmpty);
 
         // A message from a person still comes, without a sound.
@@ -1005,6 +1147,137 @@ void main() {
             notices.activeNotifications.single;
         expect(notice.kind, NoticeKind.message);
         expect(notice.silent, isTrue);
+      });
+
+      test('only a call the app rings for rings: a friend\'s, a group call '
+          'from someone in that joined group', () async {
+        final LockedNoticeKit groups = LockedNoticeKit(
+          memberTags: <String>{
+            LockedNoticeKit.memberTag('group:g1', _member),
+            LockedNoticeKit.memberTag('group:g1', _ada),
+          },
+        );
+        await startReceiver(await publishFor(_masterKey()), noticeKit: groups);
+        final List<bool> rings = <bool>[];
+        final List<String> cards = <String>[];
+        receiver.ringForCall = (bool on) async => rings.add(on);
+        receiver.showCallCard = (String from) async => cards.add(from);
+        // A group member who is no friend, calling alone; a group call to
+        // a group this phone is not in; one without the ids the app needs.
+        await receive(_member, const <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c1',
+        });
+        await receive(_member, const <String, dynamic>{
+          'type': 'group_call_invite',
+          'groupId': 'made-up',
+          'callId': 'c2',
+        });
+        await receive(_ada, const <String, dynamic>{
+          'type': 'group_call_invite',
+          'groupId': 'g1',
+        });
+        expect(rings, isEmpty);
+        expect(cards, isEmpty);
+        expect(notices.activeNotifications, isEmpty);
+
+        // A group call in a group it is in rings, from any member.
+        await receive(_member, const <String, dynamic>{
+          'type': 'group_call_invite',
+          'groupId': ' g1 ',
+          'callId': 'c3',
+        });
+        expect(rings, <bool>[true]);
+        expect(cards, <String>[_member]);
+        await receive(_member, const <String, dynamic>{
+          'type': 'group_call_leave',
+          'groupId': 'g1',
+          'callId': 'c3',
+        });
+        expect(rings, <bool>[true, false]);
+
+        // And a friend's call, as before.
+        await receive(_bob, const <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c4',
+        });
+        expect(rings, <bool>[true, false, true]);
+        expect(cards, <String>[_member, _bob]);
+      });
+
+      test('a mention gets past a mute only from someone in that group, and '
+          'only a few times per sender', () async {
+        const String self = '200::1';
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        Map<String, dynamic> mentioning(String rid, String groupId) =>
+            <String, dynamic>{
+              'type': 'group_message',
+              '_rid': rid,
+              'groupId': groupId,
+              'msgId': rid,
+              'text': 'Hej <@0>',
+              kMentionsKey: <Object?>[
+                const Mention(address: self, name: 'Ty').toJson(),
+              ],
+            };
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: LockedNoticeKit(
+            self: self,
+            mutedChats: <String, int>{
+              _ada: now + 3600000,
+              'group:g1': now + 3600000,
+            },
+            memberTags: <String>{
+              LockedNoticeKit.memberTag('group:g1', _member),
+            },
+          ),
+          // Every notice is counted, none folded into the one before.
+          noticeThrottle: Duration.zero,
+        );
+        // A muted friend: her message is quiet, and so is a "mention" in a
+        // group she made up or one she is not in.
+        await receive(_ada, <String, dynamic>{
+          'type': 'message',
+          '_rid': 'm1',
+          'text': 'hej',
+        });
+        for (int i = 0; i < 3; i++) {
+          await receive(_ada, mentioning('a$i', 'made-up-$i'));
+          await receive(_ada, mentioning('b$i', 'g1'));
+        }
+        expect(notices.activeNotifications, isEmpty);
+
+        // A member of the muted group mentioning this phone: told, within
+        // the app's limit per sender; past it the mute holds.
+        for (int i = 0; i < kMaxMentionAlertsPerSender + 2; i++) {
+          await receive(_member, mentioning('c$i', 'g1'));
+        }
+        expect(notices.audibleAlertCount, kMaxMentionAlertsPerSender);
+        expect(notices.activeNotifications.single.kind, NoticeKind.mention);
+      });
+
+      test('an invitation to a cell chat\'s id is dropped however the id is '
+          'padded, as the app reads it', () async {
+        await startReceiver(await publishFor(_masterKey()), noticeKit: names);
+        for (final String id in <String>[
+          ' pyrcell-0123456789abcdef01234567',
+          'pyrcell-0123456789abcdef01234567\t',
+        ]) {
+          await receive(_bob, <String, dynamic>{
+            'type': 'group_invite',
+            '_rid': 'i$id',
+            'groupId': id,
+            'groupName': 'Komorka',
+          });
+        }
+        // Nor an invitation to no group at all.
+        await receive(_bob, const <String, dynamic>{
+          'type': 'group_invite',
+          '_rid': 'i-none',
+          'groupId': '  ',
+        });
+        expect(notices.activeNotifications, isEmpty);
       });
 
       test('an invitation to the id of a pyramid cell chat tells of nothing: '
@@ -1543,6 +1816,108 @@ void main() {
       );
     });
 
+    group('a missed call its caller tells of afterwards', () {
+      List<String> slots() => <String>[
+        for (final RuntimeSystemNotification n in notices.activeNotifications)
+          n.slotKey ?? '',
+      ];
+
+      test('a call that never rang here (the phone was away) is kept for '
+          'the app, confirmed, and leaves one "missed call"', () async {
+        await startReceiver(await publishFor(_masterKey()));
+        final List<bool> rings = <bool>[];
+        receiver.ringForCall = (bool on) async => rings.add(on);
+        transport.sentSignals.clear();
+        final Map<String, dynamic> missed = <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c-away',
+          'kind': 'audio',
+          'at': 900,
+          '_rid': 'cm1',
+        };
+        await receive(_ada, missed);
+        expect(receiver.keptCount, 1);
+        expect(
+          transport.sentSignals.where(
+            (s) => s.payload['type'] == 'rly_ack' && s.payload['rid'] == 'cm1',
+          ),
+          hasLength(1),
+        );
+        expect(slots(), <String>[kLockedMissedCallSlot]);
+        expect(rings, isEmpty, reason: 'it never rings');
+        // Its sender tries again until it hears the acknowledgement.
+        await notices.clear();
+        await receive(_ada, missed);
+        expect(receiver.keptCount, 1);
+        expect(notices.activeNotifications, isEmpty);
+      });
+
+      test('a call whose ring this phone followed left its "missed call" '
+          'already; one still ringing (its hangup got lost) stops', () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          ringTimeout: const Duration(milliseconds: 40),
+        );
+        await receive(_ada, <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c1',
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        expect(slots(), <String>[kLockedMissedCallSlot]);
+        await notices.clear();
+        await receive(_ada, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c1',
+          '_rid': 'cm-c1',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        expect(receiver.keptCount, 1, reason: 'still kept for the app');
+
+        await receive(_bob, <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c2',
+        });
+        expect(slots(), <String>[kLockedCallSlot]);
+        await receive(_bob, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c2',
+          '_rid': 'cm-c2',
+        });
+        expect(slots(), <String>[kLockedMissedCallSlot]);
+      });
+
+      test('only as the app tells of it: not with "Połączenia" off, not '
+          "from someone who is no friend", () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: const LockedNoticeKit(
+            muted: <NoticeKind>{NoticeKind.call},
+          ),
+        );
+        await receive(_ada, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c3',
+          '_rid': 'cm-c3',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        expect(receiver.keptCount, 1, reason: 'the chat still notes it');
+        await receiver.stop();
+
+        await startReceiver(await publishFor(_masterKey()));
+        await receive(_member, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c4',
+          '_rid': 'cm-c4',
+        });
+        await receive(_stranger, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c5',
+          '_rid': 'cm-c5',
+        });
+        expect(notices.activeNotifications, isEmpty);
+      });
+    });
+
     test('a friend\'s alarm is loud; anyone else\'s is only kept', () async {
       await startReceiver(await publishFor(_masterKey()));
       await receive(_member, <String, dynamic>{
@@ -1844,6 +2219,27 @@ void main() {
         'items': <Object>[_envelope('q2', from: _ada, notice: 1)],
       });
       expect(notices.activeNotifications, hasLength(1));
+    });
+
+    test('a missed call its caller told of afterwards, handed over by a '
+        'mailbox, is told: its sender marks it worth a notice', () async {
+      await startReceiver();
+      await receive(_bob, <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Object>[
+          _envelope(
+            'cm1',
+            from: _ada,
+            notice: kRelayNoticeTypes.contains(kCallMissedType) ? 1 : 0,
+          ),
+        ],
+      });
+      expect(receiver.keptCount, 1);
+      expect(notices.activeNotifications, hasLength(1));
+      expect(
+        notices.activeNotifications.single.body,
+        'Odblokuj Zen, żeby zobaczyć szczegóły.',
+      );
     });
 
     test('a mailbox handing the same mail over at every poll: kept and told '

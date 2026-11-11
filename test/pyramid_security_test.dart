@@ -425,6 +425,87 @@ void main() {
         expect(done.elections[req.id]!.winner, w.a2.id);
       });
 
+      test('a vote that ended is closed by most of its ring: a vote dated '
+          'back into it weeks later counts nowhere', () async {
+        final PyramidRecord b = await ballot(<LedgerKeyPair>[w.a, w.a1, w.a2]);
+        // A votes for itself, A1 for A1; the third card stays silent.
+        final PyramidRecord v1 = await vote(cards[0], w.a.id, t0 + day + h);
+        final PyramidRecord v2 = await vote(
+          cards[1],
+          w.a1.id,
+          t0 + day + 2 * h,
+        );
+        const int now = t0 + 30 * day;
+        final PyramidState ended = w.fold(<PyramidRecord>[
+          req,
+          b,
+          v1,
+          v2,
+        ], now: now);
+        final PyrElection e = ended.elections[req.id]!;
+        expect(e.closed, isTrue);
+        expect(e.allVoted, isFalse);
+        expect(e.winner, w.a.id);
+        expect(e.voteIds.values, unorderedEquals(<String>[v1.id, v2.id]));
+        // What the ring's apps sign once it ended: the votes that came.
+        final PyramidRecord bare = PyramidRecord(
+          body: <String, dynamic>{
+            't': PyrT.voteClose,
+            'py': w.py,
+            'at': e.deadline,
+            'by': ring,
+            'elect': req.id,
+            'votes': <String>[v1.id, v2.id]..sort(),
+          },
+        );
+        final PyramidRecord close = await (await bare.signedBy(
+          w.a,
+        )).signedBy(w.a2);
+        // A month later the silent card votes, dated inside the vote.
+        final PyramidRecord late = await vote(
+          cards[2],
+          w.a1.id,
+          t0 + day + 3 * h,
+        );
+        final PyramidState after = w.fold(<PyramidRecord>[
+          req,
+          b,
+          v1,
+          v2,
+          close,
+          late,
+        ], now: now);
+        expect(after.rejected[late.id], 'głos spoza zamknięcia głosowania');
+        expect(after.elections[req.id]!.close, close.id);
+        expect(after.elections[req.id]!.winner, w.a.id);
+        expect(after.pathOf(w.a.id), '0');
+        expect(after.pathOf(w.a1.id), '00');
+        // One of three is no close.
+        final PyramidRecord alone = await bare.signedBy(w.a);
+        final PyramidState notClosed = w.fold(<PyramidRecord>[
+          req,
+          b,
+          v1,
+          v2,
+          alone,
+        ], now: now);
+        expect(
+          notClosed.rejected[alone.id],
+          'zamknięcie podpisuje większość komórki',
+        );
+        // A phone that was there and got the vote a month late folds it
+        // when it came, after the end, before any close.
+        final PyramidState there = PyramidState.fold(
+          w.py,
+          <PyramidRecord>[...w.records, req, b, v1, v2, late],
+          now: now,
+          late: <String, int>{late.id: now - day},
+        );
+        expect(there.rejected[late.id], 'głosowanie zamknięte');
+        expect(there.elections[req.id]!.winner, w.a.id);
+        expect(there.pathOf(w.a.id), '0');
+      });
+
       test(
         'no vote counts before the ballot, nor with a stranger card',
         () async {

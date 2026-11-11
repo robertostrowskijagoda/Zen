@@ -27,11 +27,13 @@ aligned for phones with 16 KB memory pages. Details:
 ## How Zen updates itself
 
 - Every build except the store build asks GitHub for the latest release
-  20 seconds after it starts, when you come back to it and every hour while
-  it is open, whenever an hour has passed since the last look. On Android,
-  while Zen receives in the background, it also looks every few hours while
-  the app is closed. When a friend's Zen is newer than yours, Zen looks at
-  once. GitHub sees your IP address and the name "Zen", nothing else.
+  20 seconds after it starts, when you come back to it and while it is
+  open, whenever a quarter of an hour has passed since the last look. On
+  Android, while Zen receives in the background, the background service
+  also looks while the app is closed, on wakes the phone has anyway, so a
+  new version is told within about half an hour. When a friend's Zen is
+  newer than yours, Zen looks at once. GitHub sees your IP address and the
+  name "Zen", nothing else.
 - When there is a newer version, a quiet notification (once per version)
   and a bar say so, with a few lines about what is new in it. A version
   published after that takes the old notice's place, also when you closed
@@ -91,7 +93,12 @@ aligned for phones with 16 KB memory pages. Details:
   Windows ARM64 ZIP) shows **Open release page** instead of **Update**.
 - **When GitHub limits requests** (it allows only so many an hour from one
   address), Zen says so and shows when it tries again: as late as GitHub
-  asks, otherwise after 15 minutes, then 30, then an hour.
+  asks, otherwise after 15 minutes, then 30, then an hour. When GitHub
+  cannot be reached at all, the background service on Android waits longer
+  after each failed ask in a row: 15, 30, 60, 120, then at most 240
+  minutes, also across restarts, and goes back to its usual pace with the
+  first answer. A check you start by hand, and a clock set back, are never
+  held back by that wait.
   An unchanged answer costs nothing (Zen sends what it saw last time). If
   the repository has no published release (deleted or blocked), the card
   says so instead of "up to date"; a newer version can still come from a

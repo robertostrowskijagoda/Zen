@@ -108,14 +108,16 @@ void main() {
       final List<String> conflicts = <String>[];
       runtime.sessionKeyConflicts.listen(conflicts.add);
 
-      // Before the node is up: kept, handed over as hints on start.
+      // Before the node is up: kept, handed over as hints on start. One
+      // that contradicts a pin is someone's word against the device's own:
+      // nobody is warned about the device.
       runtime.vouchSessionKeys(<String, String>{'200::b': _key});
       await runtime.start();
       expect(starts, 1);
       expect(pinCalls, isEmpty);
       expect(hintCalls.single, <String, String>{bob: _key});
       await Future<void>.delayed(Duration.zero);
-      expect(conflicts, <String>[bob]);
+      expect(conflicts, isEmpty);
 
       // While it runs: at once, and never as a pin.
       runtime.vouchSessionKeys(<String, String>{'200::c': _key});
@@ -132,6 +134,76 @@ void main() {
       expect(hintCalls.length, hinted);
     },
   );
+
+  test('hints go with the friend who gave them; known peers are named to '
+      'the bridge, again after every start', () async {
+    final List<Map<String, String>> hintCalls = <Map<String, String>>[];
+    final List<Map<String, String>> dropCalls = <Map<String, String>>[];
+    final List<List<String>> knownCalls = <List<String>>[];
+    final String carol = PeerShareCodec.normalizeAddress('200::c');
+    final String dan = PeerShareCodec.normalizeAddress('200::d');
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+      bootstrap: () async => RuntimeNodeSession(
+        transport: MemorySignalTransport(),
+        snapshot: RuntimeTransportSnapshot.started(
+          localAddress: '200::1',
+          peers: 1,
+        ),
+        sessionKey: _key,
+        pinSessionKeys: (Map<String, String> pins, bool keep) =>
+            const <String, String>{},
+        hintSessionKeys: (Map<String, String> hints) {
+          hintCalls.add(Map<String, String>.of(hints));
+          return const <String, String>{};
+        },
+        dropSessionKeyHints: (Map<String, String> hints) =>
+            dropCalls.add(Map<String, String>.of(hints)),
+        setKnownPeers: (List<String> known) =>
+            knownCalls.add(List<String>.of(known)),
+      ),
+    );
+    addTearDown(runtime.dispose);
+
+    runtime.setKnownPeers(<String>['200:0:0:0:0:0:0:b', '200::b']);
+    runtime
+      ..replaceSessionKeyHints('200::b', <String, String>{
+        '200::c': _key,
+        '200::d': _key,
+      })
+      ..replaceSessionKeyHints(
+        sessionKeySourceOfAccount('acc'),
+        <String, String>{'200::d': _other},
+      );
+    await runtime.start();
+    expect(knownCalls.single, <String>[
+      PeerShareCodec.normalizeAddress('200::b'),
+    ]);
+    expect(hintCalls.single, <String, String>{carol: _key, dan: _other});
+
+    // The friend at 200::b is removed: what only it named goes; what the
+    // account's records name stays.
+    runtime.keepSessionKeyHintsOf(<String>{sessionKeySourceOfAccount('acc')});
+    expect(dropCalls.single, <String, String>{carol: _key});
+    expect(hintCalls, hasLength(1));
+    // The account goes too.
+    runtime.keepSessionKeyHintsOf(const <String>{});
+    expect(dropCalls.last, <String, String>{dan: _other});
+
+    // A friend's new list in full: what it no longer names goes.
+    runtime
+      ..replaceSessionKeyHints('200::e', <String, String>{
+        '200::c': _key,
+        '200::d': _key,
+      })
+      ..replaceSessionKeyHints('200::e', <String, String>{'200::d': _key});
+    expect(dropCalls.last, <String, String>{carol: _key});
+
+    // The same known peers again: nothing to say.
+    runtime.setKnownPeers(<String>['200::b']);
+    expect(knownCalls, hasLength(1));
+    runtime.setKnownPeers(const <String>[]);
+    expect(knownCalls.last, isEmpty);
+  });
 
   test('the bridge answer to a pin request is read', () {
     expect(

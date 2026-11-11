@@ -129,13 +129,14 @@ final class ZenAccountUnlockResult {
 
 /// "Inne konto": the account with the ID [typed] (or the [listed] one)
 /// opened with [password], as [unlockZenAccount] does. An ID that is not
-/// on this device, and the account open now ([current]), are refused
-/// after the work a wrong password costs
-/// ([AppSecurityService.spendWrongPasswordWork]) with the same answer: the
-/// wait does not tell whether an ID exists. With [throttle] nothing is
-/// tried while a wait is on, and every refusal (a wrong ID, a wrong
-/// password, the panic password) counts; an account opened clears
-/// nothing.
+/// on this device, and the account open now ([current]), are checked with
+/// the same steps against a stand-in
+/// ([AppSecurityService.wrongIdStandIn]) and refused with the same answer:
+/// the secret store sees the same reads and the wait is the same, so
+/// neither tells whether an ID exists. With [throttle] nothing is tried
+/// while a wait is on, and every attempt counts before its password is
+/// checked (Zen closed during the check leaves it counted); only an
+/// account opened takes its own attempt back, and clears nothing else.
 Future<ZenAccountUnlockResult> unlockOtherZenAccount({
   String typed = '',
   ZenListedAccount? listed,
@@ -148,6 +149,7 @@ Future<ZenAccountUnlockResult> unlockOtherZenAccount({
   if (throttle != null && await throttle.remaining() > Duration.zero) {
     return const ZenAccountUnlockResult(ZenAccountUnlock.throttled);
   }
+  await throttle?.recordFailure();
   final ZenAccountUnlockResult result = await _unlockOther(
     typed,
     listed,
@@ -156,8 +158,8 @@ Future<ZenAccountUnlockResult> unlockOtherZenAccount({
     registry,
     security,
   );
-  if (result.outcome != ZenAccountUnlock.opened) {
-    await throttle?.recordFailure();
+  if (result.outcome == ZenAccountUnlock.opened) {
+    await throttle?.withdrawFailure();
   }
   return result;
 }
@@ -180,7 +182,8 @@ Future<ZenAccountUnlockResult> _unlockOther(
           normalizeAccountId(typed) ?? newAccountId(Random.secure()),
           await registry.deviceSalt(),
         );
-    await security(standIn).spendWrongPasswordWork(password);
+    // Whatever the stand-in made of it, nothing opens.
+    await _checkPassword(security(standIn).wrongIdStandIn(), password);
     return const ZenAccountUnlockResult(ZenAccountUnlock.refused);
   }
   final ZenAccountUnlockResult result = await unlockZenAccount(
@@ -190,6 +193,29 @@ Future<ZenAccountUnlockResult> _unlockOther(
     security: security,
   );
   return ZenAccountUnlockResult(result.outcome, result.security, scope);
+}
+
+/// What [_checkPassword] found.
+enum _PasswordCheck { noPassword, right, wrong, panic }
+
+/// The steps a password for another account is checked with, one after
+/// another: for an account that is on this device and for the stand-in of
+/// one that is not alike, so the two cannot drift apart.
+Future<_PasswordCheck> _checkPassword(
+  AppSecurityService service,
+  String password,
+) async {
+  await service.initialize(settings: const AppSettings());
+  if (!service.hasPassword) {
+    return _PasswordCheck.noPassword;
+  }
+  if (await service.matchesPanicPassword(password) &&
+      !await service.verifyPassword(password)) {
+    return _PasswordCheck.panic;
+  }
+  return await service.unlock(password)
+      ? _PasswordCheck.right
+      : _PasswordCheck.wrong;
 }
 
 /// Checks [password] for the account [scope] before anything is switched:
@@ -204,21 +230,18 @@ Future<ZenAccountUnlockResult> unlockZenAccount(
   ZenAccountSecurityFactory security = defaultZenAccountSecurity,
 }) async {
   final AppSecurityService service = security(scope);
-  await service.initialize(settings: const AppSettings());
-  if (!service.hasPassword) {
-    return ZenAccountUnlockResult(ZenAccountUnlock.opened, service);
+  switch (await _checkPassword(service, password)) {
+    case _PasswordCheck.noPassword:
+    case _PasswordCheck.right:
+      return ZenAccountUnlockResult(ZenAccountUnlock.opened, service);
+    case _PasswordCheck.panic:
+      if (!scope.isDefault) {
+        await registry.wipeAccount(scope);
+      }
+      return const ZenAccountUnlockResult(ZenAccountUnlock.wiped);
+    case _PasswordCheck.wrong:
+      return const ZenAccountUnlockResult(ZenAccountUnlock.refused);
   }
-  if (await service.matchesPanicPassword(password) &&
-      !await service.verifyPassword(password)) {
-    if (!scope.isDefault) {
-      await registry.wipeAccount(scope);
-    }
-    return const ZenAccountUnlockResult(ZenAccountUnlock.wiped);
-  }
-  if (!await service.unlock(password)) {
-    return const ZenAccountUnlockResult(ZenAccountUnlock.refused);
-  }
-  return ZenAccountUnlockResult(ZenAccountUnlock.opened, service);
 }
 
 /// Stops what runs for the current account — its modules, its mesh node,

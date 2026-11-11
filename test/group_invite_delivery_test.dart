@@ -1165,19 +1165,20 @@ void main() {
 
   group('one message id, two senders', () {
     const String id = 'grp-msg-1-g-deadbeef';
-    _Harness inGroup() => _Harness(
+    _Harness inGroup({String creator = ''}) => _Harness(
       seed: SocialHubState.empty(lifecycle: _background).copyWith(
         book: FriendshipBook.restore(
           profiles: <String, FriendProfile>{
             ada: _friend(ada, 'Ada'),
             bob: _friend(bob, 'Bob'),
+            cyd: _friend(cyd, 'Cyd'),
           },
         ),
         groups: <String, GroupProfile>{
           'g': GroupProfile(
             id: 'g',
             name: 'G',
-            createdById: cyd,
+            createdById: creator.isEmpty ? cyd : creator,
             createdAtMillis: 0,
             memberAddresses: <String>[ada, bob, cyd],
           ),
@@ -1292,6 +1293,361 @@ void main() {
       );
       expect(h.sentTo(bob, 'msg_react').single['msgId'], id);
     });
+
+    Map<String, dynamic> change(
+      String type, {
+      String? author,
+      String messageId = id,
+    }) => <String, dynamic>{
+      'type': type,
+      'groupId': 'g',
+      'msgId': messageId,
+      if (type == 'msg_react') 'emoji': '👍',
+      'at': 1100,
+      kChangeAuthorKey: ?author,
+    };
+    ChatMessage of(List<ChatMessage> t, String who) =>
+        t.firstWhere((ChatMessage m) => m.sender == who);
+
+    test('a key another member\'s message took before 1.16.4 does not make '
+        'the real author\'s message a copy of it', () async {
+      final _Harness h = inGroup();
+      final String bobsKey = groupMessageLocalId(id, bob);
+      // Before 1.16.4 every id was kept as it came: Ada could send one that
+      // is the key Bob's message would later need.
+      await h.timelines.save('group:g', <ChatMessage>[
+        ChatMessage(
+          id: bobsKey,
+          sender: ada,
+          text: 'zajęte z góry',
+          sentAtMillis: 900,
+          direction: ChatMessageDirection.incoming,
+        ),
+      ]);
+      await h.deliver(ada, said('pierwsza'), at: 1000);
+      await h.deliver(bob, said('spotkanie o 18'), at: 1001);
+      List<ChatMessage> t = await chat(h);
+      expect(
+        t.map((ChatMessage m) => '${m.sender}: ${m.text}'),
+        unorderedEquals(<String>[
+          '$ada: zajęte z góry',
+          '$ada: pierwsza',
+          '$bob: spotkanie o 18',
+        ]),
+      );
+      expect(t.map((ChatMessage m) => m.id).toSet(), hasLength(3));
+      final ChatMessage bobs = of(t, bob);
+      expect(groupMessageWireId(bobs.id), id);
+      // A true late copy of Bob's message is still one.
+      await h.deliver(bob, said('spotkanie o 18'), at: 1002);
+      await h.deliver(ada, said('pierwsza'), at: 1003);
+      t = await chat(h);
+      expect(t, hasLength(3));
+      // A reaction naming Bob reaches his message, wherever it is kept.
+      await h.deliver(cyd, change('msg_react', author: bob), at: 1004);
+      t = await chat(h);
+      expect(of(t, bob).reactions, <String, String>{cyd: '👍'});
+      expect(
+        t
+            .where((ChatMessage m) => m.sender == ada)
+            .expand((ChatMessage m) => m.reactions.keys),
+        isEmpty,
+      );
+    });
+
+    test(
+      'a copy from another device of the account never goes into another '
+      'author\'s message that holds its key: it gets a key of its own',
+      () async {
+        final _Harness h = inGroup();
+        // Cyd's message holds the id, Ada's (sent before 1.16.4) Bob's key.
+        await h.timelines.save('group:g', <ChatMessage>[
+          ChatMessage(
+            id: id,
+            sender: cyd,
+            text: 'od Cyd',
+            sentAtMillis: 900,
+            direction: ChatMessageDirection.incoming,
+          ),
+          ChatMessage(
+            id: groupMessageLocalId(id, bob),
+            sender: ada,
+            text: 'zajęte z góry',
+            sentAtMillis: 901,
+            direction: ChatMessageDirection.incoming,
+          ),
+        ]);
+        await h.controller.importSyncedMessage(
+          'group:g',
+          ChatMessage(
+            id: id,
+            sender: bob,
+            text: 'od Boba',
+            sentAtMillis: 950,
+            direction: ChatMessageDirection.incoming,
+          ),
+        );
+        List<ChatMessage> t = await chat(h);
+        expect(
+          t.map((ChatMessage m) => '${m.sender}: ${m.text}'),
+          unorderedEquals(<String>[
+            '$cyd: od Cyd',
+            '$ada: zajęte z góry',
+            '$bob: od Boba',
+          ]),
+        );
+        expect(t.map((ChatMessage m) => m.id).toSet(), hasLength(3));
+        // The same copy again is a copy.
+        await h.controller.importSyncedMessage(
+          'group:g',
+          ChatMessage(
+            id: id,
+            sender: bob,
+            text: 'od Boba',
+            sentAtMillis: 950,
+            direction: ChatMessageDirection.incoming,
+          ),
+        );
+        t = await chat(h);
+        expect(t, hasLength(3));
+      },
+    );
+
+    test('one\'s own group message sent on another device shows here though '
+        'another member\'s message holds its id, and one that disappeared '
+        'here does not come back with a late mirror', () async {
+      final _Harness h = inGroup();
+      await h.deliver(ada, said('od Ady'), at: 1000);
+      Map<String, dynamic> mine(String text, String msgId) => <String, dynamic>{
+        'type': 'group_message',
+        'groupId': 'g',
+        'msgId': msgId,
+        'text': text,
+        'timestamp': 1001,
+      };
+      await h.controller.recordMirroredSend('g', mine('moja', id));
+      List<ChatMessage> t = await chat(h);
+      expect(
+        t.map(
+          (ChatMessage m) => '${m.isOutgoing ? 'ja' : m.sender}: ${m.text}',
+        ),
+        unorderedEquals(<String>['$ada: od Ady', 'ja: moja']),
+      );
+      // Mirrored again: still one.
+      await h.controller.recordMirroredSend('g', mine('moja', id));
+      expect(await chat(h), hasLength(2));
+
+      // Another one of one's own, deleted here; its mirror comes late.
+      await h.controller.recordMirroredSend('g', mine('ulotna', 'own-2'));
+      final ChatMessage gone = (await chat(
+        h,
+      )).singleWhere((ChatMessage m) => m.text == 'ulotna');
+      expect(
+        await h.controller.deleteMessageLocally(
+          key: 'group:g',
+          messageId: gone.id,
+        ),
+        isTrue,
+      );
+      await h.controller.recordMirroredSend('g', mine('ulotna', 'own-2'));
+      t = await chat(h);
+      expect(t.map((ChatMessage m) => m.text), isNot(contains('ulotna')));
+    });
+
+    test('the creator\'s deletion names the author of its message and reaches '
+        'that one, whichever holds the bare id here', () async {
+      for (final bool squatFirst in <bool>[false, true]) {
+        final _Harness h = inGroup();
+        if (squatFirst) {
+          await h.deliver(ada, said('obraźliwy tekst'), at: 1000);
+          await h.deliver(bob, said('spotkanie o 18'), at: 1001);
+        } else {
+          await h.deliver(bob, said('spotkanie o 18'), at: 1000);
+          await h.deliver(ada, said('obraźliwy tekst'), at: 1001);
+        }
+        await h.deliver(cyd, change('msg_delete', author: ada), at: 1002);
+        final List<ChatMessage> t = await chat(h);
+        expect(of(t, ada).isDeleted, isTrue, reason: 'squatFirst=$squatFirst');
+        expect(of(t, bob).isDeleted, isFalse, reason: 'squatFirst=$squatFirst');
+        expect(of(t, bob).text, 'spotkanie o 18');
+      }
+    });
+
+    test('a deletion from Zen 1.16.4 (no author) does nothing where two '
+        'members hold the id, and works where only one does', () async {
+      final _Harness h = inGroup();
+      await h.deliver(bob, said('spotkanie o 18'), at: 1000);
+      await h.deliver(ada, said('obraźliwy tekst'), at: 1001);
+      await h.deliver(cyd, change('msg_delete'), at: 1002);
+      List<ChatMessage> t = await chat(h);
+      expect(of(t, bob).isDeleted, isFalse);
+      expect(of(t, ada).isDeleted, isFalse);
+      // An id one message holds: the creator's deletion as before.
+      const String alone = 'grp-msg-2-g-cafebabe';
+      await h.deliver(bob, said('sam', messageId: alone), at: 1003);
+      await h.deliver(cyd, change('msg_delete', messageId: alone), at: 1004);
+      t = await chat(h);
+      expect(t.firstWhere((ChatMessage m) => m.id == alone).isDeleted, isTrue);
+      // And one's own message by its author, even where the id is shared.
+      await h.deliver(ada, change('msg_delete'), at: 1005);
+      t = await chat(h);
+      expect(of(t, ada).isDeleted, isTrue);
+      expect(of(t, bob).isDeleted, isFalse);
+    });
+
+    test('a reaction names the author of its message; one without it lands '
+        'only on an id one message holds', () async {
+      final _Harness h = inGroup();
+      await h.deliver(ada, said('kopia'), at: 1000);
+      await h.deliver(bob, said('oryginał'), at: 1001);
+      // From Zen 1.16.4: two messages hold the id, so it lands on neither.
+      await h.deliver(cyd, change('msg_react'), at: 1002);
+      List<ChatMessage> t = await chat(h);
+      expect(of(t, ada).reactions, isEmpty);
+      expect(of(t, bob).reactions, isEmpty);
+      await h.deliver(cyd, change('msg_react', author: bob), at: 1003);
+      t = await chat(h);
+      expect(of(t, bob).reactions, <String, String>{cyd: '👍'});
+      expect(of(t, ada).reactions, isEmpty);
+      // An author with no message of that id here: nothing.
+      await h.deliver(
+        ada,
+        change(
+          'msg_react',
+          author: PeerShareCodec.normalizeAddress('200::e7e'),
+        ),
+        at: 1004,
+      );
+      t = await chat(h);
+      expect(of(t, ada).reactions, isEmpty);
+      expect(of(t, bob).reactions, <String, String>{cyd: '👍'});
+      // An id one message holds: a reaction without an author as before.
+      const String alone = 'grp-msg-2-g-cafebabe';
+      await h.deliver(bob, said('sam', messageId: alone), at: 1005);
+      await h.deliver(cyd, change('msg_react', messageId: alone), at: 1006);
+      t = await chat(h);
+      expect(
+        t.firstWhere((ChatMessage m) => m.id == alone).reactions,
+        <String, String>{cyd: '👍'},
+      );
+    });
+
+    test('a reaction or a deletion sent from here names the author of the '
+        'message', () async {
+      final _Harness h = inGroup(creator: 'self');
+      await h.deliver(ada, said('kopia'), at: 1000);
+      await h.deliver(bob, said('oryginał'), at: 1001);
+      final List<ChatMessage> t = await chat(h);
+      h.transport.sentSignals.clear();
+      await h.controller.reactToMessage(
+        conversationKey: 'group:g',
+        messageId: of(t, bob).id,
+        emoji: '👍',
+      );
+      final Map<String, dynamic> react = h.sentTo(cyd, 'msg_react').single;
+      expect(react['msgId'], id);
+      expect(react[kChangeAuthorKey], bob);
+      await h.controller.deleteMessageForEveryone(
+        conversationKey: 'group:g',
+        messageId: of(t, ada).id,
+      );
+      final Map<String, dynamic> delete = h.sentTo(cyd, 'msg_delete').single;
+      expect(delete['msgId'], id);
+      expect(delete[kChangeAuthorKey], ada);
+      final List<ChatMessage> after = await chat(h);
+      expect(of(after, ada).isDeleted, isTrue);
+      expect(of(after, bob).isDeleted, isFalse);
+    });
+
+    test('another device of the account reacting or deleting in a group '
+        'reaches the message it meant', () async {
+      final _Harness h = inGroup(creator: 'self');
+      await h.deliver(ada, said('kopia'), at: 1000);
+      await h.deliver(bob, said('oryginał'), at: 1001);
+      // From a device on 1.16.4: two messages hold the id, so neither.
+      await h.controller.recordMirroredSend(ada, change('msg_react'));
+      List<ChatMessage> t = await chat(h);
+      expect(of(t, ada).reactions, isEmpty);
+      expect(of(t, bob).reactions, isEmpty);
+      await h.controller.recordMirroredSend(
+        ada,
+        change('msg_react', author: bob),
+      );
+      await h.controller.recordMirroredSend(
+        bob,
+        change('msg_delete', author: ada),
+      );
+      t = await chat(h);
+      expect(of(t, bob).reactions, <String, String>{'self': '👍'});
+      expect(of(t, bob).isDeleted, isFalse);
+      expect(of(t, ada).reactions, isEmpty);
+      expect(of(t, ada).isDeleted, isTrue);
+    });
+
+    test(
+      'a reply names the message it quotes by its author: the quote '
+      'shows and jumps to that one, not to whoever holds the bare id',
+      () async {
+        final _Harness h = inGroup();
+        await h.deliver(ada, said('Bob: odwołane'), at: 1000);
+        await h.deliver(bob, said('spotkanie o 18'), at: 1001);
+        final String bobs = groupMessageLocalId(id, bob);
+        Map<String, dynamic> reply(String replyId, Map<String, dynamic> re) =>
+            <String, dynamic>{...said('ok', messageId: replyId), 're': re};
+        Future<ChatReply?> quoteOf(String replyId) async => (await chat(
+          h,
+        )).firstWhere((ChatMessage m) => m.id == replyId).reply;
+
+        await h.deliver(
+          cyd,
+          reply('r1', <String, dynamic>{'id': id, 's': bob, 't': 'spotkanie'}),
+          at: 1002,
+        );
+        ChatReply? quote = await quoteOf('r1');
+        expect(quote!.messageId, bobs);
+        expect(quote.sender, bob);
+        expect(quote.text, 'spotkanie');
+
+        // Bob quoting his own message ('self' on his phone).
+        await h.deliver(
+          bob,
+          reply('r2', <String, dynamic>{'id': id, 's': 'self'}),
+          at: 1003,
+        );
+        quote = await quoteOf('r2');
+        expect(quote!.messageId, bobs);
+        expect(quote.sender, bob);
+
+        // A replier whose phone keeps Bob's message under its second key.
+        await h.deliver(
+          cyd,
+          reply('r3', <String, dynamic>{'id': bobs, 's': bob}),
+          at: 1004,
+        );
+        expect((await quoteOf('r3'))!.messageId, bobs);
+
+        // Ada's message is still hers to quote.
+        await h.deliver(
+          cyd,
+          reply('r4', <String, dynamic>{'id': id, 's': ada}),
+          at: 1005,
+        );
+        expect((await quoteOf('r4'))!.messageId, id);
+
+        // An original not here yet keeps the key it will come under.
+        await h.deliver(
+          cyd,
+          reply('r5', <String, dynamic>{'id': 'grp-msg-9-g-later', 's': bob}),
+          at: 1006,
+        );
+        expect((await quoteOf('r5'))!.messageId, 'grp-msg-9-g-later');
+
+        // Bob deleting his message drops the quotes of it, not of Ada's.
+        await h.deliver(bob, change('msg_delete', author: bob), at: 1007);
+        expect((await quoteOf('r1'))!.text, isEmpty);
+        expect((await quoteOf('r4'))!.messageId, id);
+      },
+    );
   });
 
   group('snapshot', () {

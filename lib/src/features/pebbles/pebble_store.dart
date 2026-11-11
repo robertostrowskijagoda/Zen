@@ -23,6 +23,13 @@ const int kPebbleMaxKept = 200;
 /// At most this many requests to keep a pebble wait for an answer.
 const int kPebbleMaxKeepRequests = 20;
 
+/// The most finders the author counts for one pebble, and for all of its
+/// pebbles together. A finder is a friend of the author (see
+/// [PebbleHosting]), so the first is far above any real friend list; the
+/// second keeps the index, which is rewritten whole on every change, small.
+const int kPebbleMaxFinders = 1000;
+const int kPebbleMaxFindersTotal = 20000;
+
 /// One pebble on this device.
 @immutable
 final class PebbleEntry {
@@ -434,8 +441,19 @@ final class PebbleStore extends ChangeNotifier {
       for (final MapEntry<Object?, Object?> e in finders.entries) {
         final PebbleId? id = PebbleId.parse(e.key);
         if (id != null) {
-          _finders[id] = _list(e.value).whereType<String>().toSet();
+          _finders[id] = _list(
+            e.value,
+          ).whereType<String>().take(kPebbleMaxFinders).toSet();
         }
+      }
+      // An index from a Zen that took any key keeps no more than the caps.
+      int room = kPebbleMaxFindersTotal;
+      for (final PebbleId id in _finders.keys.toList()) {
+        final Set<String> set = _finders[id]!;
+        if (set.length > room) {
+          _finders[id] = set.take(room).toSet();
+        }
+        room -= _finders[id]!.length;
       }
     }
     for (final Object? r in _list(json['rq'])) {
@@ -777,13 +795,25 @@ final class PebbleStore extends ChangeNotifier {
     await _save();
   }
 
-  /// A finder's account told the author they found [id]; false when known.
+  /// Whether [account] is counted as a finder of [id] already.
+  bool hasFinder(PebbleId id, String account) =>
+      _finders[id]?.contains(account) ?? false;
+
+  /// A finder's account told the author they found [id]; false when known,
+  /// when [id] is not a pebble made here or when the caps are reached. The
+  /// index is written only when it changed.
   Future<bool> addFinder(PebbleId id, String account) async {
     await load();
-    final Set<String> set = _finders[id] ??= <String>{};
-    if (set.length >= 100000 || !set.add(account)) {
+    if (_entries[id]?.created != true || hasFinder(id, account)) {
       return false;
     }
+    final Set<String>? had = _finders[id];
+    if ((had?.length ?? 0) >= kPebbleMaxFinders ||
+        _finders.values.fold<int>(0, (int n, Set<String> s) => n + s.length) >=
+            kPebbleMaxFindersTotal) {
+      return false;
+    }
+    (_finders[id] ??= <String>{}).add(account);
     await _save();
     return true;
   }

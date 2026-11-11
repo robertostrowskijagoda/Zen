@@ -39,6 +39,8 @@ import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
+    show kMaxGroupMessageChars;
 import 'package:zen/src/features/search/chat_search_controller.dart';
 import 'package:zen/src/features/search/presentation/chat_search_bar.dart';
 import 'package:zen/src/features/search/presentation/search_highlight.dart';
@@ -525,7 +527,8 @@ class _GroupConversationScreenState
         content: Text(
           t(
             'Przestaniesz dostawać wiadomości z tej grupy, a pozostali '
-            'zobaczą, że wyszedłeś.',
+            'zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego '
+            'telefonu.',
           ),
         ),
         actions: <Widget>[
@@ -549,6 +552,72 @@ class _GroupConversationScreenState
     if (mounted) {
       Navigator.of(context).maybePop();
     }
+  }
+
+  /// "Wyczyść historię": the group's chat goes from this phone (its
+  /// messages, files and notifications), as in a one-to-one chat; the
+  /// group and the other members' copies stay.
+  Future<void> _confirmClearHistory() async {
+    final preview = await _socialHub.previewConversationHistory(
+      peerAddress: 'group:${widget.groupId}',
+    );
+    if (!mounted || !preview.hasEntries) {
+      return;
+    }
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        scrollable: true,
+        title: Text(t('Wyczyść historię')),
+        content: Text(
+          tn(
+            preview.messageCount,
+            one:
+                'Usuniesz {n} wpis z tej rozmowy.\n'
+                'Załączniki w historii: {size}.',
+            few:
+                'Usuniesz {n} wpisy z tej rozmowy.\n'
+                'Załączniki w historii: {size}.',
+            many:
+                'Usuniesz {n} wpisów z tej rozmowy.\n'
+                'Załączniki w historii: {size}.',
+            args: <String, Object?>{
+              'size': formatAttachmentSize(preview.attachmentBytes),
+            },
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('group-clear-history-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(t('Usuń')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    await _socialHub.clearGroupHistory(groupId: widget.groupId);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          tn(
+            preview.messageCount,
+            one: 'Usunięto {n} wpis z tej rozmowy.',
+            few: 'Usunięto {n} wpisy z tej rozmowy.',
+            many: 'Usunięto {n} wpisów z tej rozmowy.',
+          ),
+        ),
+      ),
+    );
   }
 
   /// Who a message may mention: the group's members, nobody else.
@@ -575,6 +644,9 @@ class _GroupConversationScreenState
     }
     final ({String text, List<Mention> mentions}) stored = _composerController
         .storedText();
+    if (_refusedAsTooLong(stored.text)) {
+      return;
+    }
     if (await scheduleFromComposer(
       context,
       ref.read(scheduledMessagesProvider),
@@ -609,6 +681,11 @@ class _GroupConversationScreenState
       );
       return;
     }
+    if (!_boardTab && _refusedAsTooLong(stored.text)) {
+      return;
+    }
+    final int startedAt = DateTime.now().millisecondsSinceEpoch;
+    final ChatReply? replyTo = _boardTab ? null : _replyTo;
     _composerController.clear();
     try {
       if (_boardTab) {
@@ -619,7 +696,6 @@ class _GroupConversationScreenState
         }
         return;
       }
-      final ChatReply? replyTo = _replyTo;
       if (replyTo != null) {
         setState(() => _replyTo = null);
       }
@@ -637,6 +713,12 @@ class _GroupConversationScreenState
         unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.messageSent));
       }
     } catch (error) {
+      // Not stored (a full disk, a locked store, refused before it was
+      // written): what was typed and the quote come back. A message that
+      // is in the chat already has its own way to be sent again.
+      if (_boardTab || !await _sentSince(startedAt, stored.text)) {
+        _restoreComposer(stored, replyTo);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -646,6 +728,57 @@ class _GroupConversationScreenState
           ),
         );
       }
+    }
+  }
+
+  /// [text] (as stored, mentions as tokens) is longer than the members
+  /// keep of a group message: said, and nothing is sent or scheduled.
+  bool _refusedAsTooLong(String text) {
+    if (text.trim().length <= kMaxGroupMessageChars) {
+      return false;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          t('Za długie: najwyżej {n} znaków.', <String, Object?>{
+            'n': kMaxGroupMessageChars,
+          }),
+        ),
+      ),
+    );
+    return true;
+  }
+
+  /// Whether an own message with [text] was stored in this group's chat
+  /// from [startedAt] on (the send failed only after that).
+  Future<bool> _sentSince(int startedAt, String text) async {
+    final String said = text.trim();
+    try {
+      final List<ChatMessage> messages = await ref
+          .read(messageTimelineStoreProvider)
+          .load('group:${widget.groupId}');
+      return messages.any(
+        (ChatMessage m) =>
+            m.isOutgoing &&
+            m.sentAtMillis >= startedAt &&
+            (m.text == said || m.plainText == said),
+      );
+    } on Object {
+      return false;
+    }
+  }
+
+  /// Puts [stored] and [replyTo] back into an empty composer.
+  void _restoreComposer(
+    ({String text, List<Mention> mentions}) stored,
+    ChatReply? replyTo,
+  ) {
+    if (!mounted || _composerController.text.trim().isNotEmpty) {
+      return;
+    }
+    _composerController.setStoredText(stored.text, stored.mentions);
+    if (replyTo != null && _replyTo == null) {
+      setState(() => _replyTo = replyTo);
     }
   }
 
@@ -693,6 +826,13 @@ class _GroupConversationScreenState
         .where((FriendProfile f) => !groupHasMember(group, f.address))
         .toList();
 
+    if (isGroupFull(group)) {
+      // The others' phones would not take anyone past the cap.
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(groupFullText())));
+      return;
+    }
     if (acceptedFriends.isEmpty) {
       // A group of one made before any friends: not "all are in already".
       ScaffoldMessenger.of(context).showSnackBar(
@@ -730,12 +870,22 @@ class _GroupConversationScreenState
                   trailing: const Icon(Icons.person_add_rounded),
                   onTap: () async {
                     Navigator.of(dialogContext).pop();
-                    await ref
-                        .read(socialHubControllerProvider.notifier)
-                        .addMemberToGroup(
-                          groupId: widget.groupId,
-                          memberAddress: friend.address,
+                    try {
+                      await ref
+                          .read(socialHubControllerProvider.notifier)
+                          .addMemberToGroup(
+                            groupId: widget.groupId,
+                            memberAddress: friend.address,
+                          );
+                    } on FormatException catch (error) {
+                      // Refused (the group is full): said, never "added".
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(error.message)),
                         );
+                      }
+                      return;
+                    }
                     if (mounted) {
                       messenger.showSnackBar(
                         SnackBar(
@@ -938,6 +1088,8 @@ class _GroupConversationScreenState
                   _showAddMemberDialog(group);
                 } else if (action == 'leave') {
                   unawaited(_confirmLeave());
+                } else if (action == 'clear') {
+                  unawaited(_confirmClearHistory());
                 } else if (action == 'disappear') {
                   unawaited(_pickDisappearingTimer());
                 } else if (action == 'location') {
@@ -1027,6 +1179,18 @@ class _GroupConversationScreenState
                     ],
                   ),
                 ),
+                if (hasMessages)
+                  PopupMenuItem<String>(
+                    key: const Key('group-clear-history-menu'),
+                    value: 'clear',
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.delete_sweep_outlined, size: 18),
+                        const SizedBox(width: 8),
+                        Flexible(child: Text(t('Wyczyść historię'))),
+                      ],
+                    ),
+                  ),
                 PopupMenuItem<String>(
                   value: 'leave',
                   child: Row(

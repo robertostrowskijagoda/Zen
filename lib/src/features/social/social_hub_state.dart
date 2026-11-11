@@ -53,6 +53,7 @@ final class InboxEntry {
     this.peerAddress,
     this.titleEvent,
     this.bodyEvent,
+    this.messageId,
   });
 
   /// An entry whose [title] (and [body], unless [bodyText] is given: what
@@ -67,6 +68,7 @@ final class InboxEntry {
     required int createdAtMillis,
     String? routeKey,
     String? peerAddress,
+    String? messageId,
   }) {
     final SocialEventText? bodyEvent = bodyText == null ? body : null;
     return InboxEntry(
@@ -79,6 +81,7 @@ final class InboxEntry {
       peerAddress: peerAddress,
       titleEvent: title,
       bodyEvent: bodyEvent,
+      messageId: messageId,
     );
   }
 
@@ -101,6 +104,12 @@ final class InboxEntry {
   /// What the body says, when it is not a friend's own words.
   final SocialEventText? bodyEvent;
 
+  /// The chat message this entry tells of (its id as its sender gave it),
+  /// for an entry about one: when the message is deleted, disappears, is
+  /// edited or its chat is cleared, the entry goes or changes with it, so
+  /// its words do not stay behind in the list or in the shade.
+  final String? messageId;
+
   /// The title in the app's current language.
   String get displayTitle => titleEvent?.render(title) ?? title;
 
@@ -121,6 +130,34 @@ final class InboxEntry {
     peerAddress: peerAddress,
     titleEvent: titleEvent ?? this.titleEvent,
     bodyEvent: bodyEvent ?? this.bodyEvent,
+    messageId: messageId,
+  );
+
+  /// This entry kept with the message it tells of ([messageId]).
+  InboxEntry withMessageId(String? messageId) => InboxEntry(
+    id: id,
+    type: type,
+    title: title,
+    body: body,
+    createdAtMillis: createdAtMillis,
+    routeKey: routeKey,
+    peerAddress: peerAddress,
+    titleEvent: titleEvent,
+    bodyEvent: bodyEvent,
+    messageId: messageId,
+  );
+
+  /// This entry saying [body] (the message it tells of was edited).
+  InboxEntry withBody(String body) => InboxEntry(
+    id: id,
+    type: type,
+    title: title,
+    body: body,
+    createdAtMillis: createdAtMillis,
+    routeKey: routeKey,
+    peerAddress: peerAddress,
+    titleEvent: titleEvent,
+    messageId: messageId,
   );
 }
 
@@ -547,6 +584,24 @@ final class SocialHubState {
     });
     return entries;
   }
+}
+
+/// Whether [address] speaks in [group]: a member, or its creator as this
+/// phone recorded it (an older list may not name them) — unless the
+/// creator left: who left is on record ([GroupProfile.departedAt]), and a
+/// creator who left is no member any more, whose messages, calls, timers,
+/// edits and deletions no phone takes, nor tells of while locked. Only a
+/// later invitation of them makes them a member again (and takes them off
+/// that record).
+bool speaksInGroup(GroupProfile group, String address) {
+  bool same(String other) => PeerShareCodec.addressesEqual(other, address);
+  if (address.isEmpty) {
+    return false;
+  }
+  if (group.memberAddresses.any(same)) {
+    return true;
+  }
+  return same(group.createdById) && !group.departedAt.keys.any(same);
 }
 
 /// The moment of the last message in a conversation ([activityStamp]); 0

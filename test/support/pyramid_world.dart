@@ -464,3 +464,93 @@ Map<String, dynamic> memberData(
   'dc': 'x',
   'addr': FoldWorld.addrOf(name),
 };
+
+/// The court of a [FoldWorld]: one-time cards of the judges per matter, the
+/// bench records that list them ([PyrT.bench]) and decisions signed by the
+/// cards ([PyrT.ruled]), as the judges' phones make them.
+final class FoldCourt {
+  FoldCourt(this.w);
+
+  final FoldWorld w;
+
+  /// Every bench made so far: fold them with the rest.
+  final List<PyramidRecord> benches = <PyramidRecord>[];
+
+  final Map<String, PyramidRecord> _benchOf = <String, PyramidRecord>{};
+  final Map<String, LedgerKeyPair> _cards = <String, LedgerKeyPair>{};
+
+  /// [name]'s card in matter [of].
+  Future<LedgerKeyPair> card(String of, String name) async =>
+      _cards['$of|$name'] ??= await LedgerKeyPair.generate();
+
+  /// The bench of [of] for the judges [ring] (names) dated [at]: the cards
+  /// of [withCards] (by default every judge), signed by [signers] (by
+  /// default every judge).
+  Future<PyramidRecord> bench(
+    String of,
+    int at,
+    List<String> ring, {
+    List<String>? signers,
+    List<String>? withCards,
+  }) async {
+    final bool plain = signers == null && withCards == null;
+    final String key = '$of|${(List<String>.of(ring)..sort()).join(',')}';
+    final PyramidRecord? had = _benchOf[key];
+    if (had != null && plain) {
+      return had;
+    }
+    PyramidRecord r = PyramidRecord(
+      body: <String, dynamic>{
+        't': PyrT.bench,
+        'py': w.py,
+        'at': at,
+        'by': <String>[for (final String n in ring) w.id(n)]..sort(),
+        'of': of,
+        'toks': <String>[
+          for (final String n in withCards ?? ring)
+            (await card(of, n)).hybridId,
+        ]..sort(),
+      },
+    );
+    for (final String n in signers ?? ring) {
+      r = await r.signedBy(w[n]);
+    }
+    if (plain) {
+      _benchOf[key] = r;
+    }
+    benches.add(r);
+    return r;
+  }
+
+  /// A decision of [type] in matter [of] (dated [since]; its bench comes a
+  /// millisecond later) at [at], signed by the cards of [judges] on the
+  /// bench of [ring] (by default the judges), saying it needs [q] of them.
+  Future<PyramidRecord> rule(
+    String type,
+    String of,
+    int since,
+    int at,
+    List<String> judges, {
+    List<String>? ring,
+    int q = 1,
+    Map<String, dynamic> fields = const <String, dynamic>{},
+  }) async {
+    final List<String> all = ring ?? judges;
+    await bench(of, since + 1, all);
+    PyramidRecord r = PyramidRecord(
+      body: <String, dynamic>{
+        't': type,
+        'py': w.py,
+        'at': at,
+        'by': <String>[for (final String n in all) (await card(of, n)).id]
+          ..sort(),
+        'q': q,
+        ...fields,
+      },
+    );
+    for (final String n in judges) {
+      r = await r.signedBy(await card(of, n));
+    }
+    return r;
+  }
+}

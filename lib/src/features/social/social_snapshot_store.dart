@@ -50,6 +50,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'mutedUntil',
     'groupNotifyAll',
     'inboxText',
+    'inboxMessages',
     'peerVersions',
     'groups',
     'friendships',
@@ -418,6 +419,12 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         inbox = _withInboxEvents(inbox, inboxText);
         backgroundAlerts = _withInboxEvents(backgroundAlerts, inboxText);
       }
+      // Which chat message each entry tells of (so it goes with it).
+      final Object? inboxMessages = decoded['inboxMessages'];
+      if (inboxMessages is Map) {
+        inbox = _withInboxMessages(inbox, inboxMessages);
+        backgroundAlerts = _withInboxMessages(backgroundAlerts, inboxMessages);
+      }
       records.addAll(friendshipRecordsFromJson(decoded['friendships']));
       final Object? clockValue = decoded['friendshipClock'];
       if (clockValue is int && clockValue > 0) {
@@ -446,6 +453,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           final Object? pending = value['pendingInviteIds'];
           final Object? received = value['receivedInviteIds'];
           groups[group.id] = group.copyWith(
+            departedAt: groupMembershipStampsFromJson(value['departedAt']),
+            addedAt: groupMembershipStampsFromJson(value['addedAt']),
             pendingInviteIds: pending is Map
                 ? <String, String>{
                     for (final MapEntry<dynamic, dynamic> e in pending.entries)
@@ -515,6 +524,17 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       bodyEvent: SocialEventText.fromJson(saved['b']),
     );
   }
+
+  static List<InboxEntry> _withInboxMessages(
+    List<InboxEntry> entries,
+    Map<dynamic, dynamic> ids,
+  ) => <InboxEntry>[
+    for (final InboxEntry entry in entries)
+      switch (ids[entry.id]) {
+        final String id when id.isNotEmpty => entry.withMessageId(id),
+        _ => entry,
+      },
+  ];
 
   static Object? _tryDecodeJson(String raw) {
     try {
@@ -690,6 +710,13 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
                 'b': ?e.bodyEvent?.toJson(),
               },
         },
+        'inboxMessages': <String, String>{
+          for (final InboxEntry e in <InboxEntry>[
+            ...state.inbox,
+            ...state.backgroundAlerts,
+          ])
+            if (e.messageId != null) e.id: e.messageId!,
+        },
         'peerVersions': <String, String>{
           for (final MapEntry<String, String> e
               in state.peerAppVersions.entries)
@@ -698,10 +725,16 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         'groups': <String, dynamic>{
           for (final GroupProfile group in state.groups.values)
             if (group.pendingInviteIds.isNotEmpty ||
-                group.receivedInviteIds.isNotEmpty)
+                group.receivedInviteIds.isNotEmpty ||
+                group.departedAt.isNotEmpty ||
+                group.addedAt.isNotEmpty)
               group.id: <String, dynamic>{
                 'pendingInviteIds': group.pendingInviteIds,
                 'receivedInviteIds': group.receivedInviteIds,
+                // Who left and who was added by name, and when: what keeps a
+                // member list a step behind from undoing a leave.
+                if (group.departedAt.isNotEmpty) 'departedAt': group.departedAt,
+                if (group.addedAt.isNotEmpty) 'addedAt': group.addedAt,
               },
         },
         if (state.book.records.isNotEmpty)

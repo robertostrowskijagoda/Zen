@@ -336,6 +336,38 @@ void main() {
       ]);
     });
 
+    test('an entry keeps the message it tells of, in the list and among the '
+        'alerts', () async {
+      final Directory tempDir = await Directory.systemTemp.createTemp(
+        'zen-social-store-message-',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+      final FileSocialSnapshotStore store = FileSocialSnapshotStore(
+        store: FileBinaryStore(
+          tempDir,
+          codec: BinaryCodec(compressor: const _PassThroughCompressor()),
+        ),
+      );
+      const InboxEntry entry = InboxEntry(
+        id: 'message-5-ada.ygg',
+        type: InboxEntryType.message,
+        title: 'Ada',
+        body: 'czesc',
+        createdAtMillis: 5,
+        peerAddress: 'ada.ygg',
+        messageId: 'outgoing-4-ada',
+      );
+      await store.save(
+        SocialHubState.empty().copyWith(
+          inbox: const <InboxEntry>[entry],
+          backgroundAlerts: const <InboxEntry>[entry],
+        ),
+      );
+      final SocialHubState restored = (await store.load())!;
+      expect(restored.inbox.single.messageId, 'outgoing-4-ada');
+      expect(restored.backgroundAlerts.single.messageId, 'outgoing-4-ada');
+    });
+
     test('a friend goes by the name of their newest profile', () async {
       final Directory tempDir = await Directory.systemTemp.createTemp(
         'zen-social-store-names-',

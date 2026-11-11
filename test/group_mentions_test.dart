@@ -7,8 +7,11 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart'
+    show kMaxMentionAlertsPerSender;
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -139,6 +142,35 @@ List<InboxEntry> _entries(SocialHubState s) => <InboxEntry>[
 ];
 
 void main() {
+  test('a mention whose id another member\'s message holds here opens the '
+      'chat at the mention, not at the other message', () async {
+    final MemoryMessageTimelineStore timelines = MemoryMessageTimelineStore();
+    final (:container, :shade) = await _boot(timelines: timelines);
+    final SocialHubController hub = container.read(
+      socialHubControllerProvider.notifier,
+    );
+    // Bob's message came first with the id Ada's mention then uses.
+    await hub.receiveSignal(
+      _message('m-7', sender: _bob, text: 'Pierwsza', mentions: const []),
+      receivedAtMillis: 1000,
+    );
+    await hub.receiveSignal(_message('m-7'), receivedAtMillis: 1001);
+    final InboxEntry entry = _entries(
+      container.read(socialHubControllerProvider),
+    ).where((InboxEntry e) => e.type == InboxEntryType.mention).single;
+    final RuntimeRouteIntent? route = runtimeRouteIntentFromRouteKey(
+      id: entry.id,
+      routeKey: entry.routeKey,
+    );
+    final ChatMessage opened = (await timelines.load(
+      'group:$_groupId',
+    )).singleWhere((ChatMessage m) => m.id == route?.messageId);
+    expect(opened.sender, _ada);
+    expect(opened.plainText, 'Hej @Ja');
+    // The entry still names the message by the id the members know.
+    expect(entry.messageId, 'm-7');
+  });
+
   test('a mention of this person says so, and opens the chat at the '
       'message', () async {
     final MemoryMessageTimelineStore timelines = MemoryMessageTimelineStore();
@@ -311,5 +343,39 @@ void main() {
     // Karol is not in the group: a plain name.
     expect(sent.last.text, 'A ty @Karol?');
     expect(sent.last.mentions, isEmpty);
+  });
+
+  test('a group message longer than the members keep is refused, not '
+      'sent to be cut', () async {
+    final MemoryMessageTimelineStore timelines = MemoryMessageTimelineStore();
+    final (:container, shade: _) = await _boot(timelines: timelines);
+    final SocialHubController hub = container.read(
+      socialHubControllerProvider.notifier,
+    );
+    await expectLater(
+      hub.sendGroupMessage(
+        groupId: _groupId,
+        text: 'a' * (kMaxGroupMessageChars + 1),
+      ),
+      throwsStateError,
+    );
+    expect(await timelines.load('group:$_groupId'), isEmpty);
+
+    // The longest one allowed reaches the members whole.
+    final String longest = 'b' * kMaxGroupMessageChars;
+    await hub.sendGroupMessage(groupId: _groupId, text: longest);
+    expect((await timelines.load('group:$_groupId')).single.text, longest);
+    final ZenSignal? received = zenSignalFromTransportPayload(
+      sender: _ada,
+      payload: <String, dynamic>{
+        'type': 'group_message',
+        'groupId': _groupId,
+        'groupName': 'Ekipa',
+        'msgId': 'grp-msg-1-$_groupId-x',
+        'text': longest,
+        'timestamp': 1000,
+      },
+    );
+    expect(received?.content, longest);
   });
 }

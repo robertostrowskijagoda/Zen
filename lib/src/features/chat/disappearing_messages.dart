@@ -61,6 +61,32 @@ Map<String, int> rememberDisappeared(
       if (e.value >= forgetBefore) e.key: e.value,
   };
   next[disappearedMessageKey(key, id)] = expiredAtMillis;
+  return _newestRemembered(next);
+}
+
+/// [remembered] with the messages [ids] of conversation [key] added as gone
+/// at [goneAtMillis] (deleted from this device, their chat cleared): like a
+/// disappeared message, a late copy of one is not taken in again.
+Map<String, int> rememberGone(
+  Map<String, int> remembered, {
+  required String key,
+  required Iterable<String> ids,
+  required int goneAtMillis,
+  required int nowMillis,
+}) {
+  final int forgetBefore = nowMillis - kDisappearedMemory.inMilliseconds;
+  final Map<String, int> next = <String, int>{
+    for (final MapEntry<String, int> e in remembered.entries)
+      if (e.value >= forgetBefore) e.key: e.value,
+  };
+  for (final String id in ids) {
+    next[disappearedMessageKey(key, id)] = goneAtMillis;
+  }
+  return _newestRemembered(next);
+}
+
+/// [next] less the oldest past [kMaxDisappearedMessages].
+Map<String, int> _newestRemembered(Map<String, int> next) {
   if (next.length > kMaxDisappearedMessages) {
     final List<MapEntry<String, int>> oldestFirst = next.entries.toList()
       ..sort(
@@ -137,21 +163,33 @@ final class DisappearingTimelineStore implements MessageTimelineStore {
 
   @override
   Future<void> save(String peerAddress, List<ChatMessage> messages) async {
-    final List<ChatMessage> before = await delegate.load(peerAddress);
-    final Set<String> had = <String>{for (final ChatMessage m in before) m.id};
-    final List<ChatMessage> next = <ChatMessage>[
-      for (final ChatMessage m in messages)
-        had.contains(m.id) ? m : _stamp(peerAddress, m),
-    ];
-    await delegate.save(peerAddress, List<ChatMessage>.unmodifiable(next));
-    // Expired ones the caller never saw (load hides them) are gone now:
-    // their files go too.
-    final Set<String> kept = <String>{for (final ChatMessage m in next) m.id};
-    final int now = _now();
-    for (final ChatMessage m in before) {
-      if (!kept.contains(m.id) && m.isExpiredAt(now)) {
-        await _expired(peerAddress, m);
-      }
+    // In one step with what is there now ([MessageTimelineStore.update]):
+    // which messages are new (to be stamped) and which expired ones go is
+    // told from the conversation as it is written, not from a copy read a
+    // moment before.
+    final List<ChatMessage> gone = <ChatMessage>[];
+    await delegate.update(peerAddress, (List<ChatMessage> before) {
+      gone.clear();
+      final Set<String> had = <String>{
+        for (final ChatMessage m in before) m.id,
+      };
+      final List<ChatMessage> next = <ChatMessage>[
+        for (final ChatMessage m in messages)
+          had.contains(m.id) ? m : _stamp(peerAddress, m),
+      ];
+      // Expired ones the caller never saw (load hides them) are gone now:
+      // their files go too.
+      final Set<String> kept = <String>{for (final ChatMessage m in next) m.id};
+      final int now = _now();
+      gone.addAll(
+        before.where(
+          (ChatMessage m) => !kept.contains(m.id) && m.isExpiredAt(now),
+        ),
+      );
+      return List<ChatMessage>.unmodifiable(next);
+    });
+    for (final ChatMessage m in gone) {
+      await _expired(peerAddress, m);
     }
   }
 
@@ -204,24 +242,30 @@ final class DisappearingTimelineStore implements MessageTimelineStore {
   }
 
   /// Deletes every expired message in [keys]; returns how many.
+  ///
+  /// Each conversation in one step ([MessageTimelineStore.update]): a
+  /// message that arrives while the sweep runs stays. Read first and
+  /// written back later, the conversation lost it, while its sender saw it
+  /// delivered.
   Future<int> sweep(Iterable<String> keys) async {
     final int now = _now();
     int removed = 0;
     for (final String key in keys) {
-      final List<ChatMessage> all = await delegate.load(key);
-      final List<ChatMessage> expired = <ChatMessage>[
-        for (final ChatMessage m in all)
-          if (m.isExpiredAt(now)) m,
-      ];
+      final List<ChatMessage> expired = <ChatMessage>[];
+      await delegate.update(key, (List<ChatMessage> all) {
+        expired
+          ..clear()
+          ..addAll(all.where((ChatMessage m) => m.isExpiredAt(now)));
+        if (expired.isEmpty) {
+          return null;
+        }
+        return List<ChatMessage>.unmodifiable(
+          all.where((ChatMessage m) => !m.isExpiredAt(now)),
+        );
+      });
       if (expired.isEmpty) {
         continue;
       }
-      await delegate.save(
-        key,
-        List<ChatMessage>.unmodifiable(
-          all.where((ChatMessage m) => !m.isExpiredAt(now)),
-        ),
-      );
       for (final ChatMessage m in expired) {
         await _expired(key, m);
       }

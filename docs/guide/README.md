@@ -20,7 +20,7 @@ stays private, and the limits.
 
 | | Page | In short |
 |---|---|---|
-| 1 | [Getting started](getting-started.md) | Install, the first start, your name, the passwords, several accounts on one device, getting your account back, the recovery circle |
+| 1 | [Getting started](getting-started.md) | Install, the first start, your name, the app password, several accounts on one device, getting your account back, the key with close friends, the copy with friends |
 | 2 | [Friends and the graph](friends-and-graph.md) | Friendship levels, the graph and its modes, the timeline, full screen, adding friends of friends |
 | 3 | [Chats, delivery and calls](chats-and-delivery.md) | Messages and groups, reactions, replies, edits, files, GIFs, drag and drop, offline mailboxes, iPhone delivery, delivery icons, calls |
 | 4 | [Feed and videos](feed-and-videos.md) | Posts for chosen people, the short-video section |
@@ -35,6 +35,7 @@ stays private, and the limits.
 | 13 | [Updates and releases](updates.md) | How Zen updates itself and how to check a download |
 | 14 | [Pebbles](pebbles.md) | Painted stones you leave as QR stickers, collecting them, who keeps them |
 | 15 | [The pebble editor](pebble-editor.md) | Shapes, materials, painting every side of the stone, stamps and ready designs |
+| 16 | [Passwords](passwords.md) | Logins and passwords for sites and apps: the list, the generator, import, sync, how they come back, filling other apps on Android |
 
 More for the technically minded:
 
@@ -57,12 +58,14 @@ More for the technically minded:
 - **Mailbox**: a friend's device that keeps sealed messages for you while
   you are offline; devices that stay online (computers, Android) are
   preferred.
-- **Recovery circle**: 4 to 6 friends who each hold a piece of your key and
-  together help you back onto a new phone.
+- **Key with close friends**: once you set an account password, every
+  close friend holds a piece of your key; with the account password and 2,
+  3 or 4 of them (by how many hold pieces) you get back onto a new phone.
 - **Copies**: a *key copy* (paper or file) brings back the account itself;
   a *full account copy* (a file) brings back what you put in it; the *copy
-  with friends* is kept by your recovery circle and brings back friends,
-  groups and conversation texts.
+  with friends* is kept by a few chosen friends and brings back friends,
+  groups, conversation texts, passwords and notes to self after any way
+  back to the key.
 - **Post-quantum**: protected also against a future quantum computer. See the
   [security model](../SECURITY_MODEL.md).
 

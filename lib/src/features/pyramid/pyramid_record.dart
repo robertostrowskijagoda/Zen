@@ -112,7 +112,7 @@ abstract final class PyrT {
   static const String emitCancel = 'emitcancel';
 
   /// A member's complaint against another member ("Sąd"), judged first by
-  /// the head of the accused's cell ([verdict]).
+  /// the court of the accused's cell ([verdict]).
   static const String suit = 'suit';
   static const String verdict = 'verdict';
 
@@ -122,13 +122,45 @@ abstract final class PyrT {
   static const String appeal = 'appeal';
   static const String appealAnswer = 'appans';
 
-  /// Kinds published through a friend outside the cell, so the first phone
-  /// to show them is not the author's: the anonymous request and the vote
-  /// (signed by a one-time key on the cell's ballot).
-  static const Set<String> relayed = <String>{voteRequest, vote};
+  /// The one-time cards of the judges of one complaint or one appeal
+  /// ([PyrBench]): one hybrid key per judge who registered one, signed by
+  /// the judges themselves like a cell's ballot. The court's decision in
+  /// that matter is signed by these cards only, so it says that enough of
+  /// the court agreed, never which of its members.
+  static const String bench = 'bench';
+
+  /// The court's decisions, signed by the cards of their matter's bench
+  /// ([bench]) and never by a member's own key.
+  static const Set<String> ruled = <String>{verdict, appealAnswer};
+
+  /// The seal of a treasurers' era ([PyrSeal]): signed by most of the
+  /// treasurers who came after it, it fixes who the era's treasurers were,
+  /// from when to when, and which private operations dated in it count.
+  /// Nothing dated in a sealed era changes it any more: an operation it
+  /// does not list counts nowhere, a change of the tree dated into it
+  /// folds after the seals.
+  static const String seal = 'seal';
+
+  /// The close of a cell vote that ended by time: signed by most of the
+  /// vote's ring, it lists the votes that count. A vote it does not list
+  /// counts nowhere, whenever and however it comes.
+  static const String voteClose = 'vclose';
+
+  /// Kinds published through a friend outside the cell (or the court), so
+  /// the first phone to show them is not the author's: the anonymous
+  /// request and the vote (signed by a one-time key on the cell's ballot),
+  /// and the court's decisions (signed by the cards of its bench).
+  static const Set<String> relayed = <String>{voteRequest, vote, ...ruled};
 
   /// Private kinds most treasurers sign before they count; never public.
   static const Set<String> treasured = <String>{transfer, settle};
+
+  /// The release of an account's number (or of a payment's settlement)
+  /// left split between operations none of which can reach a majority:
+  /// signed by most treasurers of the era, it leaves every operation of
+  /// that span behind, and the next span of the number starts
+  /// (`pyramid_ledger.dart`, `PyrLedger.isSplit`). Private, never public.
+  static const String release = 'xrel';
 
   /// Kinds whose time starts a wait or counts against a limit (new rules
   /// a day later, an emission's veto time and its 30-day limit, a raise of
@@ -141,6 +173,38 @@ abstract final class PyrT {
     emitRule,
     suit,
     appeal,
+  };
+
+  /// Kinds a phone folds at the time it first saw them when they came late
+  /// ([kPyrLateMs]), not at their own: [timed], the changes of the tree
+  /// that touch the treasurers' levels (the service notes only those late:
+  /// one dated back would otherwise move a past set of treasurers and undo
+  /// a payment that counted), and the cell vote's cards and votes (one
+  /// dated back into a vote that ended would turn it around). The seals of
+  /// the treasurers' eras and the closes of cell votes then fix the same
+  /// on every phone, also on one that was not there.
+  static const Set<String> foldedLate = <String>{
+    ...timed,
+    admit,
+    swap,
+    leave,
+    fill,
+    absent,
+    remove,
+    migrate,
+    ballot,
+    vote,
+  };
+
+  /// Kinds that change who sits where: what may move the treasurers.
+  static const Set<String> tree = <String>{
+    admit,
+    swap,
+    leave,
+    fill,
+    absent,
+    remove,
+    migrate,
   };
 
   /// Kinds whose signatures carry their ML-DSA keys (the keyed form,

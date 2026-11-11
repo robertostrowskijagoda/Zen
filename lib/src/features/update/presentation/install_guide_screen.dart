@@ -227,9 +227,13 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
   String? _message;
 
   Future<void> _copy(String text) async {
-    await copyWithExpiry(text);
+    final bool copied = await copyWithExpiry(text);
     if (mounted) {
-      setState(() => _message = t('Skopiowano: {text}', {'text': text}));
+      setState(
+        () => _message = copied
+            ? t('Skopiowano: {text}', {'text': text})
+            : t('Nie udało się. Spróbuj jeszcze raz.'),
+      );
     }
   }
 

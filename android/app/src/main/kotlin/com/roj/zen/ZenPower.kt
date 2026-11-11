@@ -156,6 +156,18 @@ object ZenPower {
                             result.success(true)
                         }
                     }
+                    "alarmTiming" -> {
+                        // How the beat may plan its wakes (zen_wake.dart,
+                        // WakeAlarmTiming).
+                        val exact = canExact(app)
+                        result.success(
+                            mapOf(
+                                "exact" to exact,
+                                "lateWindows" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S),
+                                "rotation" to (exact && ZenNearbyBridge.rotatesOnTime()),
+                            ),
+                        )
+                    }
                     "cancel" -> {
                         val id = call.argument<String>("id")
                         if (!id.isNullOrEmpty()) {
@@ -450,11 +462,7 @@ object ZenPower {
         ensureReceiver(context)
         val at = SystemClock.elapsedRealtime() + delayMs.coerceAtLeast(0)
         val pending = pendingIntent(context, id, holdMs, create = true, tag = tag) ?: return
-        val canExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            alarms.canScheduleExactAlarms()
-        } else {
-            true
-        }
+        val exactAllowed = canExact(context)
         if (!whileIdle) {
             // Work Doze would skip anyway (a look around): not worth a
             // wake in Doze, and batched with other alarms.
@@ -462,7 +470,7 @@ object ZenPower {
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (exact && canExact) {
+            if (exact && exactAllowed) {
                 alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
             } else {
                 alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
@@ -470,6 +478,15 @@ object ZenPower {
         } else {
             alarms.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
         }
+    }
+
+    /** Whether an exact alarm comes on time (Android 12+: the person allowed them). */
+    private fun canExact(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return true
+        }
+        val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
+        return alarms.canScheduleExactAlarms()
     }
 
     fun cancel(context: Context, id: String) {

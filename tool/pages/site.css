@@ -90,6 +90,15 @@ pre code { background: none; border: 0; padding: 0; word-break: normal; }
   .topnav {
     gap: 0 1px; flex-wrap: nowrap; justify-content: flex-start;
     overflow-x: auto; scrollbar-width: none;
+    /* A row longer than the screen fades out at its end instead of
+       stopping in the middle of a word; the last entry scrolls clear. */
+    padding-inline-end: 24px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  [dir="rtl"] .topnav {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
   }
   .topnav a { padding: 0 6px; font-size: 14px; flex: none; }
   .topnav a:first-child { margin-inline-start: auto; }
@@ -161,6 +170,43 @@ pre code { background: none; border: 0; padding: 0; word-break: normal; }
   .hero { padding-top: 20px; }
   .hero-icon { width: 60px; height: 60px; margin-bottom: 10px; border-radius: 17px; }
   .hero .lead { font-size: 16px; }
+}
+/* The app itself: two phones beside the promise on a wide screen, one
+   phone rising under the download on a narrow one (.get-shot). */
+.hero-shots, .get-shot { margin: 0; }
+.hero-shots { display: none; }
+.hero-shots img, .get-shot img {
+  display: block; width: 100%; height: auto; border-radius: 30px; background: var(--card);
+  border: 7px solid #18161f; box-shadow: 0 28px 60px rgba(46, 24, 110, .30);
+}
+@media (prefers-color-scheme: dark) {
+  .hero-shots img, .get-shot img { border-color: #33304a; box-shadow: 0 28px 60px rgba(0, 0, 0, .55); }
+}
+.get-shot {
+  height: 270px; margin-top: 26px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 62%, transparent);
+  mask-image: linear-gradient(#000 62%, transparent);
+}
+.get-shot picture { display: block; width: min(62vw, 236px); margin: 0 auto; padding-top: 4px; }
+body.inv .get-shot { display: none; }
+@media (min-width: 900px) {
+  body:not(.inv) .hero {
+    /* The phones reach below the promise, beside the download; sideways
+       nothing leaves the column (their turned corners, the glow). */
+    overflow-x: clip; overflow-y: visible; text-align: start; max-width: 1040px;
+    margin-inline: auto; padding: 56px 16px 6px;
+  }
+  body:not(.inv) .hero-icon { margin-inline: 0; }
+  body:not(.inv) .hero h1 { font-size: 50px; max-width: min(600px, calc(100% - 450px)); }
+  body:not(.inv) .hero .lead { margin-inline: 0; max-width: min(560px, calc(100% - 450px)); }
+  body:not(.inv) .hero-shots {
+    display: block; position: absolute; top: 60px; inset-inline-end: 34px;
+    width: min(410px, 46%); height: 540px; pointer-events: none;
+  }
+  .hero-shots picture { position: absolute; display: block; }
+  .hero-shots .back { top: 46px; inset-inline-start: 0; width: 204px; transform: rotate(-7deg); }
+  .hero-shots .front { top: 0; inset-inline-end: 6px; width: 236px; transform: rotate(4deg); }
+  body:not(.inv) .get-shot { display: none; }
 }
 .pill {
   display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 0; padding: 4px 14px;
@@ -588,8 +634,10 @@ main.prose { max-width: 780px; }
 .gallery-track {
   display: flex; gap: 18px; overflow-x: auto; overscroll-behavior-x: contain;
   scroll-snap-type: x mandatory; scroll-padding-inline: 16px;
-  padding: 6px 16px 16px; margin: 0 -16px; scrollbar-width: thin;
+  padding: 6px 16px 16px; margin: 0 -16px; scrollbar-width: none;
 }
+/* The arrows under the row and a swipe move it; no scrollbar is drawn. */
+.gallery-track::-webkit-scrollbar { display: none; }
 .gallery-track:focus-visible { outline-offset: -3px; }
 @media (pointer: fine) { .gallery-track { cursor: grab; } }
 .gallery-track.dragging { cursor: grabbing; scroll-snap-type: none; user-select: none; }
@@ -622,10 +670,27 @@ html[dir="rtl"] .gallery-next .ico { transform: scaleX(-1); }
 .get .stack { margin-top: 4px; }
 .get #others { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 16px; }
 .get .more-install { font-weight: 600; }
+/* Under it, small: opening the app, and the builds for other phones behind
+   a tap (their names mean something only to those who look for them). */
+.get-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 0 18px; }
+.get-foot .hint { margin-top: 10px; }
+details.other summary {
+  display: inline; cursor: pointer; list-style: none; color: var(--link); font-weight: 600;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+details.other summary::-webkit-details-marker { display: none; }
+details.other[open] summary { color: var(--muted); text-decoration: none; cursor: default; }
+/* Wide screens: the download sits under the promise, at its left edge,
+   beside the phones. */
+@media (min-width: 900px) {
+  body:not(.inv) .get { text-align: start; margin-inline: 0; max-width: min(560px, calc(100% - 450px)); min-height: 250px; }
+  body:not(.inv) .get .hint { text-align: start; }
+  body:not(.inv) .get #others, body:not(.inv) .get-foot { justify-content: flex-start; }
+}
 .get .get-more .btn { min-height: 44px; font-size: 15px; }
 #have a { font-weight: 700; }
-/* Seven reasons fill whole rows: the first (and on wide screens the last)
-   takes two columns. */
+/* Seven reasons fill whole rows: the first takes a row of its own (two
+   columns, then all three), the other six follow in twos or threes. */
 .adv { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: 1fr; }
 @media (min-width: 560px) {
   .adv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -633,13 +698,19 @@ html[dir="rtl"] .gallery-next .ico { transform: scaleX(-1); }
 }
 @media (min-width: 900px) {
   .adv { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .adv > li:last-child { grid-column: span 2; }
+  .adv > li:first-child { grid-column: 1 / -1; }
 }
 .adv > li:first-child { border: 2px solid var(--btn1); box-shadow: 0 0 0 4px var(--glow), var(--shadow); }
 .adv > li:first-child h3 { font-size: 20px; }
 .adv .fi { margin-bottom: 10px; }
-/* Folded reasons: the title and two lines; a tap opens the rest. */
-.adv > li.fold { cursor: pointer; }
+/* Folded reasons (phones only, the page script): the title, two lines and
+   a mark in the corner that there is more; a tap opens the rest. */
+.adv > li.fold { cursor: pointer; position: relative; padding-bottom: 36px; }
+.adv > li.fold::after {
+  content: ""; position: absolute; inset-inline-end: 20px; bottom: 16px; width: 9px; height: 9px;
+  border: solid var(--link); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg);
+}
+.adv > li.fold.open::after { bottom: 11px; transform: rotate(-135deg); }
 .adv > li.fold p {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }

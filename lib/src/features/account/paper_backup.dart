@@ -198,10 +198,16 @@ final class PaperBackupAccount {
 /// pyramid key comes from the account key, and the device is marked to
 /// take the pyramid's records back ([PyramidService.markRecovered]), so
 /// the place in the pyramid and the wallet return.
+///
+/// [friends]: addresses of friends the person named (an invitation code):
+/// the copy with friends is asked for from them first, as from the
+/// helpers after a recovery through the circle. Without them, only friends
+/// known on this device are asked (none on a fresh one).
 Future<LedgerIdentity> adoptPaperBackup(
   LedgerDisk disk,
   PaperBackupAccount backup, {
   String deviceName = 'Urządzenie',
+  Iterable<String> friends = const <String>[],
 }) async {
   if ((await LedgerKeyPair.fromSeed(backup.seed)).id != backup.account) {
     throw StateError('The key does not belong to the confirmed account.');
@@ -212,7 +218,8 @@ Future<LedgerIdentity> adoptPaperBackup(
     deviceName: deviceName,
   );
   await PyramidService.markRecovered(disk);
-  // And the copy the recovery circle keeps, asked for from friends.
-  await CircleBackupService.markRestore(disk);
+  // And the copy with friends, asked for from the friends named and from
+  // friends known here.
+  await CircleBackupService.markRestore(disk, helpers: friends);
   return identity;
 }

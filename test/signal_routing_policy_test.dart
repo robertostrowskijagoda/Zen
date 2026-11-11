@@ -63,7 +63,8 @@ void main() {
     expect(plan.showSystemNotification, isFalse);
   });
 
-  test('message read receipts stay durable without raising notifications', () {
+  test('message read receipts raise no notification and leave no queue '
+      'copy (the chat takes them at once)', () {
     final SignalHandlingPlan plan = policy.planFor(
       signal: const ZenSignal(
         type: ZenSignalType.messageRead,
@@ -78,7 +79,7 @@ void main() {
     );
 
     expect(plan.priority, SignalPriority.messaging);
-    expect(plan.persist, isTrue);
+    expect(plan.persist, isFalse);
     expect(plan.deliverToUi, isFalse);
     expect(plan.showSystemNotification, isFalse);
   });

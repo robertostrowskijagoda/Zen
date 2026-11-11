@@ -5,6 +5,8 @@ import 'package:zen/src/domain/messages/chat_location.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/chat/message_timeline_store.dart'
+    show chatMediaRefFromJson;
 import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -30,10 +32,44 @@ const int kMaxSignalIdChars = 256;
 /// accepted, not only that it arrived.
 const String kGroupJoinedAck = 'joined';
 
+/// Largest number (either sign) read from a peer: every integer up to it
+/// is exact as a JSON number on any platform, and sums of a few such
+/// times or sizes stay far from overflowing.
+const int kMaxSignalNumber = 9007199254740991;
+
+/// Deepest nesting of maps and lists kept from a peer's payload (the
+/// deepest real one, a call's description with its key block, is three).
+const int _maxSignalDepth = 16;
+
+/// The key of `msg_react` and `msg_delete` in a group that names the
+/// author of the message they mean: members choose message ids themselves,
+/// so one id can belong to messages of two members.
+const String kChangeAuthorKey = 'author';
+
+/// A ring that ended unanswered, told by the caller afterwards: `{callId,
+/// kind, at}` (when the call was made, by the caller's clock). Sent
+/// reliably, so a callee who was away when it rang still learns of it from
+/// the caller's queue or a mailbox. A Zen before 1.16.5 does not know it
+/// and ignores it; it never rings.
+const String kCallMissedType = 'call_missed';
+
+/// The mark in [ZenSignal.chatExtras] of a [kCallMissedType] notice, read as
+/// the end of the call it names (`ZenSignalType.callEnd`): the call is over
+/// wherever it is still on file, and anywhere else only the missed call is
+/// noted ([isMissedCallNotice] in notification_privacy.dart).
+const String kMissedCallMark = 'missed';
+
 ZenSignal? zenSignalFromTransportPayload({
   required String sender,
   required Map<String, dynamic> payload,
-}) {
+}) =>
+    // JSON from the wire can hold numbers no reader here can use (1e400 is
+    // infinity, 1e300 has no exact integer) and nesting nothing here
+    // needs. Read once into a copy without them, so no reader below (nor
+    // the stores the signal ends up in) has to meet them.
+    _signalFrom(sender, _finiteJsonMap(payload, 0));
+
+ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
   final String type = _readString(payload['type']) ?? '';
   for (final String key in _idKeys) {
     final Object? id = payload[key];
@@ -153,9 +189,7 @@ ZenSignal? zenSignalFromTransportPayload({
         durationMs: _readInt(payload['durationMs']),
         sentAtMillis: _readTimestamp(payload['createdAt']),
         disappearSeconds: _readInt(payload['ttl']),
-        miniProfile: payload['mp'] is Map
-            ? Map<String, dynamic>.from(payload['mp'] as Map)
-            : null,
+        miniProfile: _readMiniProfile(payload['mp']),
         chatExtras: _readChatExtras(payload),
       );
     case 'message_transfer_cancel':
@@ -261,6 +295,21 @@ ZenSignal? zenSignalFromTransportPayload({
         callId: _readString(payload['callId']),
         content: _readString(payload['kind']) ?? 'audio',
       );
+    case 'call_missed': // kCallMissedType
+      // Names the one call it is about, like the teardown signals.
+      final String? missedCallId = _readString(payload['callId']);
+      if (missedCallId == null) {
+        return null;
+      }
+      final int? calledAt = _readInt(payload['at']);
+      return ZenSignal(
+        type: ZenSignalType.callEnd,
+        sender: sender,
+        callId: missedCallId,
+        content: _readString(payload['kind']) == 'video' ? 'video' : 'audio',
+        sentAtMillis: calledAt != null && calledAt > 0 ? calledAt : null,
+        chatExtras: const <String, dynamic>{kMissedCallMark: true},
+      );
     case 'group_invite':
       if (_readString(payload['groupId']) == null) {
         // Every group signal is keyed by its group; without one it cannot
@@ -299,6 +348,12 @@ ZenSignal? zenSignalFromTransportPayload({
         avatarPreset: _readString(payload['avatarPreset']),
         displayName: _readName(payload['senderName']),
         inviteId: _readString(payload['inviteId']),
+        // A member-list update that names the one person it adds, stamped
+        // with the adder's clock; the members' list for someone who just
+        // joined also tells who left and when (see
+        // [kGroupAddedKey], [kGroupLeftKey]).
+        sentAtMillis: _readInt(payload['at']),
+        chatExtras: _readGroupMembershipExtras(payload),
       );
     case 'group_invite_ack':
       if (_readString(payload['groupId']) == null) {
@@ -357,6 +412,9 @@ ZenSignal? zenSignalFromTransportPayload({
         return null;
       }
       final String? emoji = _readString(payload['emoji']);
+      final String? author = type == 'msg_edit'
+          ? null
+          : _readAuthor(payload[kChangeAuthorKey]);
       return ZenSignal(
         type: switch (type) {
           'msg_react' => ZenSignalType.messageReaction,
@@ -376,10 +434,12 @@ ZenSignal? zenSignalFromTransportPayload({
             'emoji': emoji != null && emoji.length <= kMaxReactionChars
                 ? emoji
                 : '',
+            kChangeAuthorKey: ?author,
           },
           // A newer position of a shared one, or a poll its author ended.
           'msg_edit' => _editExtras(payload),
-          _ => null,
+          _ =>
+            author == null ? null : <String, dynamic>{kChangeAuthorKey: author},
         },
       );
     case 'disappear_timer':
@@ -398,6 +458,8 @@ ZenSignal? zenSignalFromTransportPayload({
         type: ZenSignalType.groupLeave,
         sender: sender,
         groupId: _readString(payload['groupId']),
+        // When the leaver left, by its own clock (absent before 1.16.5).
+        sentAtMillis: _readInt(payload['at']),
       );
     case 'profile_update':
       return ZenSignal(
@@ -448,6 +510,39 @@ ZenSignal? zenSignalFromTransportPayload({
   }
 }
 
+/// What a `group_invite` carries about single members, kept in
+/// [ZenSignal.chatExtras] under the same keys: the one address a
+/// member-list update adds ([kGroupAddedKey]), and who left the group and
+/// when ([kGroupLeftKey], an address-to-time map, at most
+/// [kMaxGroupMemberCount] entries). `null` when it carries neither (a Zen
+/// before 1.16.5 sends neither).
+Map<String, dynamic>? _readGroupMembershipExtras(Map<String, dynamic> payload) {
+  final String? added = _readString(payload[kGroupAddedKey]);
+  final Object? left = payload[kGroupLeftKey];
+  final Map<String, int> departures = <String, int>{};
+  if (left is Map) {
+    for (final MapEntry<dynamic, dynamic> e in left.entries) {
+      if (departures.length >= kMaxGroupMemberCount) {
+        break;
+      }
+      final String? address = _readString(e.key);
+      final int? at = _readInt(e.value);
+      if (address != null &&
+          address.length <= kMaxSignalIdChars &&
+          at != null &&
+          at > 0) {
+        departures[PeerShareCodec.normalizeAddress(address)] = at;
+      }
+    }
+  }
+  final Map<String, dynamic> out = <String, dynamic>{
+    if (added != null && added.length <= kMaxSignalIdChars)
+      kGroupAddedKey: PeerShareCodec.normalizeAddress(added),
+    if (departures.isNotEmpty) kGroupLeftKey: departures,
+  };
+  return out.isEmpty ? null : out;
+}
+
 /// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`)
 /// mentions (`men`), a poll (`poll`) and a position (`loc`) a chat or group message carries; `null` when none.
 /// What an edit carries beside its text: a newer position of a shared one
@@ -464,14 +559,16 @@ Map<String, dynamic>? _editExtras(Map<String, dynamic> payload) {
 
 Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
   final ChatReply? reply = ChatReply.fromJson(payload['re']);
-  final Object? media = payload['media'];
+  // A group file's reference is kept until the file arrives: only its
+  // known fields, never the peer's map as it came.
+  final Map<String, dynamic>? media = chatMediaRefFromJson(payload['media']);
   final List<Mention> mentions = mentionsFromJson(payload[kMentionsKey]);
   final ChatPoll? poll = ChatPoll.fromJson(payload[kPollKey]);
   final ChatLocation? location = ChatLocation.fromJson(payload[kLocationKey]);
   final Map<String, dynamic> out = <String, dynamic>{
     if (reply != null) 're': reply.toJson(),
     if (payload['fwd'] == true) 'fwd': true,
-    if (media is Map) 'media': Map<String, dynamic>.from(media),
+    'media': ?media,
     if (mentions.isNotEmpty) kMentionsKey: mentionsToJson(mentions),
     if (poll != null) kPollKey: poll.toJson(),
     if (location != null) kLocationKey: location.toJson(),
@@ -490,12 +587,73 @@ ChatMessageType _readMessageType(Object? value) {
   };
 }
 
+/// A whole number from a peer: an integer, or a finite number, within
+/// [kMaxSignalNumber] either way; anything else is absent (`toInt` throws
+/// on infinity and NaN).
 int? _readInt(Object? value) {
   return switch (value) {
-    final int typed => typed,
-    final num typed => typed.toInt(),
+    final num typed when _usable(typed) => typed.toInt(),
     _ => null,
   };
+}
+
+/// Whether [n] is finite and within [kMaxSignalNumber] either way (a
+/// range check, not `abs`: the smallest integer is its own `abs`).
+bool _usable(num n) =>
+    n.isFinite && n >= -kMaxSignalNumber && n <= kMaxSignalNumber;
+
+/// [value] (a decoded JSON value) without what no reader can use: numbers
+/// that are not finite or lie beyond [kMaxSignalNumber], and anything
+/// nested deeper than [_maxSignalDepth]. In a map such an entry is
+/// dropped (absent, as if not sent); in a list it becomes `null`, so the
+/// other items keep their places (a poll's answers are counted by place).
+Object? _finiteJson(Object? value, int depth) {
+  return switch (value) {
+    final num n when !_usable(n) => null,
+    final Map<dynamic, dynamic> map =>
+      depth >= _maxSignalDepth ? null : _finiteJsonMap(map, depth + 1),
+    final List<dynamic> list =>
+      depth >= _maxSignalDepth
+          ? null
+          : <dynamic>[
+              for (final Object? item in list) _finiteJson(item, depth + 1),
+            ],
+    _ => value,
+  };
+}
+
+Map<String, dynamic> _finiteJsonMap(Map<dynamic, dynamic> map, int depth) {
+  final Map<String, dynamic> out = <String, dynamic>{};
+  for (final MapEntry<dynamic, dynamic> entry in map.entries) {
+    final Object? value = _finiteJson(entry.value, depth);
+    if (value != null || entry.value == null) {
+      out[entry.key.toString()] = value;
+    }
+  }
+  return out;
+}
+
+/// The mini-profile (`mp`) a message to someone who is not a friend
+/// carries: its name and its photo's reference, nothing else. A map with
+/// nothing usable stays an empty map (it still marks such a message).
+Map<String, dynamic>? _readMiniProfile(Object? value) {
+  if (value is! Map) {
+    return null;
+  }
+  final String? name = _readName(value['n']);
+  final Map<String, dynamic>? avatar = chatMediaRefFromJson(value['av']);
+  return <String, dynamic>{'n': ?name, 'av': ?avatar};
+}
+
+/// The address a `msg_react` / `msg_delete` names as the author of its
+/// message ([kChangeAuthorKey]); `null` when it names none (a Zen before
+/// it sent no author).
+String? _readAuthor(Object? value) {
+  final String? author = _readString(value);
+  if (author == null || author.toLowerCase() == 'self') {
+    return null;
+  }
+  return PeerShareCodec.normalizeAddress(author);
 }
 
 Map<String, dynamic>? _readMap(Object? value) {
@@ -522,6 +680,7 @@ const List<String> _idKeys = <String>[
   'callId',
   'msgId',
   'transferId',
+  kChangeAuthorKey,
 ];
 
 /// [_readString], cut to at most [maxChars] UTF-16 units without splitting a
@@ -578,10 +737,10 @@ bool? _readBool(Object? value) {
 /// Epoch millis from an ISO-8601 string or a number; `null` otherwise.
 int? _readTimestamp(Object? value) {
   if (value is num) {
-    return value.toInt();
+    return _readInt(value);
   }
   if (value is String) {
-    return DateTime.tryParse(value)?.millisecondsSinceEpoch;
+    return _readInt(DateTime.tryParse(value)?.millisecondsSinceEpoch);
   }
   return null;
 }

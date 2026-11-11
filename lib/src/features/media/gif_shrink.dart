@@ -1,3 +1,4 @@
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -209,6 +210,156 @@ Uint8List? shrinkGif(
   }
   return null;
 }
+
+// An animated WebP or PNG (a keyboard's sticker, a picture saved from a
+// messenger) would become a still wherever a photo is re-encoded: only its
+// first frame is decoded there. Where a picture is picked on this phone it
+// becomes an animated GIF instead, the one animated format every place of
+// this app keeps, checks and plays; a GIF never comes in any other format
+// from another phone.
+
+/// The longest side of a GIF made of an animated WebP or PNG (the place it
+/// goes to may make it smaller still).
+const int kAnimatedPictureGifSide = 480;
+
+/// The most pixels, all frames together, an animated WebP or PNG may have
+/// to be made a GIF: decoding it keeps every frame in memory at once, so
+/// this bounds that memory (about 128 MB) before anything is decoded.
+const int kMaxAnimatedPicturePixels = 32 * 1000 * 1000;
+
+/// Whether [bytes] are an animated WebP (a `VP8X` chunk with the animation
+/// flag) or an animated PNG (an `acTL` chunk before the picture data). Read
+/// from the header only.
+bool looksLikeAnimatedPicture(Uint8List bytes) =>
+    _isAnimatedWebP(bytes) || _isAnimatedPng(bytes);
+
+bool _isAnimatedWebP(Uint8List b) =>
+    b.length >= 21 &&
+    b[0] == 0x52 && // RIFF
+    b[1] == 0x49 &&
+    b[2] == 0x46 &&
+    b[3] == 0x46 &&
+    b[8] == 0x57 && // WEBP
+    b[9] == 0x45 &&
+    b[10] == 0x42 &&
+    b[11] == 0x50 &&
+    b[12] == 0x56 && // VP8X
+    b[13] == 0x50 &&
+    b[14] == 0x38 &&
+    b[15] == 0x58 &&
+    (b[20] & 0x02) != 0;
+
+bool _isAnimatedPng(Uint8List b) {
+  const List<int> signature = <int>[137, 80, 78, 71, 13, 10, 26, 10];
+  if (b.length < 16) {
+    return false;
+  }
+  for (int i = 0; i < signature.length; i++) {
+    if (b[i] != signature[i]) {
+      return false;
+    }
+  }
+  int offset = 8;
+  // The animation control chunk must come before the first picture data.
+  for (int chunks = 0; chunks < 64 && offset + 8 <= b.length; chunks++) {
+    final int length =
+        (b[offset] << 24) |
+        (b[offset + 1] << 16) |
+        (b[offset + 2] << 8) |
+        b[offset + 3];
+    final String type = String.fromCharCodes(b, offset + 4, offset + 8);
+    if (type == 'acTL') {
+      return true;
+    }
+    if (type == 'IDAT' || type == 'IEND') {
+      return false;
+    }
+    offset += 12 + length;
+  }
+  return false;
+}
+
+/// [bytes], an animated WebP or PNG of more than one frame, as an animated
+/// GIF: each frame as the animation shows it, scaled to at most [maxSide]
+/// a side, thinned out to [kMaxShrunkGifFrames] (their time goes to the
+/// frames that stay), with its timing and loop count; no metadata is
+/// carried over. Null for anything else, or for one bigger than
+/// [kMaxGifSide] a side or [kMaxAnimatedPicturePixels] over all its frames
+/// (refused before it is decoded). Pure and slow: run it in an isolate.
+Uint8List? animatedPictureAsGif(
+  Uint8List bytes, {
+  int maxSide = kAnimatedPictureGifSide,
+}) {
+  final img.Decoder decoder;
+  if (_isAnimatedWebP(bytes)) {
+    decoder = img.WebPDecoder()..maxPixels = kMaxAnimatedPicturePixels;
+  } else if (_isAnimatedPng(bytes)) {
+    decoder = img.PngDecoder(maxPixels: kMaxAnimatedPicturePixels);
+  } else {
+    return null;
+  }
+  final img.Image? decoded;
+  try {
+    final img.DecodeInfo? info = decoder.startDecode(bytes);
+    if (info == null ||
+        info.width <= 0 ||
+        info.height <= 0 ||
+        info.width > kMaxGifSide ||
+        info.height > kMaxGifSide ||
+        decoder.numFrames() < 2 ||
+        info.width * info.height * decoder.numFrames() >
+            kMaxAnimatedPicturePixels) {
+      return null;
+    }
+    decoded = decoder.decode(bytes);
+  } on Object {
+    return null;
+  }
+  if (decoded == null || decoded.numFrames < 2) {
+    return null;
+  }
+  final List<img.Image> frames = List<img.Image>.of(decoded.frames);
+  final int w = decoded.width;
+  final int h = decoded.height;
+  final _Crop whole = _Crop(
+    x: 0,
+    y: 0,
+    width: w,
+    height: h,
+    canvasWidth: w,
+    canvasHeight: h,
+  );
+  final int step = math.max(
+    1,
+    (frames.length + kMaxShrunkGifFrames - 1) ~/ kMaxShrunkGifFrames,
+  );
+  try {
+    return _encode(
+      frames,
+      whole,
+      math.min(maxSide, math.max(w, h)),
+      step,
+      decoded.loopCount,
+    );
+  } on Object {
+    return null;
+  }
+}
+
+/// [bytes] with an animated WebP or PNG made an animated GIF
+/// ([animatedPictureAsGif], in an isolate); anything else (a GIF, a photo,
+/// one that cannot be made a GIF) as it is.
+Future<Uint8List> gifIfAnimated(Uint8List bytes) async {
+  if (!looksLikeAnimatedPicture(bytes)) {
+    return bytes;
+  }
+  return await _asGifInIsolate(bytes) ?? bytes;
+}
+
+// Not async on purpose: a closure made in an async function may drag its
+// suspended frame along, which cannot be sent to another isolate.
+Future<Uint8List?> _asGifInIsolate(Uint8List bytes) =>
+    Isolate.run(() => animatedPictureAsGif(bytes));
 
 /// [gif] from another phone when it is a complete GIF already within the
 /// limits its sender had to meet; stripped of its metadata. Null otherwise

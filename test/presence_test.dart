@@ -1948,7 +1948,13 @@ void main() {
         ),
         3,
       );
-      // A friend who shows nothing: every round, as before.
+    });
+
+    test('a friend who shows nothing is pinged every second round, one whose '
+        'phone said it stops receiving every third', () {
+      const int now = _day + _hour;
+      // A friend who keeps their state from this person: the ping learns
+      // only that they answer.
       expect(
         presencePingEvery(
           heard: (state: PeerPresence.hidden, at: now - _minute),
@@ -1956,8 +1962,58 @@ void main() {
           silentSinceMillis: _day,
           nowMillis: now,
         ),
-        1,
+        2,
       );
+      // "asleep": an iPhone that iOS suspends hears nothing meanwhile.
+      expect(
+        presencePingEvery(
+          heard: (state: PeerPresence.offline, at: now - _minute),
+          stateAtLastPing: PeerPresence.offline,
+          silentSinceMillis: _day,
+          nowMillis: now,
+        ),
+        3,
+      );
+      // Just changed to either: every round still.
+      for (final PeerPresence state in <PeerPresence>[
+        PeerPresence.hidden,
+        PeerPresence.offline,
+      ]) {
+        expect(
+          presencePingEvery(
+            heard: (state: state, at: now - _minute),
+            stateAtLastPing: PeerPresence.background,
+            silentSinceMillis: _day,
+            nowMillis: now,
+          ),
+          1,
+        );
+      }
+      // Pings an hour on the screen after the first two rounds (a round
+      // every kPresencePingInterval): before, 30 to either; now 15 and 10.
+      int perHour(PeerPresence state) {
+        final PresencePingCadence cadence = PresencePingCadence()
+          ..begin(now - 2 * _hour);
+        int pings = 0;
+        for (int m = 0; m < 120; m += kPresencePingInterval.inMinutes) {
+          final int at = now + m * _minute;
+          final List<String> due = cadence.round(
+            <String>[_ada],
+            nowMillis: at,
+            heardOf: (_) => (state: state, at: at - _minute),
+            isFriend: (_) => true,
+          );
+          if (m >= 60 && due.isNotEmpty) {
+            pings++;
+          }
+        }
+        return pings;
+      }
+
+      expect(perHour(PeerPresence.online), 30);
+      expect(perHour(PeerPresence.background), 15);
+      expect(perHour(PeerPresence.hidden), 15);
+      expect(perHour(PeerPresence.offline), 10);
     });
   });
 
@@ -2128,6 +2184,18 @@ void main() {
         seen = air.sentSignals.length;
         if (pinged) {
           pingedAt.add(clock);
+          // The friend's phone answers (one that stays silent for half an
+          // hour is pinged every third round only).
+          await phone.handleFrame(
+            SignalTransportFrame(
+              from: _me,
+              payload: const <String, dynamic>{
+                'type': 'pong',
+                'state': 'background',
+              },
+              receivedAtMillis: clock,
+            ),
+          );
         }
       }
       expect(pingedAt.first - _day, 7 * _minute, reason: 'the first wake');

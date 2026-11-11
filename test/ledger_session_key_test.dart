@@ -117,8 +117,8 @@ void main() {
       );
       expect(aPins.warnings, isEmpty);
 
-      // The device record names the key, so friends pin it before any
-      // contact with the address it names.
+      // The device record names the key, so friends have it as a hint
+      // before any contact with the address it names.
       final LogEntry record = a
           .entriesOf(spaceKind: 'acts')
           .lastWhere((LogEntry e) => e.kind == kDeviceRecordKind);

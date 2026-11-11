@@ -111,6 +111,12 @@ final class SettingsSearchDevice {
 /// Words the rows of the settings list are also found by, by the row's key
 /// (their own title and subtitle count as well).
 const Map<String, List<String>> kSettingsRowKeywords = <String, List<String>>{
+  'settings-nav-passwords': <String>[
+    'menedżer haseł',
+    'loginy',
+    'passwords',
+    'password manager',
+  ],
   'settings-nav-account': <String>[
     'konto',
     'kopia klucza',

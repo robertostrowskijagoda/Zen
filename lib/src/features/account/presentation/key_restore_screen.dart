@@ -15,6 +15,7 @@ import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// "Przywróć klucz": takes the account back on a new device from the
 /// encrypted backup file (and its password) or from the typed or scanned
@@ -44,6 +45,10 @@ class KeyRestoreScreen extends ConsumerStatefulWidget {
 class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
   final TextEditingController _input = TextEditingController();
   final TextEditingController _filePassword = TextEditingController();
+
+  /// A friend's invitation code (or address): the copy with friends is
+  /// asked for from them (a fresh phone knows no friend yet).
+  final TextEditingController _friend = TextEditingController();
   late Uint8List? _fileBytes = widget.fileBytes;
   PaperBackupAccount? _found;
   bool _busy = false;
@@ -54,6 +59,7 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
   void dispose() {
     _input.dispose();
     _filePassword.dispose();
+    _friend.dispose();
     super.dispose();
   }
 
@@ -167,15 +173,36 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
     if (_busy) {
       return;
     }
+    final List<String> friends = <String>[];
+    if (_friend.text.trim().isNotEmpty) {
+      try {
+        friends.add(PeerShareCodec.parseTarget(_friend.text).address);
+      } on FormatException {
+        setState(
+          () => _message = t('To nie jest kod zaproszenia ani adres Zen.'),
+        );
+        return;
+      }
+    }
     setState(() => _busy = true);
     String? message;
     bool restored = false;
     try {
       final LedgerDisk disk = ref.read(ledgerDiskProvider);
-      await adoptPaperBackup(disk, account, deviceName: thisDeviceName);
+      // The friend is greeted first after the restart and asked for what
+      // it keeps of this account (the friends' list among it), as the
+      // helpers are after a recovery through the circle.
+      await ref.read(ledgerNodeProvider)?.rememberDeviceAddresses(friends);
+      await adoptPaperBackup(
+        disk,
+        account,
+        deviceName: thisDeviceName,
+        friends: friends,
+      );
       restored = true;
       _input.clear();
       _filePassword.clear();
+      _friend.clear();
       _fileBytes = null;
     } on Object catch (e) {
       message = t('Nie udało się: {error}', <String, Object?>{'error': e});
@@ -222,9 +249,11 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                   icon: Icons.history_edu_rounded,
                   text: t(
                     'Kopia klucza zwraca konto. To urządzenie stanie się '
-                    'Twoim kolejnym urządzeniem tego konta. Znajomi, grupy '
-                    'i teksty rozmów wrócą z kopii u znajomych, jeśli ją '
-                    'masz; zdjęcia i pliki z rozmów — nie.',
+                    'Twoim kolejnym urządzeniem tego konta. Hasła, notatki, '
+                    'znajomi, grupy, profil i teksty rozmów wrócą z kopii '
+                    'u znajomych: podaj niżej kod zaproszenia jednego '
+                    'z nich, a Zen poprosi ich o nią. Bez żadnego znajomego '
+                    'wraca samo konto; zdjęcia i pliki z rozmów nie wracają.',
                   ),
                 ),
                 ZenCard(
@@ -342,6 +371,18 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                 ],
                 if (found != null) ...<Widget>[
                   const SizedBox(height: 14),
+                  TextField(
+                    key: const Key('key-restore-friend'),
+                    controller: _friend,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: InputDecoration(
+                      labelText: t(
+                        'Kod zaproszenia znajomego (nieobowiązkowo)',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   _FingerprintCard(
                     account: found,
                     busy: _busy,

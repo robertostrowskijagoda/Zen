@@ -548,12 +548,18 @@ final class SecureStorageCredentialsStore
     await _moved();
     final String key = scopedSecretName(_effectiveNamespace, rawKey);
     final String? value = await _keychain.read(key);
-    if (value != null || !(_onIos || _onMacOs)) {
+    if (!(_onIos || _onMacOs)) {
       return value;
     }
     // In case the plugin looks items up by their accessibility too: one
-    // written before is found with the earlier one, and moved.
+    // written before is found with the earlier one, and moved. Looked up
+    // whether the item was found or not, so the keychain does the same
+    // work for an entry that is there and one that is not (a wrong account
+    // ID must not answer sooner than a wrong password).
     final String? earlier = await _earlierKeychain.read(key);
+    if (value != null) {
+      return value;
+    }
     if (earlier != null) {
       try {
         await _write(key, earlier);
@@ -693,6 +699,45 @@ final class SecureStorageCredentialsStore
   }
 }
 
+/// The secret store of [AppSecurityService.wrongIdStandIn]: every read is
+/// made in [_inner] (its answer dropped), and what comes back is what an
+/// account with a password and no emergency wipe password keeps, made up
+/// here at random (so no password matches it). Writes and deletes stay in
+/// memory: a wrong ID leaves nothing in the secret store.
+final class _StandInCredentialsStore implements AppSecurityCredentialsStore {
+  _StandInCredentialsStore(this._inner, String kdfJson)
+    : _values = <String, String>{
+        appSecurityPasswordHashStorageKey: _randomHex(32),
+        appSecuritySaltStorageKey: _randomHex(32),
+        appSecurityPasswordKdfStorageKey: kdfJson,
+        appSecurityWrappedMasterKeyStorageKey: _randomHex(60),
+        appSecurityMasterKeyFingerprintStorageKey: _randomHex(32),
+        appSecurityPanicStandInSaltStorageKey: _randomHex(32),
+      };
+
+  final AppSecurityCredentialsStore _inner;
+  final Map<String, String> _values;
+
+  static String _randomHex(int bytes) =>
+      securityHexFromBytes(randomSecurityBytes(bytes));
+
+  @override
+  Future<String?> read(String key) async {
+    await _inner.read(key);
+    return _values[key];
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    _values.remove(key);
+  }
+}
+
 final class MemorySecurityCredentialsStore
     implements AppSecurityCredentialsStore {
   final Map<String, String> _values = <String, String>{};
@@ -751,11 +796,16 @@ abstract class AppSecurityService extends ChangeNotifier {
 
   Future<bool> matchesPanicPassword(String password);
 
-  /// Does the work a wrong [password] costs this lock (the emergency wipe
-  /// password's check and the unlock: the same reads, two derivations of
-  /// the same cost) and changes nothing: for an account ID that is not on
-  /// this device, which then answers no sooner than a wrong password does.
-  Future<void> spendWrongPasswordWork(String password) async {}
+  /// This lock as it stands for an account ID that is not on this device:
+  /// a service whose every read goes to this one's secret store (under
+  /// names nothing was written to, for an ID that is not here) with the
+  /// answer dropped, and which answers as an account with a password and
+  /// no emergency wipe password does. It writes nothing and no password
+  /// opens it. A wrong ID is checked against it with the very steps a
+  /// password is checked with (`unlockZenAccount`), so the secret store
+  /// sees the same reads in the same order and the same two derivations
+  /// run: the wait does not tell whether an ID exists.
+  AppSecurityService wrongIdStandIn();
 
   /// Whether biometric unlock can be offered (hardware vault present and a
   /// sealed key stored).
@@ -1048,36 +1098,21 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     }
   }
 
-  /// A derivation of [password] with [salt] whose result is not used: the
-  /// cost [kdfKey] records, else the password's, else today's.
-  Future<void> _spendDerivation(
-    String password,
-    Uint8List salt,
-    String kdfKey,
-  ) async {
-    PasswordCost cost = _cost;
-    for (final String key in <String>[
-      kdfKey,
-      appSecurityPasswordKdfStorageKey,
-    ]) {
-      final String? kdf = await _credentialsStore.read(key);
-      if (kdf == null) {
-        continue;
-      }
-      try {
-        final Object? json = jsonDecode(kdf);
-        final PasswordCost? recorded = json is Map && json['a'] == 'argon2id'
-            ? PasswordCost.fromJson(json)
-            : null;
-        if (recorded != null) {
-          cost = recorded;
-          break;
-        }
-      } on FormatException {
-        continue;
-      }
+  /// The Argon2id cost recorded under [kdfKey]; `null` when none (or none
+  /// readable) is.
+  Future<PasswordCost?> _recordedCost(String kdfKey) async {
+    final String? kdf = await _credentialsStore.read(kdfKey);
+    if (kdf == null) {
+      return null;
     }
-    await derivePasswordKey(password, salt, cost: cost);
+    try {
+      final Object? json = jsonDecode(kdf);
+      return json is Map && json['a'] == 'argon2id'
+          ? PasswordCost.fromJson(json)
+          : null;
+    } on FormatException {
+      return null;
+    }
   }
 
   static Uint8List _saltOrRandom(String? hex) {
@@ -1341,46 +1376,43 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     final String? standInHex = await _credentialsStore.read(
       appSecurityPanicStandInSaltStorageKey,
     );
+    // Both costs are read whether an emergency wipe password is set or
+    // not: the secret store sees the same reads either way.
+    final PasswordCost? panicCost = await _recordedCost(
+      appSecurityPanicKdfStorageKey,
+    );
+    final PasswordCost? passwordCost = await _recordedCost(
+      appSecurityPasswordKdfStorageKey,
+    );
     if (saltHex == null || hashHex == null) {
       // None set: the same derivation against the stand-in salt, so the
       // wait tells nothing.
-      await _spendDerivation(
+      await derivePasswordKey(
         password,
         _saltOrRandom(standInHex),
-        appSecurityPanicKdfStorageKey,
+        cost: panicCost ?? passwordCost ?? _cost,
       );
       return false;
     }
-    final Uint8List? derivedKey = await _derive(
+    if (panicCost == null) {
+      return false;
+    }
+    final Uint8List derivedKey = await derivePasswordKey(
       password,
       securityBytesFromHex(saltHex),
-      appSecurityPanicKdfStorageKey,
+      cost: panicCost,
     );
-    return derivedKey != null &&
-        securityConstantTimeEquals(
-          securityVerifyDigest(derivedKey),
-          securityBytesFromHex(hashHex),
-        );
+    return securityConstantTimeEquals(
+      securityVerifyDigest(derivedKey),
+      securityBytesFromHex(hashHex),
+    );
   }
 
   @override
-  Future<void> spendWrongPasswordWork(String password) async {
-    for (final String key in const <String>[
-      appSecurityPasswordHashStorageKey,
-      appSecurityPanicPasswordHashStorageKey,
-      appSecurityPanicSaltStorageKey,
-      appSecurityPanicStandInSaltStorageKey,
-      appSecurityPanicKdfStorageKey,
-      appSecuritySaltStorageKey,
-      appSecurityPasswordKdfStorageKey,
-      appSecurityWrappedMasterKeyStorageKey,
-    ]) {
-      await _credentialsStore.read(key);
-    }
-    for (int pass = 0; pass < 2; pass++) {
-      await derivePasswordKey(password, randomSecurityBytes(32), cost: _cost);
-    }
-  }
+  AppSecurityService wrongIdStandIn() => LocalAppSecurityService(
+    credentialsStore: _StandInCredentialsStore(_credentialsStore, _kdfJson),
+    passwordCost: _cost,
+  );
 
   @override
   Future<bool> canUnlockWithBiometrics() async =>

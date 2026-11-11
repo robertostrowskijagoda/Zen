@@ -40,6 +40,13 @@ final class _FakeRing implements MediaKeyRing {
   /// The senders and receivers a transformer was asked for, by id.
   final List<String> sealed = <String>[];
 
+  /// Whose key ring entry each sender or receiver was put on, by id.
+  final Map<String, String> participants = <String, String>{};
+
+  /// What each transformer reports its state to, by sender or receiver id.
+  final Map<String, MediaCryptorStateListener> states =
+      <String, MediaCryptorStateListener>{};
+
   String? key(String participantId, int index) => keys[participantId]?[index];
 
   @override
@@ -50,13 +57,18 @@ final class _FakeRing implements MediaKeyRing {
   @override
   Future<MediaFrameCryptor> attachSender(
     RTCRtpSender sender,
-    String participantId,
-  ) async {
+    String participantId, {
+    MediaCryptorStateListener? onState,
+  }) async {
     if (senderFails) {
       throw StateError('no transformer');
     }
     await holdSenders?.future;
     sealed.add(sender.senderId);
+    participants[sender.senderId] = participantId;
+    if (onState != null) {
+      states[sender.senderId] = onState;
+    }
     return _FakeCryptor();
   }
 
@@ -65,8 +77,13 @@ final class _FakeRing implements MediaKeyRing {
     RTCRtpReceiver receiver,
     String participantId, {
     void Function()? onMissingKey,
+    MediaCryptorStateListener? onState,
   }) async {
     sealed.add(receiver.receiverId);
+    participants[receiver.receiverId] = participantId;
+    if (onState != null) {
+      states[receiver.receiverId] = onState;
+    }
     return _FakeCryptor();
   }
 
@@ -165,30 +182,41 @@ final class _FakeClock implements MediaKeyClock {
 }
 
 final class _Sender implements RTCRtpSender {
-  _Sender([this.senderId = 's1', this.hasTrack = true]);
+  _Sender([this.senderId = 's1', this.hasTrack = true, this.kind = 'audio']);
 
   @override
   final String senderId;
 
   final bool hasTrack;
+  final String kind;
 
   @override
-  MediaStreamTrack? get track => hasTrack ? _Track() : null;
+  MediaStreamTrack? get track => hasTrack ? _Track(kind) : null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class _Track implements MediaStreamTrack {
+  _Track([this.kind = 'audio']);
+
+  @override
+  final String? kind;
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class _Receiver implements RTCRtpReceiver {
-  _Receiver([this.receiverId = 'r1']);
+  _Receiver([this.receiverId = 'r1', this.kind = 'audio']);
 
   @override
   final String receiverId;
+
+  final String kind;
+
+  @override
+  MediaStreamTrack? get track => _Track(kind);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -685,6 +713,71 @@ void main() {
       expect(ring.sealed, <String>['audio', 'ra', 'rv', 'video']);
     });
 
+    test('a video call: the camera is sealed and opened like the '
+        'microphone, under the same participant and with the same key on '
+        'both ends, counted by kind; a frame that does not open is named '
+        'by kind', () async {
+      final _FakeBackend offererBackend = _FakeBackend();
+      final _FakeBackend answererBackend = _FakeBackend();
+      final (
+        MediaE2eeChannel offering,
+        MediaE2eeChannel answering,
+      ) = await _handshake(
+        callId: 'call-video',
+        offerer: kMediaOffererId,
+        answerer: kMediaAnswererId,
+        offererBackend: offererBackend,
+        answererBackend: answererBackend,
+      );
+      _Connection call(String side) => _Connection(
+        transceivers: <RTCRtpTransceiver>[
+          _Transceiver(
+            _Sender('$side-mic', true, 'audio'),
+            _Receiver('$side-ra', 'audio'),
+          ),
+          _Transceiver(
+            _Sender('$side-cam', true, 'video'),
+            _Receiver('$side-rv', 'video'),
+          ),
+        ],
+      );
+      await offering.attachAll(call('o'));
+      await answering.attachAll(call('a'));
+      await offering.link.idle;
+      await answering.link.idle;
+      final _FakeRing caller = offererBackend.rings.single;
+      final _FakeRing callee = answererBackend.rings.single;
+      expect(caller.sealed, <String>['o-mic', 'o-ra', 'o-cam', 'o-rv']);
+      expect(callee.sealed, <String>['a-mic', 'a-ra', 'a-cam', 'a-rv']);
+      expect(offering.sealedSenders, <String, int>{'audio': 1, 'video': 1});
+      expect(offering.openedReceivers, <String, int>{'audio': 1, 'video': 1});
+      expect(answering.sealedSenders, <String, int>{'audio': 1, 'video': 1});
+      expect(answering.openedReceivers, <String, int>{'audio': 1, 'video': 1});
+      // The caller's camera seals as the offerer, the callee opens it as
+      // the offerer, and the key in the slot the frames name is the same.
+      expect(caller.participants['o-cam'], kMediaOffererId);
+      expect(callee.participants['a-rv'], kMediaOffererId);
+      expect(callee.participants['a-cam'], kMediaAnswererId);
+      expect(caller.participants['o-rv'], kMediaAnswererId);
+      final int slot = mediaKeyIndex(offering.link.sendEpoch);
+      expect(caller.key(kMediaOffererId, slot), isNotNull);
+      expect(
+        callee.key(kMediaOffererId, slot),
+        caller.key(kMediaOffererId, slot),
+      );
+      final int back = mediaKeyIndex(answering.link.sendEpoch);
+      expect(
+        caller.key(kMediaAnswererId, back),
+        callee.key(kMediaAnswererId, back),
+      );
+      // What the transformers report is kept by role, for the log.
+      callee.states['a-rv']!('decryptionFailed');
+      callee.states['a-ra']!('ok');
+      expect(answering.cryptorStates, <String, String>{
+        'video receiver': 'decryptionFailed',
+        'audio receiver': 'ok',
+      });
+    });
     test('the call ends while its senders are being sealed (a friend who '
         'is offline): the channel waits for it before the connection may '
         'close, and seals nothing more', () async {

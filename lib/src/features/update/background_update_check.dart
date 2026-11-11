@@ -29,8 +29,10 @@ import 'package:zen/src/features/update/whats_new.dart';
 /// answer is [every] old or older, whoever asked (the app keeps the same
 /// file, [UpdateNoticeStore], and asks every [kGithubCheckEvery] while it
 /// runs). A failed check is kept with its error (shown on the updates
-/// screen) and tried again on the next run, a beat later, or once the
-/// wait GitHub asked for is over. Once when the service starts, too (after
+/// screen) and tried again once the wait GitHub asked for is over, and not
+/// before the wait that grows with each failed ask in a row
+/// ([backgroundUpdateRetryWait]): GitHub that cannot be reached is not asked
+/// on every wake of a locked phone. Once when the service starts, too (after
 /// [firstAfter]), so a service that is restarted often still checks. A
 /// version still to be
 /// announced comes with the release's short note (whats_new.dart) in the
@@ -39,6 +41,10 @@ import 'package:zen/src/features/update/whats_new.dart';
 /// that is installed now is taken away.
 /// The shortest round of [BackgroundUpdateCheck] on the service's beat.
 const Duration kUpdateBeatAtMost = Duration(minutes: 15);
+
+/// The longest the background service waits after a failed ask before it
+/// asks again, however many failed in a row.
+const Duration kBackgroundUpdateRetryAtMost = Duration(hours: 4);
 
 final class BackgroundUpdateCheck {
   BackgroundUpdateCheck({
@@ -52,6 +58,7 @@ final class BackgroundUpdateCheck {
     this.currentVersion = kAppVersion,
     this.releaseKeys = kReleaseMaintainers,
     this.every = kBackgroundGithubCheckEvery,
+    this.retryAtMost = kBackgroundUpdateRetryAtMost,
     this.firstAfter = const Duration(minutes: 2),
   }) : _notices = notices,
        store = store ?? FileUpdateNoticeStore(),
@@ -75,6 +82,9 @@ final class BackgroundUpdateCheck {
 
   /// How old GitHub's last answer must be before it is asked again.
   final Duration every;
+
+  /// The longest wait after failed asks ([backgroundUpdateRetryWait]).
+  final Duration retryAtMost;
 
   /// The first look after the service starts.
   final Duration firstAfter;
@@ -135,7 +145,12 @@ final class BackgroundUpdateCheck {
       }
     }
     final int now = _now();
-    if (!backgroundUpdateCheckDue(kept, nowMillis: now, every: every)) {
+    if (!backgroundUpdateCheckDue(
+      kept,
+      nowMillis: now,
+      every: every,
+      retryAtMost: retryAtMost,
+    )) {
       return;
     }
     final GithubRelease? release;
@@ -146,8 +161,9 @@ final class BackgroundUpdateCheck {
         // No published release: an answer all the same.
         await store.update((UpdateNoticeState s) => s.answered(at: now));
       } else {
-        // An error answer (a rate limit, a server error): the next run
-        // tries again, after the wait GitHub asked for, if it asked.
+        // An error answer (a rate limit, a server error): tried again after
+        // the wait GitHub asked for, if it asked, and the wait that grows
+        // with each failed ask in a row.
         final Duration? wait = e.retryAfter;
         await store.update(
           (UpdateNoticeState s) => s.failed(
@@ -162,7 +178,7 @@ final class BackgroundUpdateCheck {
       logZenWarning('Update check in the background: $e');
       return;
     } on Object catch (e) {
-      // Not reached or no answer: the next run tries again.
+      // Not reached or no answer: tried again after the growing wait.
       await store.update((UpdateNoticeState s) => s.failed(at: now, error: e));
       logZenWarning('Update check in the background: $e');
       return;
@@ -206,15 +222,39 @@ final class BackgroundUpdateCheck {
   }
 }
 
+/// How long the background service waits after the [failures]-th failed
+/// ask in a row before it asks again: [every] after the first, twice as long
+/// after each next one, and never more than [atMost] (nor less than [every]).
+/// No failed ask: no wait.
+Duration backgroundUpdateRetryWait({
+  required int failures,
+  required Duration every,
+  required Duration atMost,
+}) {
+  if (failures <= 0) {
+    return Duration.zero;
+  }
+  final Duration cap = atMost < every ? every : atMost;
+  Duration wait = every;
+  for (int i = 1; i < failures && wait < cap; i++) {
+    wait *= 2;
+  }
+  return wait < cap ? wait : cap;
+}
+
 /// Whether the background service asks now: the last answer is [every] old
-/// ([updateCheckDue]; a failed check leaves it as it was, so the next run
-/// on the beat tries again), and GitHub did not ask to wait until later
-/// ([UpdateNoticeState.retryAtMillis]; a wait longer than [every] is a
-/// clock set back, and ignored).
+/// ([updateCheckDue]; a failed check leaves it as it was), GitHub did not ask
+/// to wait until later ([UpdateNoticeState.retryAtMillis]; a wait longer
+/// than [every] is a clock set back, and ignored), and the wait after failed
+/// asks is over ([backgroundUpdateRetryWait], counted from the last failed
+/// ask; a last failed ask that lies in the future is a clock set back, and
+/// does not hold the check back: the ask that follows writes the time anew).
+/// A check the person starts in the app does not ask this.
 bool backgroundUpdateCheckDue(
   UpdateNoticeState state, {
   required int nowMillis,
   required Duration every,
+  Duration retryAtMost = kBackgroundUpdateRetryAtMost,
 }) {
   if (!updateCheckDue(
     state.checkedAtMillis,
@@ -224,9 +264,21 @@ bool backgroundUpdateCheckDue(
     return false;
   }
   final int? retryAt = state.retryAtMillis;
-  return retryAt == null ||
-      retryAt <= nowMillis ||
-      retryAt - nowMillis > every.inMilliseconds;
+  if (retryAt != null &&
+      retryAt > nowMillis &&
+      retryAt - nowMillis <= every.inMilliseconds) {
+    return false;
+  }
+  final int? failedAt = state.failedAtMillis;
+  if (state.failures <= 0 || failedAt == null || failedAt > nowMillis) {
+    return true;
+  }
+  final Duration wait = backgroundUpdateRetryWait(
+    failures: state.failures,
+    every: every,
+    atMost: retryAtMost,
+  );
+  return nowMillis - failedAt >= wait.inMilliseconds;
 }
 
 /// The background service's [BackgroundUpdateCheck], started; null where

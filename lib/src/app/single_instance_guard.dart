@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/zen_instance.dart';
@@ -22,17 +23,47 @@ import 'package:zen/src/features/security/app_security_crypto.dart';
 /// exchange is guarded by a handshake so an unrelated program sitting on the
 /// same port cannot be mistaken for a Zen instance — and vice versa.
 ///
-/// Loopback is shared by every user of the computer, so every request
-/// carries this session's secret: random, new at every claim of the lock,
-/// in a file of the app's own data folder that only this user can read
-/// ([secretFileName]). A request without it is not answered and changes
-/// nothing (another user cannot make this Zen open a file).
+/// Loopback is shared by every user of the computer, so both sides prove
+/// that they know this session's secret: random, new at every claim of the
+/// lock, in a file of the app's own data folder that only this user can
+/// read ([secretFileName]), deleted when the lock is released. The secret
+/// itself never crosses the socket. A launch sends a fresh nonce; the owner
+/// of the port answers with its own nonce and an HMAC of both under the
+/// secret; only when that checks out does the launch answer with its own
+/// HMAC and, inside that one message, the file it was started with. So
+/// another user who got to the port first learns nothing (no secret, no
+/// path) and is not taken for a running Zen, and a request without the
+/// secret is not answered and changes nothing (another user cannot make this
+/// Zen open a file). When the port is held by something that cannot prove
+/// the secret, the launch starts as it would beside an unrelated program:
+/// it neither quits nor hands anything over.
+///
+/// A running 1.16.4 (or earlier) copy only understands the older request
+/// that carries the secret in the clear. A new launch never sends that
+/// request (it would hand the secret to anyone who holds the port), so it
+/// cannot tell such a copy from a stranger and starts beside it without the
+/// single-instance service; an old launch still reaches a new copy, which
+/// keeps answering that request for as long as it carries the right secret.
 abstract final class ZenSingleInstance {
   /// Fixed loopback port for the lock. Not a network service: bound to
   /// 127.0.0.1 only.
   static const int lockPort = 47821;
 
+  /// The request of 1.16.4 and earlier: the secret in the clear. Still
+  /// answered (to whoever knows the secret, which is that user's own Zen),
+  /// never sent.
   static const String _hello = 'ZEN-SINGLE-INSTANCE/2';
+
+  /// Two-way challenge-response: `HELLO <nonce>`, `PROOF <nonce> <mac>`,
+  /// `ACTIVATE <mac> [<file>]`, `ACK`.
+  static const String _helloV3 = 'ZEN-SINGLE-INSTANCE/3';
+  static const String _challenge = 'HELLO';
+  static const String _proof = 'PROOF';
+  static const String _ownerLabel = 'zen.single-instance.owner';
+  static const String _launcherLabel = 'zen.single-instance.launcher';
+
+  /// Longest line either side reads; a path in base64 is far shorter.
+  static const int _maxLineBytes = 16 * 1024;
 
   /// The file of the session's secret, in the app's own data folder.
   static const String secretFileName = 'single_instance.key';
@@ -48,6 +79,9 @@ abstract final class ZenSingleInstance {
 
   /// This session's secret while the lock is held.
   static String? _secret;
+
+  /// The file [_secret] was written to, deleted at [release].
+  static File? _secretFile;
 
   /// True on the platforms where the lock applies (desktop only — Android and
   /// iOS already guarantee a single process per app).
@@ -121,22 +155,43 @@ abstract final class ZenSingleInstance {
     return File('${dir.path}${Platform.pathSeparator}$secretFileName');
   }
 
-  /// A new secret for this session, written where only this user reads it
-  /// (on Linux and macOS the file is made `0600` before the secret goes
-  /// in; on Windows the folder is the user's own).
+  /// A new secret for this session, written where only this user reads it.
+  ///
+  /// The secret goes into a file inside a folder made for it alone (created
+  /// `0700` on Linux and macOS, the user's own folder on Windows), which is
+  /// made `0600` and only then moved to its place: no other user can ever
+  /// have the file open, not even for the moment between its creation and a
+  /// later `chmod`, and a launch never reads half a secret.
   static Future<void> _newSecret(Future<File> Function() secretFile) async {
     final String secret = securityHexFromBytes(randomSecurityBytes(32));
     _secret = secret;
+    _secretFile = null;
+    Directory? staging;
     try {
       final File file = await secretFile();
       await file.parent.create(recursive: true);
-      await file.writeAsString('', flush: true);
+      staging = await file.parent.createTemp('.zen-single-instance-');
+      final File draft = File(
+        '${staging.path}${Platform.pathSeparator}$secretFileName',
+      );
+      await draft.writeAsString(secret, flush: true);
       if ((Platform.isLinux || Platform.isMacOS) &&
-          !posixChmod(file.path, kOwnerOnlyFileMode)) {
-        await file.delete();
+          !posixChmod(draft.path, kOwnerOnlyFileMode)) {
         throw StateError('The single instance secret could not be private.');
       }
-      await file.writeAsString(secret, flush: true);
+      for (int attempt = 1; ; attempt += 1) {
+        try {
+          await draft.rename(file.path);
+          break;
+        } on FileSystemException {
+          // A launch may be reading the file just now (Windows).
+          if (attempt >= 3) {
+            rethrow;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      }
+      _secretFile = file;
     } on Object catch (error, stackTrace) {
       // Nothing can ask this instance for anything then; a second launch
       // starts as it would beside an unrelated program.
@@ -145,6 +200,12 @@ abstract final class ZenSingleInstance {
         error,
         stackTrace,
       );
+    } finally {
+      try {
+        await staging?.delete(recursive: true);
+      } on Object {
+        // Empty or already gone; nothing in it is the secret any more.
+      }
     }
   }
 
@@ -198,9 +259,9 @@ abstract final class ZenSingleInstance {
         stackTrace,
       );
     }
-    // The port is taken. Probing the owner; once more a moment later, for
-    // an instance that has only just claimed the port and is still
-    // writing its secret.
+    // The port is taken. Asking the owner to prove the secret; once more a
+    // moment later, for an instance that has only just claimed the port and
+    // is still writing its secret.
     bool ownedByZen = await _requestActivationFromRunningInstance(
       port,
       open,
@@ -367,42 +428,81 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
   static Future<void> release() async {
     final StreamSubscription<Socket>? subscription = _subscription;
     final ServerSocket? server = _server;
+    final File? secretFile = _secretFile;
     _subscription = null;
     _server = null;
     _secret = null;
+    _secretFile = null;
     try {
       await subscription?.cancel();
+      if (secretFile != null) {
+        // While the port is still held: nobody else can have written a
+        // secret of their own in the meantime.
+        try {
+          if (await secretFile.exists()) {
+            await secretFile.delete();
+          }
+        } on Object catch (error, stackTrace) {
+          logZenError(
+            'Deleting the single instance secret failed',
+            error,
+            stackTrace,
+          );
+        }
+      }
       await server?.close();
     } catch (error, stackTrace) {
       logZenError('Releasing single instance lock failed', error, stackTrace);
     }
   }
 
-  /// Reads a single handshake line, or `null` when the peer says nothing —
-  /// a hung-up connection is normal here, not an error worth logging.
-  static Future<String?> _readHandshakeLine(Socket socket) async {
-    final List<String> lines = await socket
-        .cast<List<int>>()
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .take(1)
-        .toList()
-        .timeout(_handshakeTimeout, onTimeout: () => const <String>[]);
-    return lines.isEmpty ? null : lines.first;
-  }
+  /// The proof of the owner of the port: [secret] over both nonces.
+  @visibleForTesting
+  static String ownerProof({
+    required String secret,
+    required String clientNonce,
+    required String serverNonce,
+  }) => _mac(secret, '$_ownerLabel $clientNonce $serverNonce');
+
+  /// The proof of a launch: [secret] over both nonces and the file it
+  /// carries ([open], base64url of its path, or empty).
+  @visibleForTesting
+  static String launcherProof({
+    required String secret,
+    required String clientNonce,
+    required String serverNonce,
+    String open = '',
+  }) => _mac(secret, '$_launcherLabel $clientNonce $serverNonce $open');
+
+  static String _mac(String secret, String message) => crypto.Hmac(
+    crypto.sha256,
+    utf8.encode(secret),
+  ).convert(utf8.encode(message)).toString();
+
+  static String _newNonce() => securityHexFromBytes(randomSecurityBytes(16));
+
+  static bool _isNonce(String word) => RegExp(r'^[0-9a-f]{32}$').hasMatch(word);
+
+  static bool _isMac(String word) => RegExp(r'^[0-9a-f]{64}$').hasMatch(word);
 
   static Future<void> _handleConnection(Socket socket) async {
+    final _HandshakeLines lines = _HandshakeLines(socket, _handshakeTimeout);
     try {
-      final String? request = await _readHandshakeLine(socket);
+      final String? request = await lines.next();
       final String? secret = _secret;
-      final String? open = request == null || secret == null
-          ? null
-          : parseActivationRequest(request, secret: secret);
-      if (open == null) {
-        // Not this user's Zen (or no request at all): no answer.
+      if (request == null || secret == null) {
+        // Nothing asked, or nothing to answer with: no answer.
         return;
       }
-      socket.write('$_hello $_ack\n');
+      final bool challenged = request.startsWith('$_helloV3 ');
+      final String? open = challenged
+          ? await _answerChallenge(socket, lines, request, secret)
+          : parseActivationRequest(request, secret: secret);
+      if (open == null) {
+        // Not this user's Zen (or no valid request at all): no answer.
+        return;
+      }
+      socket.write(challenged ? '$_helloV3 $_ack\n' : '$_hello $_ack\n');
       await socket.flush();
       final Future<void> Function()? handler = _onActivateRequested;
       if (handler != null) {
@@ -419,12 +519,135 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
         stackTrace,
       );
     } finally {
+      await lines.close();
       try {
         await socket.close();
       } catch (_) {
         // The peer may already be gone; nothing to clean up.
       }
       socket.destroy();
+    }
+  }
+
+  /// Answers the challenge in [hello] with the owner's proof and reads the
+  /// launch's proof: the file it carries (an empty string for none), or
+  /// `null` when it does not know the secret.
+  static Future<String?> _answerChallenge(
+    Socket socket,
+    _HandshakeLines lines,
+    String hello,
+    String secret,
+  ) async {
+    final List<String> words = hello.trim().split(' ');
+    if (words.length != 3 || words[1] != _challenge || !_isNonce(words[2])) {
+      return null;
+    }
+    final String clientNonce = words[2];
+    final String serverNonce = _newNonce();
+    final String proof = ownerProof(
+      secret: secret,
+      clientNonce: clientNonce,
+      serverNonce: serverNonce,
+    );
+    socket.write('$_helloV3 $_proof $serverNonce $proof\n');
+    await socket.flush();
+    final String? answer = await lines.next();
+    if (answer == null) {
+      return null;
+    }
+    final List<String> parts = answer.trim().split(' ');
+    if (parts.length < 3 ||
+        parts.length > 4 ||
+        parts[0] != _helloV3 ||
+        parts[1] != _activate ||
+        !_isMac(parts[2])) {
+      return null;
+    }
+    final String file = parts.length == 4 ? parts[3] : '';
+    final String expected = launcherProof(
+      secret: secret,
+      clientNonce: clientNonce,
+      serverNonce: serverNonce,
+      open: file,
+    );
+    if (!_sameSecret(parts[2], expected)) {
+      return null;
+    }
+    if (file.isEmpty) {
+      return '';
+    }
+    try {
+      return utf8.decode(base64Url.decode(file));
+    } on FormatException {
+      // Activation still; the file is unreadable.
+      return '';
+    }
+  }
+
+  /// Asks the owner of [port] to prove that it knows [secret] and, only
+  /// when it has, hands it the file [open]. `true` when the owner proved it
+  /// and acknowledged. Nothing but a fresh nonce is sent before the owner
+  /// has proved itself, and the secret is never sent.
+  @visibleForTesting
+  static Future<bool> handOverToRunningInstance({
+    required int port,
+    required String secret,
+    String? open,
+  }) async {
+    Socket? socket;
+    _HandshakeLines? lines;
+    try {
+      socket = await Socket.connect(
+        InternetAddress.loopbackIPv4,
+        port,
+        timeout: _handshakeTimeout,
+      );
+      lines = _HandshakeLines(socket, _handshakeTimeout);
+      final String clientNonce = _newNonce();
+      socket.write('$_helloV3 $_challenge $clientNonce\n');
+      await socket.flush();
+      final String? reply = await lines.next();
+      final List<String> words = reply == null
+          ? const <String>[]
+          : reply.trim().split(' ');
+      if (words.length != 4 ||
+          words[0] != _helloV3 ||
+          words[1] != _proof ||
+          !_isNonce(words[2]) ||
+          !_isMac(words[3]) ||
+          !_sameSecret(
+            words[3],
+            ownerProof(
+              secret: secret,
+              clientNonce: clientNonce,
+              serverNonce: words[2],
+            ),
+          )) {
+        return false;
+      }
+      final String file = open == null || open.isEmpty
+          ? ''
+          : base64Url.encode(utf8.encode(open));
+      final String proof = launcherProof(
+        secret: secret,
+        clientNonce: clientNonce,
+        serverNonce: words[2],
+        open: file,
+      );
+      socket.write(
+        file.isEmpty
+            ? '$_helloV3 $_activate $proof\n'
+            : '$_helloV3 $_activate $proof $file\n',
+      );
+      await socket.flush();
+      final String? response = await lines.next();
+      return response?.trim() == '$_helloV3 $_ack';
+    } catch (error, stackTrace) {
+      logZenError('Probing the running Zen instance failed', error, stackTrace);
+      return false;
+    } finally {
+      await lines?.close();
+      socket?.destroy();
     }
   }
 
@@ -437,36 +660,97 @@ Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
     if (secret == null) {
       return false;
     }
-    Socket? socket;
-    try {
-      socket = await Socket.connect(
-        InternetAddress.loopbackIPv4,
-        port,
-        timeout: _handshakeTimeout,
-      );
-      socket.write('${activationRequest(secret: secret, open: open)}\n');
-      await socket.flush();
-      final String? response = await _readHandshakeLine(socket);
-      final bool acknowledged = response?.trim() == '$_hello $_ack';
-      if (!acknowledged) {
+    final bool acknowledged = await handOverToRunningInstance(
+      port: port,
+      secret: secret,
+      open: open,
+    );
+    if (!acknowledged) {
+      return false;
+    }
+    if (Platform.isWindows) {
+      _grantForegroundPermission();
+      final bool restored = _bringExistingWindowToForeground();
+      if (!restored) {
+        logZenWarning(
+          'Running instance acknowledged activation, but has no valid window. Treating as zombie.',
+        );
         return false;
       }
-      if (Platform.isWindows) {
-        _grantForegroundPermission();
-        final bool restored = _bringExistingWindowToForeground();
-        if (!restored) {
-          logZenWarning(
-            'Running instance acknowledged activation, but has no valid window. Treating as zombie.',
-          );
-          return false;
+    }
+    return true;
+  }
+}
+
+/// The lines a peer sends, read one at a time. A line is at most
+/// [ZenSingleInstance._maxLineBytes] long and must arrive within [timeout]
+/// (a peer that sends more, or nothing, or hangs up, yields `null` — a
+/// hung-up connection is normal here, not an error worth logging).
+final class _HandshakeLines {
+  _HandshakeLines(Socket socket, this.timeout) {
+    _subscription = socket.listen(
+      _onData,
+      onError: (Object _) => _finish(),
+      onDone: _finish,
+      cancelOnError: true,
+    );
+  }
+
+  final Duration timeout;
+  final List<int> _buffer = <int>[];
+  late final StreamSubscription<List<int>> _subscription;
+  Completer<void>? _wake;
+  bool _ended = false;
+
+  void _onData(List<int> data) {
+    _buffer.addAll(data);
+    _wake?.complete();
+    _wake = null;
+  }
+
+  void _finish() {
+    _ended = true;
+    _wake?.complete();
+    _wake = null;
+  }
+
+  Future<String?> next() async {
+    final Stopwatch clock = Stopwatch()..start();
+    while (true) {
+      final int end = _buffer.indexOf(10);
+      if (end >= 0) {
+        if (end > ZenSingleInstance._maxLineBytes) {
+          return null;
         }
+        final String line = utf8.decode(
+          _buffer.sublist(0, end),
+          allowMalformed: true,
+        );
+        _buffer.removeRange(0, end + 1);
+        return line.trim();
       }
-      return true;
-    } catch (error, stackTrace) {
-      logZenError('Probing the running Zen instance failed', error, stackTrace);
-      return false;
-    } finally {
-      socket?.destroy();
+      if (_ended || _buffer.length > ZenSingleInstance._maxLineBytes) {
+        return null;
+      }
+      final Duration left = timeout - clock.elapsed;
+      if (left <= Duration.zero) {
+        return null;
+      }
+      final Completer<void> wake = _wake = Completer<void>();
+      try {
+        await wake.future.timeout(left);
+      } on TimeoutException {
+        _wake = null;
+        return null;
+      }
+    }
+  }
+
+  Future<void> close() async {
+    try {
+      await _subscription.cancel();
+    } on Object {
+      // The socket is destroyed by the caller anyway.
     }
   }
 }

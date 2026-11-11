@@ -45,6 +45,8 @@ import 'package:zen/src/features/chat/realtime_attachment_transfer.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
+import 'package:zen/src/features/ledger/contacts_backup.dart'
+    show contactsItemWithStamps;
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_vault.dart';
@@ -58,7 +60,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
-    show kGroupJoinedAck, kMaxSignalIdChars;
+    show kGroupJoinedAck, kMaxGroupMessageChars, kMaxSignalIdChars;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -255,13 +257,6 @@ const int _maxStrangerInvitesPerWindow = 24;
 const int _maxStrangerAlertSendersPerWindow = 10;
 
 const int _maxTrackedStrangerIdentities = 4096;
-
-/// Window of the limit on mention notifications from one person.
-const Duration _mentionAlertWindow = Duration(minutes: 10);
-
-/// Group messages of one sender per window that may say they mention this
-/// person; past it they notify like any other message.
-const int kMaxMentionAlertsPerSender = 5;
 
 /// How long reading the stored snapshot (friends, groups, the inbox) may
 /// take at start before it counts as unreadable.
@@ -487,48 +482,24 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     return true;
   }
 
-  /// When each sender's recent mentions of this person were announced.
-  final Map<String, List<int>> _mentionAlertTimes = <String, List<int>>{};
+  /// The recent mention notices of each sender.
+  final MentionAlerts _mentionAlerts = MentionAlerts();
+
+  /// What the rules shared with the locked receiver ([incomingAlertOf])
+  /// read here: this state, the settings and this device's address.
+  AlertFacts get _alertFacts => _HubAlertFacts(
+    state,
+    settings: _appSettings,
+    self: ref.read(runtimeNodeSnapshotProvider).localAddress,
+  );
 
   /// [signal] marked as mentioning this person ([kMentionsYouKey]) when it
-  /// is a group message whose text names this device, from a member of a
-  /// group this device is in, and its sender is still within
-  /// [kMaxMentionAlertsPerSender]. Anything else comes back unchanged.
-  ZenSignal _withMentionOfSelf(ZenSignal signal, int nowMillis) {
-    if (signal.type != ZenSignalType.groupMessage) {
-      return signal;
-    }
-    final GroupProfile? group = state.groups[signal.groupId ?? ''];
-    final String self = ref.read(runtimeNodeSnapshotProvider).localAddress;
-    if (group == null ||
-        group.isInvitePending ||
-        self.isEmpty ||
-        PeerShareCodec.addressesEqual(signal.sender, self) ||
-        !(groupHasMember(group, signal.sender) ||
-            PeerShareCodec.addressesEqual(group.createdById, signal.sender)) ||
-        !mentionsAnyOf(
-          signal.content ?? '',
-          signalMentions(signal),
-          addresses: <String>[self],
-        )) {
-      return signal;
-    }
-    final int windowStart = nowMillis - _mentionAlertWindow.inMilliseconds;
-    final String key = PeerShareCodec.identityKeyForAddress(signal.sender);
-    final List<int> times = _mentionAlertTimes[key] ??= <int>[];
-    times.removeWhere((int at) => at < windowStart);
-    if (times.length >= kMaxMentionAlertsPerSender) {
-      return signal;
-    }
-    times.add(nowMillis);
-    while (_mentionAlertTimes.length > _maxTrackedStrangerIdentities) {
-      _mentionAlertTimes.remove(_mentionAlertTimes.keys.first);
-    }
-    return signal.withChatExtras(<String, dynamic>{
-      ...?signal.chatExtras,
-      kMentionsYouKey: true,
-    });
-  }
+  /// is a group message whose text names this device, from someone who
+  /// speaks in a group this device is in, and its sender is still within
+  /// [kMaxMentionAlertsPerSender] ([withMentionOfSelf], which the locked
+  /// receiver applies too). Anything else comes back unchanged.
+  ZenSignal _withMentionOfSelf(ZenSignal signal, int nowMillis) =>
+      withMentionOfSelf(signal, _alertFacts, _mentionAlerts, nowMillis);
 
   /// When each (group, peer) invite was last re-sent from here.
   final Map<String, int> _groupInviteResentAtMillis = <String, int>{};
@@ -715,26 +686,11 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   /// Whether a chat message [about] makes no notification: its
   /// conversation is muted, or it is a group's message in a group that
-  /// tells only of mentions. A mention of this person always comes.
-  bool _quietChat(ZenSignal about, RuntimeSystemNotification notification) {
-    if (about.type != ZenSignalType.message &&
-        about.type != ZenSignalType.groupMessage) {
-      return false;
-    }
-    if (notification.kind == NoticeKind.mention ||
-        about.chatExtras?[kMentionsYouKey] == true) {
-      return false;
-    }
-    final String key = conversationKeyOfSignal(about);
-    if (state.isMuted(key, DateTime.now().millisecondsSinceEpoch)) {
-      return true;
-    }
-    return about.type == ZenSignalType.groupMessage &&
-        !state.groupNotifiesAll(
-          key,
-          mentionsOnly: _appSettings.groupMentionsOnly,
-        );
-  }
+  /// tells only of mentions. A mention of this person always comes
+  /// ([chatIsQuiet], as on the locked phone).
+  bool _quietChat(ZenSignal about, RuntimeSystemNotification notification) =>
+      notification.kind != NoticeKind.mention &&
+      chatIsQuiet(about, _alertFacts, DateTime.now().millisecondsSinceEpoch);
 
   Future<void> _syncRingingCallWindow() async {
     final CallSession? session = state.activeCall;
@@ -1754,12 +1710,73 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     int timestamp,
   );
 
+  /// When a friend's message [signal] that came at [receivedAtMillis] goes
+  /// in the conversation [conversationKey] (`social_hub_controller_messages.dart`).
+  Future<int> _placedSentAt(
+    ZenSignal signal,
+    int receivedAtMillis,
+    String conversationKey,
+  );
+
   Future<void> _handleChatChange(ZenSignal signal, int timestamp);
 
   Future<void> _applyMirroredChatChange(
     String peerAddress,
     Map<String, dynamic> payload,
   );
+
+  /// Takes what tells of the messages [gone] of conversation [key] out of
+  /// the in-app list, the queue and the shade
+  /// (`social_hub_controller_chat_extras.dart`).
+  Future<void> _forgetNoticesOf(
+    String key,
+    Iterable<ChatMessage> gone, {
+    bool persist = true,
+  });
+
+  /// An edit that came before the message [message] (just taken in) is
+  /// applied to it now (`social_hub_controller_chat_extras.dart`).
+  Future<void> _applyChangeThatWaited(ZenSignal message);
+
+  /// Everything that tells of the group [groupId] goes (it was left).
+  Future<void> _forgetGroupNotices(String groupId);
+
+  /// Removes the group [groupId]'s chat from this phone: its messages,
+  /// their files and what tells of them.
+  Future<void> _clearGroupHistory(String groupId);
+
+  /// Remembers [messages] of conversation [key] as gone from this phone, so
+  /// a late copy of one (a re-send, a mailbox, another device of the
+  /// account) does not bring it back
+  /// (`social_hub_controller_disappearing.dart`).
+  void _rememberGone(String key, Iterable<ChatMessage> messages);
+
+  /// Whether message [messageId] of conversation [key] is remembered as
+  /// gone from this phone ([_rememberGone]).
+  bool _isRememberedGone(String key, String messageId);
+
+  /// The chat list line of the friend [peerAddress] from what [thread]
+  /// holds now (`social_hub_controller_retention.dart`).
+  void _syncFriendPreviewFromTimeline({
+    required String peerAddress,
+    required List<ChatMessage> thread,
+    required bool resetUnread,
+  });
+
+  /// A conversation read on another device of this account
+  /// (`social_hub_controller_messages.dart`).
+  Future<void> _applyReadFromOtherDevice(
+    String peerAddress,
+    Map<String, dynamic> payload,
+  );
+
+  /// A group read on another device of this account
+  /// (`social_hub_controller_messages.dart`).
+  Future<void> _applyGroupReadFromOtherDevice(Map<String, dynamic> payload);
+
+  /// Tells this account's other devices that the group [groupId] was read
+  /// here (`social_hub_controller_messages.dart`).
+  Future<void> _mirrorGroupRead(String groupId);
 
   Future<void> _sendCallSignal({
     required String remoteAddress,

@@ -16,18 +16,28 @@
 - One-to-one chats and groups (the pyramid's cell chats too): text, photos,
   videos, files, voice notes and GIFs.
 - **GIF files** picked from the gallery or from disk stay animated (up to
-  8 MB, 2560 px a side and 400 frames); their comments and metadata are
-  removed. A GIF that would not play can go as an ordinary file.
+  8 MB, 2560 px a side and 2000 frames, with at most 200 million pixels
+  over all frames); their comments and metadata are removed. A GIF that
+  would not play can go as an ordinary file. Animated WebP and PNG
+  pictures (a keyboard's sticker, a picture saved from another messenger)
+  go as GIFs that keep playing instead of a still of their first frame. A
+  GIF picked from the gallery as your profile photo or cover keeps
+  playing too, and a HEIC photo is read by the phone's own decoder for the
+  profile, posts and comments.
 - On a computer, **drop** files anywhere on a conversation or **paste** them
   with Ctrl+V (⌘V on a Mac): photos, GIFs, videos, files. Text in the
   clipboard pastes as text, as usual.
-- **Keyboard GIFs and stickers.** On Android, GIFs from the keyboard (for
-  example Gboard or SwiftKey) arrive animated. iPhone keyboards copy a GIF
-  to the clipboard instead: use **Paste image from clipboard** in the chat
-  or in the attachment sheet.
+- **Keyboard GIFs and stickers.** On Android, GIFs and animated stickers
+  from the keyboard (for example Gboard or SwiftKey) arrive animated.
+  iPhone keyboards copy a GIF to the clipboard instead: use **Paste image
+  from clipboard** in the chat or in the attachment sheet.
 - Long-press a message to **react**, **reply**, **edit**, **forward**,
   **delete for everyone**, copy it or report it.
 - Groups have a **Board** tab with their own posts: text, a photo, or both.
+  A group has at most 256 people, its creator included; choosing more says
+  *A group can have at most 256 people.*
+- *typing…* shows while a friend writes and goes a few seconds after their
+  last keystroke, and at once when they leave the chat or Zen.
 - Audio and video calls, also in groups, with screen sharing.
 - Filters in the chat list: all, unread, online, close friends.
 
@@ -47,9 +57,14 @@
 - **Delete for everyone.** Your own messages; in a group, its creator may
   also delete anyone's message (a pyramid cell chat has no creator, so
   there only authors can). A *Message deleted* note stays in its place,
-  replies lose the quoted words and the message's file is erased. Be
-  aware: whoever already read it may remember it, and a modified app can
-  ignore the deletion and keep a copy.
+  replies lose the quoted words and the message's file is erased (a file
+  still on its way stops). Be aware: whoever already read it may remember
+  it, and a modified app can ignore the deletion and keep a copy.
+- **No words left behind.** A message deleted for everyone, one that
+  disappeared, one edited, one deleted from this phone or cleared with its
+  chat takes its notification, its entry in the notification list and any
+  copy still waiting to be shown with it, also while Zen is locked and on
+  your other devices.
 - **Forwarding** passes a text or a file to a friend or a group, marked
   *Forwarded*. Disappearing messages cannot be forwarded. Mentions in a
   forwarded message become plain names.
@@ -107,7 +122,12 @@ reactions and reply.
    from your friend starts over at once, and so does a change of network.
 
 Every message is written to disk before the first attempt, so nothing is
-lost if the app or the phone stops in between. Duplicates (a direct copy and
+lost if the app or the phone stops in between. A message is confirmed to
+its sender only once it is in the recipient's chat: one lost on the way in
+(the app killed, a failed write) comes again instead of showing
+*Delivered* for ever. A message that could not be sent puts its text and
+its quote back into the field; a group message longer than the members'
+phones keep (64 K characters) is refused instead of cut. Duplicates (a direct copy and
 a mailbox copy) are recognised and shown once. The outbox holds up to 32 MB
 of waiting messages; when it is full, a new message is marked not sent and
 you can try again once friends have picked up what waits.
@@ -143,7 +163,24 @@ tells you: a card on the chats list and an entry in the notifications say
 *Mailbox {name} has not answered for {time} — choose another*. Tapping it
 opens **Settings → Network → Offline mailboxes**, where each friend shows the kind of
 device and how much of the time it was available, and an iPhone without
-*receive in the background* is marked as a weak mailbox.
+*receive in the background* is marked as a weak mailbox. The same page
+counts *Waiting for delivery*: messages, attachments and invitations from
+you that have not reached their recipient yet, each once per message and
+person (receipts, statuses and the like that Zen sends by itself are not
+counted), and *You keep these for friends* with how many people they are
+for (a friend with two devices is one).
+
+**What waits, and how long.** Of the things Zen sends by itself — your
+profile, friend list, status, *open to meet*, nearby keys, the terms at
+your gates and read receipts — only the newest waits for each friend, here
+and in their mailboxes; a newer one replaces the older one. Posts pushed
+to a friend who is offline wait 7 days (they also come with the next sync
+of posts). A receipt for a message a friend took from a mailbox while you
+were away reaches you through your own mailboxes. A device of a friend
+that has been silent for a week while another of theirs answers is taken
+for gone: it still gets what a person sent, but nothing Zen sends by
+itself until it is heard from again. Mail for someone who is no longer
+your friend goes.
 
 **Friends with several devices, or a new phone.** Each of your devices has
 its own mailboxes and its own key, and a message to a friend goes to every
@@ -201,14 +238,20 @@ and **Retry**.
 | outbox | Waiting on your phone, recipient offline | only this device has a copy and keeps trying (on an iPhone: *Waiting on your iPhone*, tried again while Zen is open and at the background checks) |
 | mailbox | Waiting in the recipient's mailboxes with friends (N) | N sealed copies wait in mailboxes; if you are one of them, the details say so |
 | one tick | Sent | in the queue, nothing more is known yet |
-| two ticks | Delivered | the recipient's device confirmed it |
-| two ticks, coloured | Read | the recipient opened it (one-to-one chats) |
+| two ticks | Delivered | the recipient's device confirmed it is in their chat |
+| two ticks, coloured | Read | the recipient opened the chat with it on the screen (one-to-one chats) |
 | warning | Failed, retry | it expired unconfirmed; **Retry** sends it again under the same id |
 | outbox | Waiting on your phone, will go when you are both online | a large file the mailboxes cannot take |
 
 In groups the icon follows the furthest-behind member and the label says
 *Delivered {d} of {n}*. **Retry** in a group goes only to those who did not
 confirm.
+
+*Read* shows under your message only when your friend opened the chat:
+reading it marks only the friend's messages, all of them up to the one
+read, and sends one receipt. A chat read on one device of the account is
+read on its others too (groups included), with no unread count and no
+notification left there.
 
 ## Calls
 
@@ -223,7 +266,20 @@ video and shared screen are protected three times:
   again with a **256-bit post-quantum** key of the two devices.
 
 The call screen says which protection a call has. In a group call every
-participant has a separate connection to every other.
+participant has a separate connection to every other. The camera and a
+shared screen use the VP8 codec on both sides, also with an older Zen:
+two phones with hardware codecs could agree on one whose frames the frame
+encryption could not open, and the picture stayed black while the sound
+worked. The technical log (**Diagnostics**) shows for each call which
+codecs were offered and how many video frames went out, came in and were
+shown.
+
+**Busy and missed calls.** A call that comes while another one rings (in
+or out) or is under way gets *busy*: the caller sees *{name} is busy*, the
+call shows as missed for you, and the call already there goes on. A ring
+that ends unanswered sends the person called a small notice that waits
+like a message, so someone who was offline sees the missed call once when
+they are back, also on a locked phone.
 
 When you share your screen, notifications show at most who wrote, never
 what, and a red bar reminds you that everything is visible. When a call is recorded,
@@ -277,6 +333,10 @@ then, and offers *Retry* when saving failed.
 - While an Android phone sleeps (Doze), mail from the mailboxes can come a
   few minutes late.
 - Read receipts exist only in one-to-one chats.
+- Leaving or declining a group, or **Clear history** in a group, removes
+  its chat, its files and its notifications from this phone. A creator who
+  left the group is no longer a member: no phone takes their messages
+  until they are invited again.
 - **Presence.** Friends see one of three states, as a dot on the avatar
   in the chat list and in the chat header: *online* (a dot in the theme's
   "success" colour that pulses briefly when it lights up: Zen is open on
@@ -288,7 +348,13 @@ then, and offers *Retry* when saving failed.
   shows as offline, not in the background, unless it keeps receiving
   (*Keep receiving in the background*). Zen tells this only by the way:
   when you open it, with its few pings while it stays open, with its
-  answers to friends' pings, and "leaving" when it goes to the background.
+  answers to friends' pings, and "leaving" when it goes to the background;
+  a locked Android phone also asks its friends every 10 minutes (see
+  [Settings](settings-and-peers.md#settings)). Friends' states are complete
+  the moment Zen opens: what the background service heard while Zen was
+  closed is kept. A message counts as a sign that a friend is there only
+  when it was written a moment before it came; one that waited in a
+  mailbox does not, and writing to a friend does not mark them as seen.
   A weak acquaintance sees none of it; *Settings → Privacy and security →
   Contact and visibility → Show when I last opened the app* hides the time from everyone.
 

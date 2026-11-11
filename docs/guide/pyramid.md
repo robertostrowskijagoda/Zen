@@ -183,13 +183,33 @@ stricter path:
   record. The order is sealed (post-quantum hybrid encryption) to each
   treasurer separately.
 - A transfer counts when a **majority of the treasurers** of its time sign
-  it. A treasurer signs only an order that is covered, recent, has the next
-  number of the account and fits the daily limit, and never two orders with
-  one number: two majorities always share an honest treasurer, so nothing
-  is spent twice while most treasurers are honest. A treasurer who signs
-  two orders with one number leaves proof of it.
-- Every treasurer keeps the whole private ledger and syncs it with the
-  others; a new treasurer receives it the same way.
+  it. A treasurer signs only an order that carries the payer's full
+  signature, is covered, recent, between members, has the next number of
+  the account and fits the daily limit of its time, and never two orders
+  with one number; every phone refuses an order that breaks one of these
+  rules, whoever signed it. Two majorities share at least one treasurer
+  (two when their number is even), so a payment can be spent twice only if
+  those shared treasurers sign two orders with one number, and that leaves
+  proof against them.
+- **A stuck number.** When an account's number is split between orders
+  none of which can reach a majority any more (a cancelled order, two
+  devices paying at once), most treasurers of the era vote a **release**
+  about an hour after they see it, and the waiting order goes out again. A
+  treasurer never moves on to another order by itself.
+- **Sealed eras.** The treasurers of each era (from one change of who the
+  treasurers are to the next) are sealed by most of the next era's treasurers: the
+  seal fixes who they were and lists which transfers dated in that era
+  count. A transfer dated into a sealed era that its seal does not list
+  counts nowhere, so former treasurers cannot create money or replace a
+  past payment. A change at the treasurers' levels or a cell vote that
+  arrives late counts from when it was seen: it cannot move a sealed era,
+  nor a vote that its cell closed with the list of its votes.
+- Every treasurer keeps the whole private ledger, checks it for numbering
+  and balance, and syncs it with the others; a new treasurer receives it
+  the same way. A treasurer keeps only what a treasurer of its era signed,
+  within limits per payer, and sends the ledger only to another treasurer
+  asking from that treasurer's own address. No balance, issuance or
+  statement goes past a safe upper limit.
 - The person paid gets the order with the treasurers' signatures (a
   receipt). Your wallet regularly asks the treasurers for a **signed
   statement** of your balance; it shows the balance most of them agree on.
@@ -201,8 +221,9 @@ stricter path:
   hours by default), during which the third member of the top can veto it.
 - Escrow payments, used by [gates](introductions-and-gates.md) and the
   market, go the same private way: the money is set aside and released by a
-  condition, or returned after a deadline.
-- After recovering your account (recovery circle or key copy)
+  condition, or returned after a deadline; a refund waits until the time
+  for accepting the payment is over.
+- After recovering your account (close friends or key copy)
   your place and level come back from the records your friends keep, and
   your balance and history from the treasurers' statements.
 
@@ -224,17 +245,25 @@ stricter path:
   does not.) Appeals go as usual.
 - **The court.** Any member can file a complaint against another (a fraud
   warning, *don't lend this person money*, *be careful*, other), up to 3 open
-  at a time. The head of the defendant's cell decides within 3 days: a
-  verdict (with an optional expiry) or a dismissal with reasons. A verdict is
-  a warning that everyone sees on the person's profile in Zen, members and
-  non-members alike; the person cannot hide it.
+  at a time. The court of the defendant's cell (its head) decides within 3
+  days: a verdict (with an optional expiry) or a dismissal with reasons. A
+  verdict is a warning that everyone sees on the person's profile in Zen,
+  members and non-members alike; the person cannot hide it.
+- **The court decides without names.** For each matter the judges' phones
+  make one-time cards, and a verdict, a dismissal or an answer to an
+  appeal is signed with as many of those cards as the court needs, never
+  with a judge's own key. The record does not say who decided, nor how many
+  agreed; the screens and the history say *the court of level N*. At the
+  top, 2 of the top cell decide. Nothing of the court's work passes through
+  the phones of the people it judges.
 - **Appeals** go one level above whoever decided (from the top: to the top
   again). Refused or unanswered in time, you may go up again, all the way to
   the top, whose refusal is final. The time to answer doubles at each level:
   3, 6, 12, 24 days. Accepted at any level, the decision is undone: a ban is
   lifted, a removed person returns to their place (or the nearest free one in
   their former head's branch), a verdict is quashed. The parties never judge
-  their own case. Your cases are under *Decisions about you* on the *Me* tab;
+  their own case; an appeal names the court of the level it goes to
+  (*{name} appeals to the court of level {level}*). Your cases are under *Decisions about you* on the *Me* tab;
   judges see *To review*.
 
 ## National sections and the feed
@@ -287,6 +316,7 @@ top three levels and the part around you and the people you picked. Under it,
 | issuance amounts, vetoes, the limits | transfers (only the two sides and the treasurers) |
 | bans with reasons, verdicts, appeals and answers | branch statistics (only from 5 people up) |
 | cell vote results (not who voted for whom) | gate conditions, who gets an issuance |
+| how many transfers an era had (its seal lists them, without content) | which judge decided (a decision names the court of a level) |
 | | the content of reports, at their recipients |
 
 Records travel only between friends who are members (or follow the
@@ -298,8 +328,15 @@ pyramid).
   `--dart-define=ZEN_PYRAMID_TEST=true`, use a separate test pyramid; a
   release build always keeps the original one.
 - The treasurers (everyone down to level 3) see every transfer, like a
-  bank. A dishonest **majority** of treasurers could sign a spending twice
-  or a false statement: it would leave proof, but could not be stopped.
+  bank. The treasurers that two majorities share (one of an odd number of
+  treasurers, two of an even one) could together sign a spending twice,
+  and a dishonest **majority** a false statement: it would leave proof, but
+  could not be stopped.
+- An era counts as settled only once it is sealed, at least an hour after
+  it ends; until then a phone that syncs late may still see what happened
+  in it in another order.
+- Below the top, a court is one person, the head of a cell: whoever knows
+  who sits at that place knows who decided, cards or not.
 - The anonymous vote request is classical (a ring signature): a future
   quantum computer could forge a request (a nuisance, not a result) or tell
   later who asked. The votes themselves are post-quantum. See the

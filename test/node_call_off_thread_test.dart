@@ -12,7 +12,39 @@ import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 /// and every timer of the start with it. The calls run on a helper
 /// isolate now; these tests block a helper the same way a stuck bridge
 /// call would.
+Map<String, dynamic> _linksOf(int handle) => <String, dynamic>{
+  'handle': handle,
+  'up': 1,
+};
+
 void main() {
+  test('the link check of a wake reaches the helper isolate: it carries '
+      'nothing but the node handle', () async {
+    // On a phone every check failed before it began ("object is
+    // unsendable"): its closure was written inside the function that
+    // starts the session and carried that function's context along, the
+    // pin keeper and its futures included.
+    expect(await checkNodeLinksOffThread(7, check: _linksOf), <String, dynamic>{
+      'handle': 7,
+      'up': 1,
+    });
+
+    // And nothing in the function that starts the session sends a closure
+    // of its own to another isolate: what it sends goes through functions
+    // that hold only what they are given.
+    final String source = File(
+      'lib/src/features/runtime/runtime_native_signal_transport.dart',
+    ).readAsStringSync().replaceAll('\r\n', '\n');
+    final int start = source.indexOf(
+      'Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({',
+    );
+    expect(start, greaterThan(0));
+    final String body = source.substring(start, source.indexOf('\n}\n', start));
+    expect(body, contains('checkNodeLinksOffThread(handle)'));
+    expect(body, isNot(contains('runNodeCallOffThread<')));
+    expect(body, isNot(contains('Isolate.run')));
+  });
+
   test(
     'a bridge call that blocks its thread never stops this isolate',
     () async {

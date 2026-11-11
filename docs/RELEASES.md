@@ -172,6 +172,40 @@ key, so every release must be signed with this key.
 > 6. Settings → Advanced → Diagnostics: save the log; read it for `ERROR` lines,
 >    "already runs" or "Flutter framework error".
 >
+> What the tests cannot show (since 1.16.5; the same log tells the result):
+>
+> 7. A video call between the two Android phones, started from each side in
+>    turn: both see the other's camera, also after the camera is switched
+>    off and on during the call. The log of each phone has the
+>    `Call video codec: VP8 both ways` line and the `Call video:` lines of
+>    the first camera frame and the first remote frame on the screen.
+> 8. A GIF from the gallery as the profile photo keeps moving on both
+>    phones; a HEIC photo (an iPhone's, copied over) is taken as the profile
+>    photo and in a post.
+> 9. Autofill (Android 9 and later): *Hasła* → menu → *Wypełnianie w innych
+>    aplikacjach*, pick Zen in Android's settings; a login page in a browser and a login form of
+>    an app offer *Odblokuj Zen*; after the app password and a pick, the
+>    login and the password are filled; closing the picker without a pick
+>    fills nothing; with Zen locked the suggestion still asks for the
+>    unlock first.
+> 10. Lock a phone with friends' statuses known, wait 20 minutes, open Zen:
+>     every friend's status is there at once, and the log has a
+>     `presence-kept` line.
+> 11. After the update over the previous version, *Skrzynki offline* shows a
+>     "Czeka na doręczenie" of a few at most once friends were online, and
+>     on a phone that had a pile waiting the log of the first start has a
+>     `Relay tidy:` line saying how much went.
+> 12. Leave a locked phone through a night with nobody around and save its
+>     log in the morning: the `beat` lines come about 6 times an hour,
+>     whether or not the phone is shown nearby.
+> 13. Copy a key or a password, leave Zen and lock it (or wait a minute in
+>     the background): the clipboard is empty when another app pastes.
+> 14. If two spare phones are available: an account whose close friends
+>     are the two test phones loses its phone (uninstall Zen), comes back
+>     on a spare phone: both friends tap *Pomóż*, and after 24 hours the
+>     account password takes the account over; its friends, chats,
+>     passwords and notes come back from the copy the friends keep.
+>
 > Only when all of it works, edit the release, untick "pre-release" and tick
 > "Set as the latest release". If something fails, delete the pre-release and
 > its tag, fix it and release again.
@@ -189,7 +223,8 @@ key, so every release must be signed with this key.
    fails the test.
 2. `git switch -c release-1.12.0` (from a clean, up-to-date `main`), then
    `dart run tool/release.dart prepare 1.12.0`. It runs
-   `dart format`, `flutter analyze`, `flutter test` and `go test`
+   `dart format`, `flutter analyze`, `flutter test`, `go test`, the tests
+   of the CI checks (`tool/ci/test_*.py`) and the link check
    (`--skip-checks` skips them when CI already ran them on this commit),
    checks that `release.yml` makes every file the app updates from under
    exactly the names the app asks for (`tool/release_contract.dart`; also
@@ -583,7 +618,7 @@ SideStore does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Ma
   `release.dart prepare` refuses while native pins are missing
   (`--allow-unpinned-native` only for a test release). Tests:
   `tool/ci/test_check_webrtc_sdk.py`.
-- **Go.** `go.mod` has a `toolchain` line (go1.27.3, the latest 1.27
+- **Go.** `go.mod` has a `toolchain` line (go1.27.4, the latest 1.27
   security fix); `actions/setup-go` with `go-version-file` takes it, and
   `ios.yml` reads it too. Dependabot does not raise `toolchain`: bump it by
   hand with every Go 1.27.x release. The CI job `govulncheck`

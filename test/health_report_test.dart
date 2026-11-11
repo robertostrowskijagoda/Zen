@@ -221,6 +221,18 @@ void main() {
       );
     });
 
+    test('a backup of friends that could not be saved is a warning, and '
+        'only then a line', () {
+      expect(buildHealthReport(_healthy()).item('contacts'), isNull);
+      const HealthInputs failing = HealthInputs(
+        net: HealthNetState.active,
+        contactsBackupFailing: true,
+      );
+      final HealthItem? line = buildHealthReport(failing).item('contacts');
+      expect(line?.level, HealthLevel.warn);
+      expect(line?.detail, contains('kopii listy znajomych'));
+    });
+
     test('df output is read', () {
       final StorageInfo? s = parseDfOutput(
         'Filesystem 1K-blocks Used Available Use% Mounted on\n'

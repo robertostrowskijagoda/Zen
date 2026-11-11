@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/security/app_security_gate.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
@@ -16,6 +17,7 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 /// device is erased) and its throttling of password attempts.
 void main() {
   late MemorySecurityCredentialsStore store;
+  late MemorySecurityCredentialsStore deviceStore;
   late LocalAppSecurityService security;
   late DateTime now;
   late int wipes;
@@ -41,6 +43,13 @@ void main() {
             UnlockThrottle(
               store,
               monotonic: () => now.difference(DateTime.utc(2026)),
+            ),
+          ),
+          otherAccountThrottleProvider.overrideWithValue(
+            UnlockThrottle.otherAccounts(
+              store: deviceStore,
+              monotonic: () => now.difference(DateTime.utc(2026)),
+              wallClock: () => now,
             ),
           ),
           // The real wipe needs the whole runtime; this one only erases the
@@ -72,6 +81,7 @@ void main() {
     wipeGate = Completer<void>();
     now = DateTime.utc(2026, 10, 21, 12);
     store = MemorySecurityCredentialsStore();
+    deviceStore = MemorySecurityCredentialsStore();
     security = LocalAppSecurityService(
       credentialsStore: store,
       passwordIterations: 10,
@@ -115,7 +125,10 @@ void main() {
     expect(find.textContaining('z drugiego urządzenia'), findsOneWidget);
     expect(find.textContaining('kopii całego konta'), findsOneWidget);
     expect(find.textContaining('z kopii klucza'), findsOneWidget);
-    expect(find.textContaining('kręgu odzyskiwania'), findsOneWidget);
+    expect(
+      find.textContaining('pomocą bliskich znajomych i hasła konta'),
+      findsOneWidget,
+    );
     expect(find.textContaining('nie da się cofnąć'), findsOneWidget);
     // Nothing here tells whether a panic password exists.
     expect(find.textContaining('panic', findRichText: true), findsNothing);
@@ -247,6 +260,54 @@ void main() {
     await attempt(tester, 'sekret12');
     expect(find.text('aplikacja'), findsOneWidget);
     expect(await store.read(appSecurityUnlockFailuresStorageKey), isNull);
+  });
+
+  testWidgets('a password is counted before it is checked: Zen closed during '
+      'the check leaves the attempt counted', (WidgetTester tester) async {
+    await pumpLocked(tester);
+    final List<String?> duringCheck = <String?>[];
+    // What a start would find, were Zen closed as a derivation starts.
+    debugOnPasswordDerivation = (PasswordCost _) =>
+        store.read(appSecurityUnlockFailuresStorageKey).then(duringCheck.add);
+    addTearDown(() => debugOnPasswordDerivation = null);
+    await attempt(tester, 'zle-haslo');
+    expect(find.text('Nieprawidłowe hasło.'), findsOneWidget);
+    expect(duringCheck, <String?>['1;0', '1;0']);
+
+    duringCheck.clear();
+    await attempt(tester, 'sekret12');
+    expect(find.text('aplikacja'), findsOneWidget);
+    expect(duringCheck, <String?>['2;0', '2;0']);
+    expect(await store.read(appSecurityUnlockFailuresStorageKey), isNull);
+  });
+
+  testWidgets('the lock screen and unlocking give the guesses at another '
+      'account the time Zen ran, so they are forgiven slowly', (
+    WidgetTester tester,
+  ) async {
+    await pumpLocked(tester);
+    final int twoDaysAgo = now
+        .subtract(const Duration(days: 2))
+        .millisecondsSinceEpoch;
+    await deviceStore.write(
+      UnlockThrottle.otherAccountsStorageKey,
+      '6;0;$twoDaysAgo;0',
+    );
+    // A start: the lock screen looks once.
+    await tester.pumpWidget(const SizedBox());
+    await pumpGate(tester);
+    now = now.add(UnlockThrottle.forgivingRunTime);
+    await tester.pump(const Duration(seconds: 1));
+    expect(
+      await deviceStore.read(UnlockThrottle.otherAccountsStorageKey),
+      startsWith('6;'),
+    );
+    await attempt(tester, 'sekret12');
+    expect(find.text('aplikacja'), findsOneWidget);
+    expect(
+      await deviceStore.read(UnlockThrottle.otherAccountsStorageKey),
+      startsWith('5;'),
+    );
   });
 
   testWidgets('during a wait the way out is still there', (

@@ -247,8 +247,8 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     startSuspended: !inService && !kIsWeb && Platform.isAndroid,
     createIdentity: !inService,
   );
-  // Device keys proven by hybrid-signed hellos and named by friends'
-  // signed device records are pinned in the bridge (pq_session.go); a
+  // Device keys proven by hybrid-signed hellos are pinned in the bridge
+  // (pq_session.go); those friends' device records name are only hints. A
   // signed key that contradicts the session, or a pin, is warned about in
   // the chat with that address.
   final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
@@ -269,6 +269,9 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   node
     ..onSessionKeys = (Map<String, String> keys, {bool force = false}) {
       runtime.vouchSessionKeys(keys, force: force);
+    }
+    ..onSessionKeyHints = (String account, Map<String, String> keys) {
+      runtime.replaceSessionKeyHints(sessionKeySourceOfAccount(account), keys);
     }
     ..onDeviceKeyMismatch = warnKeyMismatch
     // A friend's device its owner unlinked (lost or stolen): said in the
@@ -492,6 +495,51 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       }
     },
   );
+  // The bridge is told who is known: friends, and the devices of this
+  // account and friends' that proved themselves. Only they use the known
+  // peers' KEM budget and keep their peer entries and pins; a stranger is
+  // a stranger whatever frames went back and forth. What a removed
+  // friend's word named (its list, its device records) goes with it.
+  void syncKnownPeers() {
+    if (!ref.mounted) {
+      return;
+    }
+    final List<String> friends = acceptedFriendAddresses(
+      ref.read(socialHubControllerProvider),
+    );
+    runtime.setKnownPeers(<String>[
+      for (final String f in friends)
+        if (!node.isUnlinkedAddress(f)) f,
+      for (final AccountDevice d in node.linkableDevices)
+        if (d.address case final String address) address,
+    ]);
+    if (!node.isReady) {
+      // Friends' accounts are not read yet: nothing their records named
+      // is handed over before, nothing is taken back either.
+      return;
+    }
+    runtime.keepSessionKeyHintsOf(<String>{
+      for (final String f in friends) PeerShareCodec.normalizeAddress(f),
+      for (final String f in friends)
+        if (node.accountOf(f) case final String account)
+          sessionKeySourceOfAccount(account),
+      sessionKeySourceOfAccount(node.account),
+    });
+  }
+
+  ref.listen<String>(
+    socialHubControllerProvider.select(
+      (SocialHubState state) =>
+          (acceptedFriendAddresses(state)..sort()).join(','),
+    ),
+    (String? previous, String next) => syncKnownPeers(),
+    fireImmediately: true,
+  );
+  final StreamSubscription<void> knownDevicesSub = node.devicesChanged.listen(
+    (_) => syncKnownPeers(),
+  );
+  ref.onDispose(() => unawaited(knownDevicesSub.cancel()));
+  unawaited(node.settled.then((_) => syncKnownPeers()));
   // The profile you edit is mirrored into the public profile space,
   // with your mesh address only once something public of yours can bring
   // followers (friends know it anyway).

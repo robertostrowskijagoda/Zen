@@ -11,6 +11,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
+import 'package:zen/src/features/media/platform_picture.dart';
 import 'package:zen/src/features/social/mentions.dart';
 
 // Pictures in comments (under posts and films): photos and GIFs, up to
@@ -34,12 +35,17 @@ const int kCommentGifSide = 480;
 /// One picture ready to go into a comment.
 typedef CommentPicture = ({Uint8List bytes, String mime});
 
-/// [bytes] (a picked, pasted or inserted picture) made ready for a
+/// [picked] (a picked, pasted or inserted picture) made ready for a
 /// comment: a GIF stays an animated GIF, without its metadata and within
-/// [kMaxCommentImageBytes] (made smaller when it has to be); anything else
-/// becomes a fresh JPEG ([sanitizePhoto]). Throws [ArgumentError] with the
-/// reason to show when it cannot go.
-Future<CommentPicture> commentPicture(Uint8List bytes) async {
+/// [kMaxCommentImageBytes] (made smaller when it has to be), and so does an
+/// animated WebP or PNG ([gifIfAnimated]); anything else becomes a fresh
+/// JPEG ([sanitizePhoto]), a HEIC photo after the phone's own decoder read
+/// it ([readablePicture]). Throws [ArgumentError] with the reason to show
+/// when it cannot go.
+Future<CommentPicture> commentPicture(Uint8List picked) async {
+  final Uint8List bytes = await gifIfAnimated(
+    await readablePicture(picked) ?? picked,
+  );
   if (looksLikeGif(bytes)) {
     final PickedGif gif = preparePickedGif(bytes);
     if (gif.status == PickedGifStatus.ready &&

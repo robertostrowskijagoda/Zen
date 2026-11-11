@@ -3,13 +3,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/health/health_report.dart';
+import 'package:zen/src/features/ledger/contacts_backup.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -126,6 +127,7 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
         clockSkew: clock.estimate,
         clockPeers: clock.peerCount,
         storage: _storage,
+        contactsBackupFailing: ContactsBackupNotice.instance.failing,
       ),
     );
   }
@@ -182,7 +184,10 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
         child: SafeArea(
           top: false,
           child: ListenableBuilder(
-            listenable: clock,
+            listenable: Listenable.merge(<Listenable>[
+              clock,
+              ContactsBackupNotice.instance,
+            ]),
             builder: (BuildContext context, Widget? _) {
               final HealthReport report = _report(shell, clock);
               return ListView(
@@ -200,14 +205,21 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
                   OutlinedButton.icon(
                     key: const Key('health-copy'),
                     onPressed: () async {
-                      await Clipboard.setData(
-                        ClipboardData(text: _asText(report)),
-                      );
+                      // It tells the state of this device (neighbours,
+                      // service, battery): it leaves the clipboard after a
+                      // minute and stays out of its history.
+                      final bool copied = await copyWithExpiry(_asText(report));
                       if (!context.mounted) {
                         return;
                       }
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(t('Raport skopiowany.'))),
+                        SnackBar(
+                          content: Text(
+                            copied
+                                ? t('Raport skopiowany.')
+                                : t('Nie udało się. Spróbuj jeszcze raz.'),
+                          ),
+                        ),
                       );
                     },
                     icon: const Icon(Icons.copy_rounded, size: 18),

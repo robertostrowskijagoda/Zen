@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,6 +27,7 @@ import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -287,6 +289,106 @@ void main() {
       kAndroidBackgroundProbeWait,
       lessThan(kAndroidBackgroundHeartbeatInterval),
     );
+  });
+
+  test('beside a healthy app with the screen off the watchdog wakes the '
+      'phone once a minute and for no longer than the answer takes', () {
+    fakeAsync((FakeAsync async) {
+      final _SleepyPhone phone = _SleepyPhone(async);
+      final _WatchdogRun run = _runParkedService(
+        async,
+        phone,
+        length: const Duration(hours: 1),
+        answerAfter: (int wake, Duration at) =>
+            const Duration(milliseconds: 100),
+      );
+      expect(run.opened, isEmpty);
+      expect(phone.wakes, 60);
+      expect(phone.awakeFor, const Duration(seconds: 6));
+    });
+  });
+
+  // With the screen off the phone is awake for a watchdog wake's probe
+  // only, and the app's silence is counted on a clock that stands still
+  // in between: by the timeout alone a hung app was taken over only once
+  // the wakes added up to 20 s, on the seventh wake, seven minutes without
+  // messages or calls.
+  test('beside an app that hangs with the screen off the service takes the '
+      'node over on the second watchdog wake after the hang', () {
+    for (final Duration offset in <Duration>[
+      const Duration(seconds: 1),
+      const Duration(seconds: 30),
+      const Duration(seconds: 59),
+    ]) {
+      fakeAsync((FakeAsync async) {
+        final _SleepyPhone phone = _SleepyPhone(async);
+        final Duration hang = const Duration(minutes: 3) + offset;
+        final _WatchdogRun run = _runParkedService(
+          async,
+          phone,
+          length: const Duration(hours: 1),
+          answerAfter: (int wake, Duration at) =>
+              at < hang ? const Duration(milliseconds: 100) : null,
+        );
+        expect(run.opened, hasLength(1), reason: 'hung $offset after a wake');
+        final Duration took = run.opened.single - hang;
+        // Two watchdog wakes a period apart, the second one's probe wait,
+        // and a moment for the node to come up.
+        expect(
+          took,
+          lessThanOrEqualTo(
+            kAndroidStandbyWatchdogEvery * 2 +
+                kAndroidBackgroundProbeWait +
+                const Duration(seconds: 1),
+          ),
+          reason: 'hung $offset after a wake',
+        );
+        expect(
+          phone.wakeStarts.where((Duration at) => at > hang),
+          hasLength(kAndroidWatchdogUnansweredWakes),
+          reason: 'two probes unanswered, and no watchdog after the takeover',
+        );
+        expect(
+          phone.awakeSince(hang),
+          lessThan(kAndroidBackgroundHeartbeatTimeout),
+          reason: 'the phone slept between the wakes',
+        );
+        expect(
+          phone.wakeEnds.last,
+          greaterThanOrEqualTo(run.opened.single),
+          reason: 'the wake that took over held the phone for the node',
+        );
+      });
+    }
+  });
+
+  test('an app that answers a watchdog probe late, or misses one now and '
+      'then, keeps its node', () {
+    final Map<String, Duration? Function(int wake, Duration at)> apps =
+        <String, Duration? Function(int wake, Duration at)>{
+          // Busy through one wake and nearly all of the next.
+          'late once': (int wake, Duration at) => switch (wake) {
+            3 => null,
+            4 => const Duration(milliseconds: 2900),
+            _ => const Duration(milliseconds: 100),
+          },
+          'every other wake': (int wake, Duration at) =>
+              wake.isOdd ? null : const Duration(milliseconds: 100),
+        };
+    for (final MapEntry<String, Duration? Function(int wake, Duration at)> app
+        in apps.entries) {
+      fakeAsync((FakeAsync async) {
+        final _SleepyPhone phone = _SleepyPhone(async);
+        final _WatchdogRun run = _runParkedService(
+          async,
+          phone,
+          length: const Duration(hours: 1),
+          answerAfter: app.value,
+        );
+        expect(run.opened, isEmpty, reason: app.key);
+        expect(phone.wakes, 60, reason: app.key);
+      });
+    }
   });
 
   test('the service hears its repeat event only while parked beside the '
@@ -1417,6 +1519,240 @@ final class _FakeBackgroundVault implements BackgroundVault {
       await deliver(record);
     }
     return kept.length;
+  }
+}
+
+/// An Android phone with the screen off, on a virtual clock: it sleeps but
+/// for its alarms, and an alarm holds it awake until its work is done
+/// (never past the alarm's hold). [monotonic] is the clock Android counts
+/// the app's silence on: it moves only while the phone is awake.
+final class _SleepyPhone implements ZenWakePlatform {
+  _SleepyPhone(this._async);
+
+  final FakeAsync _async;
+
+  /// Called right after each alarm's work started: the app answers then.
+  void Function(int wake, Duration at)? onWake;
+
+  /// Alarms that woke the phone.
+  int wakes = 0;
+
+  /// When each wake started and ended (the phone slept again).
+  final List<Duration> wakeStarts = <Duration>[];
+  final List<Duration> wakeEnds = <Duration>[];
+
+  /// How long the phone was awake after [at] (wall clock).
+  Duration awakeSince(Duration at) {
+    Duration awake = Duration.zero;
+    for (int i = 0; i < wakeStarts.length; i++) {
+      final Duration end = i < wakeEnds.length ? wakeEnds[i] : _async.elapsed;
+      final Duration start = wakeStarts[i] > at ? wakeStarts[i] : at;
+      if (end > start) {
+        awake += end - start;
+      }
+    }
+    return awake;
+  }
+
+  int _holds = 0;
+  Duration _awakeBefore = Duration.zero;
+  Duration? _awakeSince;
+
+  /// How long the phone has been awake in all.
+  Duration get awakeFor =>
+      _awakeBefore +
+      (_awakeSince == null ? Duration.zero : _async.elapsed - _awakeSince!);
+
+  Duration get monotonic => awakeFor;
+
+  @override
+  WakeTimer after(
+    String name,
+    Duration delay,
+    FutureOr<void> Function() fire, {
+    required Duration hold,
+    required bool exact,
+    bool whileIdle = true,
+  }) {
+    final Timer alarm = Timer(delay, () {
+      wakes += 1;
+      if (_holds++ == 0) {
+        _awakeSince = _async.elapsed;
+        wakeStarts.add(_async.elapsed);
+      }
+      bool released = false;
+      late final Timer limit;
+      void release() {
+        if (released) {
+          return;
+        }
+        released = true;
+        limit.cancel();
+        if (--_holds == 0) {
+          _awakeBefore += _async.elapsed - _awakeSince!;
+          _awakeSince = null;
+          wakeEnds.add(_async.elapsed);
+        }
+      }
+
+      limit = Timer(hold, release);
+      final FutureOr<void> work = fire();
+      if (work is Future<void>) {
+        unawaited(work.whenComplete(release));
+      }
+      onWake?.call(wakes, _async.elapsed);
+    });
+    return _PhoneAlarm(alarm);
+  }
+
+  @override
+  Future<void> hold(String tag, Duration duration) async {}
+
+  @override
+  Future<void> release(String tag, {Duration after = Duration.zero}) async {}
+
+  @override
+  Future<void> holdForCall(bool on) async {}
+
+  @override
+  Stream<void> get appGone => const Stream<void>.empty();
+}
+
+/// A stopwatch on [_SleepyPhone.monotonic]: it stands still while the
+/// phone sleeps, like Android's monotonic clock.
+final class _PhoneStopwatch implements Stopwatch {
+  _PhoneStopwatch(this._phone);
+
+  final _SleepyPhone _phone;
+  Duration _before = Duration.zero;
+  Duration? _startedAt;
+
+  @override
+  int get frequency => 1000000;
+
+  @override
+  bool get isRunning => _startedAt != null;
+
+  @override
+  void start() {
+    _startedAt ??= _phone.monotonic;
+  }
+
+  @override
+  void stop() {
+    final Duration? at = _startedAt;
+    if (at != null) {
+      _before += _phone.monotonic - at;
+      _startedAt = null;
+    }
+  }
+
+  @override
+  void reset() {
+    _before = Duration.zero;
+    if (_startedAt != null) {
+      _startedAt = _phone.monotonic;
+    }
+  }
+
+  @override
+  Duration get elapsed =>
+      _before +
+      (_startedAt == null ? Duration.zero : _phone.monotonic - _startedAt!);
+
+  @override
+  int get elapsedTicks => elapsed.inMicroseconds;
+
+  @override
+  int get elapsedMicroseconds => elapsed.inMicroseconds;
+
+  @override
+  int get elapsedMilliseconds => elapsed.inMilliseconds;
+}
+
+final class _PhoneAlarm implements WakeTimer {
+  _PhoneAlarm(this._timer);
+
+  final Timer _timer;
+
+  @override
+  bool get isActive => _timer.isActive;
+
+  @override
+  void cancel() => _timer.cancel();
+}
+
+/// What the parked service did beside the app.
+final class _WatchdogRun {
+  /// When the service opened a node of its own (took the node over), on
+  /// the wall clock and on the phone's monotonic one.
+  final List<Duration> opened = <Duration>[];
+  final List<Duration> openedAwake = <Duration>[];
+}
+
+/// The service parked beside an app that is off screen, on [phone], for
+/// [length]: on each watchdog wake the app answers after [answerAfter]
+/// (`null`: not on this wake). The service's repeat event, every 5 s of
+/// awake time, is left out: it looks only once the app has been silent
+/// for [kAndroidBackgroundHeartbeatTimeout] of awake time, which these
+/// short wakes do not reach before the watchdog decides.
+_WatchdogRun _runParkedService(
+  FakeAsync async,
+  _SleepyPhone phone, {
+  required Duration length,
+  required Duration? Function(int wake, Duration at) answerAfter,
+}) {
+  final int Function() wallBefore = ZenWake.nowMillis;
+  final ZenWakePlatform platformBefore = ZenWake.platform;
+  ZenWake.resetForTest();
+  ZenWake.platform = phone;
+  ZenWake.nowMillis = () =>
+      DateTime(2026, 11, 10).millisecondsSinceEpoch +
+      async.elapsed.inMilliseconds;
+  try {
+    final _WatchdogRun run = _WatchdogRun();
+    final TaskHandler handler = buildAndroidBackgroundTaskHandlerForTesting(
+      notices: MemoryRuntimeSystemNotificationService(),
+      openSession: (AndroidBackgroundBootstrapPayload payload) async {
+        // A node takes a moment to come up.
+        await Future<void>.delayed(const Duration(seconds: 1));
+        run.opened.add(async.elapsed);
+        run.openedAwake.add(phone.monotonic);
+        return LockedReceiverSession.empty();
+      },
+      stopwatch: () => _PhoneStopwatch(phone),
+    );
+    void heartbeat() => handler.onReceiveData(<String, Object?>{
+      'type': 'zen.runtime.heartbeat',
+      'onScreen': false,
+      'engine': 1,
+    });
+    phone.onWake = (int wake, Duration at) {
+      final Duration? after = answerAfter(wake, at);
+      if (after != null) {
+        Timer(after, heartbeat);
+      }
+    };
+    final Map<String, dynamic> parked = const AndroidBackgroundBootstrapPayload(
+      settings: AppSettings(),
+    ).withMode(AndroidBackgroundRuntimeMode.standby).toData();
+    // The first payload is the bootstrap; the next one parks the service.
+    handler.onReceiveData(parked);
+    handler.onReceiveData(parked);
+    heartbeat();
+    async.elapse(length);
+    // A wake that started at the end has its probe's wait to finish.
+    async.elapse(kAndroidBackgroundProbeWait);
+    handler.onReceiveData(<String, Object?>{
+      'type': kAndroidBackgroundStopRequestType,
+    });
+    unawaited(handler.onDestroy(DateTime(2026, 11, 10), false));
+    async.flushMicrotasks();
+    return run;
+  } finally {
+    ZenWake.resetForTest();
+    ZenWake.platform = platformBefore;
+    ZenWake.nowMillis = wallBefore;
   }
 }
 

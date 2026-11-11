@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
@@ -12,6 +14,11 @@ final String keyMid = 'b2' * 32;
 final String keyFar = 'f1' * 32;
 
 final class _Host implements MeetHost {
+  _Host({this.dropped = const <String>{}});
+
+  /// Friends removed since.
+  final Set<String> dropped;
+
   final List<(String, Map<String, dynamic>)> sent =
       <(String, Map<String, dynamic>)>[];
 
@@ -26,7 +33,7 @@ final class _Host implements MeetHost {
   List<String> closeFriends() => <String>[close];
 
   @override
-  bool isFriend(String a) => a == mid || a == close;
+  bool isFriend(String a) => (a == mid || a == close) && !dropped.contains(a);
 
   @override
   bool isSelf(String a) => false;
@@ -42,53 +49,52 @@ final class _Host implements MeetHost {
 }
 
 void main() {
-  test(
-    'friend lists carry friends\' device keys; received ones are pinned',
-    () async {
-      final _Host host = _Host();
-      final Map<String, String> vouched = <String, String>{};
-      final MeetService service =
-          MeetService(
-              host: host,
-              store: MeetStore(MemoryLedgerDisk()),
-              now: () => 1,
-            )
-            ..friendNames = (() => <String, String>{
-              mid: 'Marek',
-              close: 'Celina',
-            })
-            ..sessionKeyOf = ((String a) => a == mid ? keyMid : null)
-            ..onVouchedKeys = vouched.addAll;
+  test('friend lists carry friends\' device keys; received ones are handed '
+      'over as hints from that friend', () async {
+    final _Host host = _Host();
+    final Map<String, String> vouched = <String, String>{};
+    final MeetService service =
+        MeetService(
+            host: host,
+            store: MeetStore(MemoryLedgerDisk()),
+            now: () => 1,
+          )
+          ..friendNames = (() => <String, String>{
+            mid: 'Marek',
+            close: 'Celina',
+          })
+          ..sessionKeyOf = ((String a) => a == mid ? keyMid : null)
+          ..onVouchedKeys = ((String _, Map<String, String> k) =>
+              vouched.addAll(k));
 
-      await service.shareFriendList(service.friendNames!(), force: true);
-      final Map<String, dynamic> toClose = host.sent
-          .lastWhere(((String, Map<String, dynamic>) s) => s.$1 == close)
-          .$2;
-      final List<Object?> list = toClose['l'] as List<Object?>;
-      expect(
-        list,
-        contains(equals(<String, String>{'a': mid, 'n': 'Marek', 'k': keyMid})),
-      );
+    await service.shareFriendList(service.friendNames!(), force: true);
+    final Map<String, dynamic> toClose = host.sent
+        .lastWhere(((String, Map<String, dynamic>) s) => s.$1 == close)
+        .$2;
+    final List<Object?> list = toClose['l'] as List<Object?>;
+    expect(
+      list,
+      contains(equals(<String, String>{'a': mid, 'n': 'Marek', 'k': keyMid})),
+    );
 
-      final String far = PeerShareCodec.normalizeAddress('200::f1');
-      await service.handle(
-        SignalTransportFrame(
-          from: close,
-          payload: <String, dynamic>{
-            'type': MeetTypes.friendList,
-            'l': <Object?>[
-              <String, Object?>{'a': far, 'n': 'Fela', 'k': keyFar},
-              <String, Object?>{'a': '200::f2', 'n': 'X', 'k': 'nonsense'},
-              <String, Object?>{'a': '200::f3', 'n': 'Y'},
-            ],
-            'd': 'x',
-          },
-          receivedAtMillis: 2,
-        ),
-      );
-      expect(vouched, <String, String>{far: keyFar});
-    },
-  );
+    final String far = PeerShareCodec.normalizeAddress('200::f1');
+    await service.handle(
+      SignalTransportFrame(
+        from: close,
+        payload: <String, dynamic>{
+          'type': MeetTypes.friendList,
+          'l': <Object?>[
+            <String, Object?>{'a': far, 'n': 'Fela', 'k': keyFar},
+            <String, Object?>{'a': '200::f2', 'n': 'X', 'k': 'nonsense'},
+            <String, Object?>{'a': '200::f3', 'n': 'Y'},
+          ],
+          'd': 'x',
+        },
+        receivedAtMillis: 2,
+      ),
+    );
+    expect(vouched, <String, String>{far: keyFar});
+  });
 
   SignalTransportFrame listFrom(
     String from,
@@ -112,7 +118,7 @@ void main() {
       host: _Host(),
       store: MeetStore(MemoryLedgerDisk()),
       now: () => 1,
-    )..onVouchedKeys = vouched.addAll;
+    )..onVouchedKeys = ((String _, Map<String, String> k) => vouched.addAll(k));
     for (int batch = 0; batch < 9; batch++) {
       await service.handle(
         listFrom(
@@ -158,7 +164,7 @@ void main() {
             now: () => 1,
           )
           ..ownDevices = (() => <String>[own])
-          ..onVouchedKeys = ((Map<String, String> k) => calls.add(k));
+          ..onVouchedKeys = ((String _, Map<String, String> k) => calls.add(k));
     await service.handle(
       listFrom(
         close,
@@ -229,7 +235,7 @@ void main() {
       host: _Host(),
       store: MeetStore(MemoryLedgerDisk()),
       now: () => 1,
-    )..onVouchedKeys = vouched.addAll;
+    )..onVouchedKeys = ((String _, Map<String, String> k) => vouched.addAll(k));
     await service.handle(
       listFrom(
         close,
@@ -270,4 +276,79 @@ void main() {
     );
     expect(vouched[far], keyFar);
   });
+
+  test(
+    'what a friend vouched for is kept across restarts: handed over '
+    'again, still its whole share, and forgotten once it is removed',
+    () async {
+      final MemoryLedgerDisk disk = MemoryLedgerDisk();
+      final Map<String, String> first = <String, String>{};
+      await (MeetService(host: _Host(), store: MeetStore(disk), now: () => 1)
+            ..onVouchedKeys = ((String _, Map<String, String> k) =>
+                first.addAll(k)))
+          .handle(
+            listFrom(
+              close,
+              <Map<String, Object?>>[
+                for (int i = 0; i < kMaxFriendListEntries; i++)
+                  <String, Object?>{
+                    'a': '201:1::${i.toRadixString(16)}',
+                    'n': 'x',
+                    'k': 'ab' * 32,
+                  },
+              ],
+              'a',
+              2,
+            ),
+          );
+      expect(first, hasLength(kMaxFriendListEntries));
+
+      // The app starts again: the friend's next list names someone new.
+      final List<(String, Map<String, String>)> again =
+          <(String, Map<String, String>)>[];
+      final String far = PeerShareCodec.normalizeAddress('200::f1');
+      await (MeetService(host: _Host(), store: MeetStore(disk), now: () => 1)
+            ..onVouchedKeys = ((String f, Map<String, String> k) =>
+                again.add((f, Map<String, String>.of(k)))))
+          .handle(
+            listFrom(
+              close,
+              <Map<String, Object?>>[
+                <String, Object?>{'a': far, 'n': 'Fela', 'k': keyFar},
+              ],
+              'b',
+              3,
+            ),
+          );
+      expect(again, hasLength(1), reason: 'handed over again, nobody added');
+      expect(again.single.$1, close);
+      expect(again.single.$2, hasLength(kMaxFriendListEntries));
+      expect(again.single.$2, isNot(contains(far)));
+
+      // Removed: nothing of it is handed over again, and it is forgotten.
+      final List<String> fromWhom = <String>[];
+      await (MeetService(
+              host: _Host(dropped: <String>{close}),
+              store: MeetStore(disk),
+              now: () => 1,
+            )
+            ..onVouchedKeys = ((String f, Map<String, String> _) =>
+                fromWhom.add(f)))
+          .handle(
+            listFrom(
+              mid,
+              <Map<String, Object?>>[
+                <String, Object?>{'a': far, 'n': 'Fela', 'k': keyFar},
+              ],
+              'c',
+              4,
+            ),
+          );
+      expect(fromWhom, <String>[mid]);
+      final Object? kept = jsonDecode(
+        utf8.decode((await disk.read(MeetService.vouchedKey))!),
+      );
+      expect((kept! as Map<String, Object?>).keys, <String>[mid]);
+    },
+  );
 }

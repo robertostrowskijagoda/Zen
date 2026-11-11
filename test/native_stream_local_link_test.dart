@@ -48,17 +48,22 @@ final class _Api implements LocalLinkNodeApi {
   void close(String id) => closed.add(id);
 }
 
-final class _Radio implements NativeLinkRadio {
+final class _Radio implements NativeLinkRadio, IncomingStreamHint {
   bool permitted = true;
+  int expected = 0;
   bool enabled = true;
   bool paired = false;
   bool connects = true;
+  Completer<bool>? connectGate;
   List<String> pairedList = const <String>[];
   final List<String> calls = <String>[];
   final StreamController<Map<Object?, Object?>> _events =
       StreamController<Map<Object?, Object?>>.broadcast();
 
   void emit(Map<Object?, Object?> event) => _events.add(event);
+
+  @override
+  void expectIncomingStream() => expected++;
 
   @override
   Future<Map<String, Object?>> state() async => <String, Object?>{
@@ -104,7 +109,7 @@ final class _Radio implements NativeLinkRadio {
       'connect $device psm=$psm classic=$classic ${endpoint.id} '
       'advert=$advert',
     );
-    return connects;
+    return connectGate?.future ?? connects;
   }
 
   @override
@@ -305,6 +310,38 @@ void main() {
       expect(radio.calls.last, startsWith('connect aa'));
     });
 
+    test('only a friend not linked yet makes the radio look quickly', () async {
+      api.friends.add('9999');
+      await link.start(() => api, foreground: true);
+      // A stranger's device, seen cycle after cycle.
+      for (int i = 0; i < 5; i++) {
+        await link.onSeen(device: 'zz', advert: '7777', psm: 0x81);
+      }
+      expect(radio.expected, 0);
+      // A friend's, who is to dial this device (its advert is the lower).
+      api.friends.add('1000');
+      await link.onSeen(device: 'aa', advert: '1000', psm: 0x81);
+      expect(radio.expected, 1);
+      // The same friend once linked: the node no longer matches its advert.
+      api.friends.remove('1000');
+      await link.onSeen(device: 'aa', advert: '1000', psm: 0x81);
+      expect(radio.expected, 1);
+    });
+
+    test('a friend this device is dialling needs no hint on top', () async {
+      api.friends.add('9999');
+      final Completer<bool> connecting = Completer<bool>();
+      radio.connectGate = connecting;
+      await link.start(() => api, foreground: true);
+      unawaited(link.onSeen(device: 'aa', advert: '9999', psm: 0x81));
+      await Future<void>.delayed(Duration.zero);
+      expect(radio.expected, 1, reason: 'before the dial began');
+      await link.onSeen(device: 'aa', advert: '9999', psm: 0x81);
+      expect(radio.expected, 1, reason: 'the dial keeps the radio quick');
+      connecting.complete(true);
+      await Future<void>.delayed(Duration.zero);
+    });
+
     test('a device without a channel is not dialled', () async {
       api.friends.add('9999');
       await link.start(() => api, foreground: true);
@@ -455,6 +492,55 @@ void main() {
       expect(events.last, <Object?, Object?>{'type': 'radio', 'on': false});
       await radio.stop();
       expect(go.calls.last, 'YggBtLinkStopJson');
+    });
+
+    test('Zen adverts seen again and again do not keep the bridge asked '
+        'twice a second', () {
+      fakeAsync((FakeAsync async) {
+        final _Go go = _Go()
+          ..answers['YggBtLinkStartJson'] = <String, dynamic>{'channel': 3}
+          ..answers['YggBtLinkPollJson'] = <String, dynamic>{'listening': true};
+        final GoBluetoothRadio radio = GoBluetoothRadio(go: go);
+        final List<Map<Object?, Object?>> events = <Map<Object?, Object?>>[];
+        radio.events.listen(events.add);
+        int polls() =>
+            go.calls.where((String c) => c == 'YggBtLinkPollJson').length;
+        int pollsFor(Duration d) {
+          final int before = polls();
+          async.elapse(d);
+          return polls() - before;
+        }
+
+        radio.start();
+        async.flushMicrotasks();
+        // The quick polls after the start are over.
+        expect(pollsFor(const Duration(seconds: 30)), 60);
+        expect(pollsFor(const Duration(minutes: 1)), 12);
+
+        // A hundred sightings of a device (an hour of 8 s scans in cycles
+        // of 30 s) are reported, and the polls stay as slow as they were.
+        final List<int> data = zenLinkManufacturerData(
+          0x81,
+          List<int>.generate(20, (int i) => i),
+        );
+        for (int i = 0; i < 100; i++) {
+          radio.noteAdvert('AA:BB:CC:DD:EE:FF/public', data);
+        }
+        async.flushMicrotasks();
+        expect(events, hasLength(100));
+        expect(events.first['type'], 'seen');
+        expect(pollsFor(const Duration(minutes: 2)), 24);
+
+        // The links tell a friend not linked yet: quick for a while.
+        radio.expectIncomingStream();
+        expect(pollsFor(const Duration(seconds: 10)), 20);
+        // The rest of the 30 s of quick polls, then slow ones.
+        expect(pollsFor(const Duration(seconds: 30)), inInclusiveRange(40, 43));
+        expect(pollsFor(const Duration(minutes: 1)), 12);
+
+        radio.stop();
+        async.flushMicrotasks();
+      });
     });
 
     test('the bridge is asked twice a second only while a dial waits or '

@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
@@ -222,6 +224,230 @@ String conversationKeyOfSignal(ZenSignal signal) {
       : signal.sender;
 }
 
+/// What a phone knows of people and of the settings when it decides what an
+/// incoming chat message or call makes it do ([incomingAlertOf]). The
+/// unlocked app answers from its own state and settings, the locked
+/// receiver from the background capability and the [LockedNoticeKit]
+/// ([LockedNoticeKit.alertFacts]); both decide with the same functions
+/// below, so a locked phone rings, shows the call card or tells of a
+/// message exactly when the app would. Whatever one side does not know
+/// counts as "no", which is the quiet outcome.
+abstract interface class AlertFacts {
+  /// Whether [address] is a friend (one of a friend's devices among them).
+  bool isFriend(String address);
+
+  /// Whether [address] speaks in the group [groupId] this device joined: a
+  /// member, or the one who made it. `false` for a group it only was
+  /// invited to, one it is not in, and whenever it is not known.
+  bool speaksIn(String groupId, String address);
+
+  /// This device's own address (`''` when not known).
+  String get self;
+
+  /// Whether the news of [kind] is switched off in the settings.
+  bool mutes(NoticeKind kind);
+
+  /// Whether the conversation [key] ([conversationKeyOfSignal]) is muted at
+  /// [nowMillis] ("Wycisz…").
+  bool chatMuted(String key, int nowMillis);
+
+  /// Whether the group chat [groupKey] tells of every message, not only of
+  /// mentions of this person.
+  bool groupNotifiesAll(String groupKey);
+}
+
+/// What an incoming frame makes a phone do, the same for the unlocked app
+/// and the locked receiver.
+enum IncomingAlert {
+  /// Nothing to see or hear (it may still be kept for the app).
+  nothing,
+
+  /// A notification.
+  notice,
+
+  /// The phone rings and shows the call card (and the call's notice).
+  ring,
+}
+
+/// Whether [signal] is a call that may ring here, from someone who may
+/// call: a call from a friend, a group call from someone who speaks in that
+/// joined group. Anything else (a group member who is no friend calling
+/// alone, a group call for a group not joined) never rings.
+bool callInviteAdmitted(ZenSignal signal, AlertFacts facts) {
+  switch (signal.type) {
+    case ZenSignalType.callInvite:
+      return facts.isFriend(signal.sender);
+    case ZenSignalType.groupCallInvite:
+      final String groupId = signal.groupId ?? '';
+      return groupId.isNotEmpty && facts.speaksIn(groupId, signal.sender);
+    default:
+      return false;
+  }
+}
+
+/// Whether the call [signal] rings and shows its card: admitted
+/// ([callInviteAdmitted]) and "Połączenia" not switched off (then neither
+/// the ring nor the card, while Zen is not on the screen).
+bool callRings(ZenSignal signal, AlertFacts facts) =>
+    callInviteAdmitted(signal, facts) && !facts.mutes(NoticeKind.call);
+
+/// Whether [signal] is a caller's word that its ring ended unanswered
+/// ([kCallMissedType]), read as the end of that call.
+bool isMissedCallNotice(ZenSignal signal) =>
+    signal.type == ZenSignalType.callEnd &&
+    signal.chatExtras?[kMissedCallMark] == true;
+
+/// Whether a call from [caller] that nobody answered here leaves a notice:
+/// from a friend (only friends may ring), and "Połączenia" not switched off.
+/// The chat notes the missed call either way.
+bool missedCallTold(String caller, AlertFacts facts) =>
+    facts.isFriend(caller) && !facts.mutes(NoticeKind.call);
+
+/// How long the limit on mention notices from one person counts back.
+const Duration kMentionAlertWindow = Duration(minutes: 10);
+
+/// Group messages of one sender per [kMentionAlertWindow] that may say they
+/// mention this person; past it they notify like any other message.
+const int kMaxMentionAlertsPerSender = 5;
+
+/// Whether the group message [signal] mentions this device and comes from
+/// someone who speaks in that group (anyone else mentions nobody), before
+/// the limit per sender ([MentionAlerts]).
+bool mentionsThisDevice(ZenSignal signal, AlertFacts facts) {
+  if (signal.type != ZenSignalType.groupMessage) {
+    return false;
+  }
+  final String groupId = signal.groupId ?? '';
+  final String self = facts.self;
+  return groupId.isNotEmpty &&
+      self.isNotEmpty &&
+      !PeerShareCodec.addressesEqual(signal.sender, self) &&
+      facts.speaksIn(groupId, signal.sender) &&
+      mentionsAnyOf(
+        signal.content ?? '',
+        signalMentions(signal),
+        addresses: <String>[self],
+      );
+}
+
+/// The mention notices each sender recently got ([kMaxMentionAlertsPerSender]
+/// per [kMentionAlertWindow], counted by the sender's identity, so one
+/// person's many addresses share it). One per app and one per run of the
+/// locked receiver.
+final class MentionAlerts {
+  final Map<String, List<int>> _times = <String, List<int>>{};
+
+  /// The most senders remembered.
+  static const int maxSenders = 4096;
+
+  /// Whether [sender] may have one more mention notice at [nowMillis],
+  /// counting it when so.
+  bool take(String sender, int nowMillis) {
+    final int windowStart = nowMillis - kMentionAlertWindow.inMilliseconds;
+    final String key = PeerShareCodec.identityKeyForAddress(sender);
+    final List<int> times = _times[key] ??= <int>[];
+    times.removeWhere((int at) => at < windowStart);
+    if (times.length >= kMaxMentionAlertsPerSender) {
+      return false;
+    }
+    times.add(nowMillis);
+    while (_times.length > maxSenders) {
+      _times.remove(_times.keys.first);
+    }
+    return true;
+  }
+}
+
+/// [signal] marked as mentioning this person ([kMentionsYouKey]) when
+/// [mentionsThisDevice] and its sender is still within [alerts]; anything
+/// else comes back unchanged.
+ZenSignal withMentionOfSelf(
+  ZenSignal signal,
+  AlertFacts facts,
+  MentionAlerts alerts,
+  int nowMillis,
+) {
+  if (!mentionsThisDevice(signal, facts) ||
+      !alerts.take(signal.sender, nowMillis)) {
+    return signal;
+  }
+  return signal.withChatExtras(<String, dynamic>{
+    ...?signal.chatExtras,
+    kMentionsYouKey: true,
+  });
+}
+
+/// Whether the chat message [signal] makes no notice: its conversation is
+/// muted, or it is a group's message in a group that tells only of
+/// mentions. A mention of this person ([withMentionOfSelf]) always comes.
+bool chatIsQuiet(ZenSignal signal, AlertFacts facts, int nowMillis) {
+  if (signal.type != ZenSignalType.message &&
+      signal.type != ZenSignalType.groupMessage) {
+    return false;
+  }
+  if (signalMentionsYou(signal)) {
+    return false;
+  }
+  final String key = conversationKeyOfSignal(signal);
+  if (facts.chatMuted(key, nowMillis)) {
+    return true;
+  }
+  return signal.type == ZenSignalType.groupMessage &&
+      !facts.groupNotifiesAll(key);
+}
+
+/// The switch a chat message's notice answers to: a message, a group
+/// message, or a mention of this person.
+NoticeKind chatNoticeKind(ZenSignal signal) => switch (signal.type) {
+  ZenSignalType.groupMessage when signalMentionsYou(signal) =>
+    NoticeKind.mention,
+  ZenSignalType.groupMessage => NoticeKind.groupMessage,
+  _ => NoticeKind.message,
+};
+
+/// What the call or chat message [signal] (a group message already passed
+/// through [withMentionOfSelf]) makes this phone do; `null` for any other
+/// signal, which these rules do not cover.
+///
+/// * A call: [IncomingAlert.ring] when [callRings], else nothing.
+/// * A missed call told by its caller ([isMissedCallNotice]): a notice when
+///   [missedCallTold], else nothing. Never a ring.
+/// * A message: a notice when it comes from a friend; a group message: when
+///   its sender speaks in that joined group. Either: unless the
+///   conversation is quiet ([chatIsQuiet]) or its switch
+///   ([chatNoticeKind]) is off.
+IncomingAlert? incomingAlertOf(
+  ZenSignal signal,
+  AlertFacts facts, {
+  required int nowMillis,
+}) {
+  switch (signal.type) {
+    case ZenSignalType.callInvite || ZenSignalType.groupCallInvite:
+      return callRings(signal, facts)
+          ? IncomingAlert.ring
+          : IncomingAlert.nothing;
+    case ZenSignalType.callEnd when isMissedCallNotice(signal):
+      return missedCallTold(signal.sender, facts)
+          ? IncomingAlert.notice
+          : IncomingAlert.nothing;
+    case ZenSignalType.message:
+      if (!facts.isFriend(signal.sender)) {
+        return IncomingAlert.nothing;
+      }
+    case ZenSignalType.groupMessage:
+      final String groupId = signal.groupId ?? '';
+      if (groupId.isEmpty || !facts.speaksIn(groupId, signal.sender)) {
+        return IncomingAlert.nothing;
+      }
+    default:
+      return null;
+  }
+  return chatIsQuiet(signal, facts, nowMillis) ||
+          facts.mutes(chatNoticeKind(signal))
+      ? IncomingAlert.nothing
+      : IncomingAlert.notice;
+}
+
 /// What the locked background receiver (Android's service, an iPhone's
 /// background wakes) needs to tell who wrote (and at most
 /// [kLockedNoticePreviewChars] of what) in its notifications: the level
@@ -235,7 +461,10 @@ String conversationKeyOfSignal(ZenSignal signal) {
 /// The kit also carries the notification switches of the settings: the
 /// kinds of news that are off ([muted]) and whether the notification
 /// sounds are on ([sounds]), which the locked receiver applies like the
-/// app does ([applyNoticeSettings]).
+/// app does ([applyNoticeSettings]); and what it takes to decide, as the
+/// app does, whether a group message or a group call counts at all: who
+/// speaks in each joined group ([memberTags]), the muted conversations and
+/// the groups' choice of mentions only ([alertFacts]).
 ///
 /// A conversation the kit has no name for is told about without one: so is
 /// everything from strangers, a group message from anyone the kit does not
@@ -259,6 +488,8 @@ final class LockedNoticeKit {
     this.groupNotifyAll = const <String, bool>{},
     this.groupMentionsOnly = true,
     this.self = '',
+    this.memberTags = const <String>{},
+    this.speakersKnown = true,
   });
 
   /// Conversations muted for a while (`SocialHubState.mutedUntil`).
@@ -271,47 +502,57 @@ final class LockedNoticeKit {
   /// "W grupach tylko wzmianki" (`AppSettings.groupMentionsOnly`).
   final bool groupMentionsOnly;
 
-  /// This device's address: a group message that mentions it is told
-  /// about even in a muted conversation or a mentions-only group.
+  /// This device's address: a group message from someone who speaks in
+  /// that group and mentions it is told about even in a muted conversation
+  /// or a mentions-only group (within [kMaxMentionAlertsPerSender]).
   final String self;
 
-  /// Whether the chat message [payload] from [from] makes no notice while
-  /// locked, as the app decides (`_quietChat`): its conversation is
-  /// muted, or it is a group's message in a group that tells only of
-  /// mentions. A mention of this device always comes.
-  bool quietChat({
-    required String from,
-    required Map<String, dynamic> payload,
-    required int nowMillis,
-  }) {
-    final ZenSignal? signal = zenSignalFromTransportPayload(
-      sender: PeerShareCodec.normalizeAddress(from),
-      payload: payload,
-    );
-    if (signal == null ||
-        (signal.type != ZenSignalType.message &&
-            signal.type != ZenSignalType.groupMessage)) {
-      return false;
-    }
-    final bool inGroup = signal.type == ZenSignalType.groupMessage;
-    if (inGroup &&
-        self.isNotEmpty &&
-        mentionsAnyOf(
-          signal.content ?? '',
-          signalMentions(signal),
-          addresses: <String>[self],
-        )) {
-      return false;
-    }
-    final String key = inGroup
-        ? conversationKeyOfSignal(signal)
-        : PeerShareCodec.normalizeAddress(from);
-    final int? until = mutedChats[key];
-    if (until != null && until > nowMillis) {
-      return true;
-    }
-    return inGroup && !(groupNotifyAll[key] ?? !groupMentionsOnly);
+  /// Who speaks in which joined group, every joined group whatever its
+  /// level: one [memberTag] per group and member (the one who made it and
+  /// each device of a friend among them). A tag recognises a member of a
+  /// group whose id is known; it does not list anyone. What decides whether
+  /// a group message or a group call counts ([AlertFacts.speaksIn]); kits
+  /// written before 1.16.5 have none, and then only [members] count.
+  final Set<String> memberTags;
+
+  /// Whether this kit says who speaks in the joined groups ([memberTags]).
+  /// A kit written before 1.16.5 does not (it lists the members only of
+  /// groups whose level shows the sender): until the app is unlocked once
+  /// and writes a new one, the locked receiver takes the word of the
+  /// background capability instead, as 1.16.4 did (a friend, or a member
+  /// of some joined group), so nobody's group calls and messages go quiet
+  /// over an update.
+  final bool speakersKnown;
+
+  /// The tag of [address] as one who speaks in the group chat [groupKey]
+  /// ([groupConversationKey]).
+  static String memberTag(String groupKey, String address) => crypto.sha256
+      .convert(
+        utf8.encode('$groupKey\n${PeerShareCodec.normalizeAddress(address)}'),
+      )
+      .toString()
+      .substring(0, 32);
+
+  static final RegExp _tagPattern = RegExp(r'^[0-9a-f]{32}$');
+
+  /// Whether [address] speaks in the joined group [groupId], as far as the
+  /// kit knows.
+  bool speaksIn(String groupId, String address) {
+    final String key = groupConversationKey(groupId);
+    return memberTags.contains(memberTag(key, address)) ||
+        (members[key]?.contains(PeerShareCodec.normalizeAddress(address)) ??
+            false);
   }
+
+  /// The facts the locked receiver decides with ([incomingAlertOf]): the
+  /// kit's, and who is a friend ([isFriend], from the background
+  /// capability). [inJoinedGroup] (the capability's word that an address
+  /// is a friend or a member of some joined group) counts only for a kit
+  /// that does not say who speaks where ([speakersKnown]).
+  AlertFacts alertFacts({
+    required bool Function(String address) isFriend,
+    bool Function(String address)? inJoinedGroup,
+  }) => _KitAlertFacts(this, isFriend, inJoinedGroup);
 
   /// The kinds of news with a level of their own
   /// (`AppSettings.noticePrivacy`): a conversation's own level comes first,
@@ -511,6 +752,9 @@ final class LockedNoticeKit {
     if (groupNotifyAll.isNotEmpty) 'ga': groupNotifyAll,
     if (!groupMentionsOnly) 'gm': false,
     if (self.isNotEmpty) 'me': self,
+    // Always there, empty too: its presence says the kit knows who speaks
+    // where ([speakersKnown]).
+    'gt': memberTags.toList(growable: false),
     if (kindLevels.isNotEmpty)
       'k': <String, String>{
         for (final MapEntry<NoticeKind, NotificationPrivacy> e
@@ -620,6 +864,12 @@ final class LockedNoticeKit {
         final String me when fits(me) => me,
         _ => '',
       },
+      memberTags: <String>{
+        if (json['gt'] case final List<dynamic> gt)
+          for (final Object? tag in gt.take(maxEntries))
+            if (tag is String && _tagPattern.hasMatch(tag)) tag,
+      },
+      speakersKnown: json['gt'] is List,
       kindLevels: <NoticeKind, NotificationPrivacy>{
         if (json['k'] case final Map<dynamic, dynamic> k)
           for (final MapEntry<dynamic, dynamic> e in k.entries)
@@ -633,12 +883,53 @@ final class LockedNoticeKit {
   }
 }
 
+/// [LockedNoticeKit.alertFacts]: what the locked receiver knows.
+final class _KitAlertFacts implements AlertFacts {
+  _KitAlertFacts(this._kit, this._isFriend, this._inJoinedGroup);
+
+  final LockedNoticeKit _kit;
+  final bool Function(String address) _isFriend;
+  final bool Function(String address)? _inJoinedGroup;
+
+  @override
+  bool isFriend(String address) =>
+      _isFriend(PeerShareCodec.normalizeAddress(address));
+
+  @override
+  bool speaksIn(String groupId, String address) =>
+      _kit.speaksIn(groupId, address) ||
+      (!_kit.speakersKnown &&
+          (_inJoinedGroup?.call(PeerShareCodec.normalizeAddress(address)) ??
+              false));
+
+  @override
+  String get self => _kit.self;
+
+  @override
+  bool mutes(NoticeKind kind) => _kit.muted.contains(kind);
+
+  @override
+  bool chatMuted(String key, int nowMillis) {
+    final int? until =
+        _kit.mutedChats[key.startsWith('group:')
+            ? key
+            : PeerShareCodec.normalizeAddress(key)];
+    return until != null && until > nowMillis;
+  }
+
+  @override
+  bool groupNotifiesAll(String groupKey) =>
+      _kit.groupNotifyAll[groupKey] ?? !_kit.groupMentionsOnly;
+}
+
 /// The kit for [state] with the global level [privacy]: each friend's and
 /// each joined group's own level, and the names (and a group's members) of
 /// those whose level shows who wrote. A friend's other devices
 /// ([directory]) count as the friend. The names group members gave
 /// themselves stay out: a member who is not a friend is told about without
-/// a name. [muted] and [sounds] are the notification switches.
+/// a name. Who speaks in each joined group goes in as tags, whatever the
+/// group's level ([LockedNoticeKit.memberTags]). [muted] and [sounds] are
+/// the notification switches.
 LockedNoticeKit lockedNoticeKitOf(
   SocialHubState state, {
   required NotificationPrivacy privacy,
@@ -695,11 +986,26 @@ LockedNoticeKit lockedNoticeKitOf(
       }
     }
   }
+  final Set<String> memberTags = <String>{};
   for (final GroupProfile group in state.groups.values) {
     if (group.isInvitePending) {
       continue;
     }
     final String key = groupConversationKey(group.id);
+    // Who speaks in it, whatever its level: whether a group message or a
+    // group call counts at all is decided by that (as the app decides:
+    // [speaksInGroup], so not a creator who left).
+    for (final String speaker in <String>[
+      ...group.memberAddresses,
+      if (speaksInGroup(group, group.createdById)) group.createdById,
+    ]) {
+      for (final String device in devicesOf(speaker)) {
+        if (device.isNotEmpty &&
+            memberTags.length < LockedNoticeKit.maxEntries) {
+          memberTags.add(LockedNoticeKit.memberTag(key, device));
+        }
+      }
+    }
     final NotificationPrivacy? own = state.ownNotificationPrivacyOf(key);
     if (own != null) {
       overrides[key] = own;
@@ -759,6 +1065,7 @@ LockedNoticeKit lockedNoticeKitOf(
     groupNotifyAll: state.groupNotifyAll,
     groupMentionsOnly: groupMentionsOnly,
     self: normal(self),
+    memberTags: memberTags,
   );
 }
 

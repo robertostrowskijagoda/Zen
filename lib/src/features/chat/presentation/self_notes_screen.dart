@@ -1,11 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/chat/self_notes.dart';
 
 /// "Notatki dla siebie": a chat with oneself, the same on every device of
@@ -44,7 +44,17 @@ class _SelfNotesScreenState extends ConsumerState<SelfNotesScreen> {
       return;
     }
     _text.clear();
-    await ref.read(selfNotesServiceProvider).add(text);
+    try {
+      await ref.read(selfNotesServiceProvider).add(text);
+    } on FormatException catch (error) {
+      // Refused (as many notes as are kept): said, and the text stays.
+      if (mounted) {
+        _text.text = text;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
   }
 
   Future<void> _actions(SelfNote note) async {
@@ -71,7 +81,14 @@ class _SelfNotesScreenState extends ConsumerState<SelfNotesScreen> {
       ),
     );
     if (action == 'copy') {
-      await Clipboard.setData(ClipboardData(text: note.text));
+      // Notes to oneself hold what one keeps from others (codes,
+      // passwords): copied like any secret, gone after a minute and kept
+      // out of the clipboard history.
+      if (!await copyWithExpiry(note.text) && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(t('Nie udało się. Spróbuj jeszcze raz.'))),
+        );
+      }
     } else if (action == 'delete') {
       await ref.read(selfNotesServiceProvider).delete(note.id);
     }

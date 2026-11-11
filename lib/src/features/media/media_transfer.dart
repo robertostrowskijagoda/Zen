@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 
 // Files and pictures dropped on Zen or pasted from the clipboard.
@@ -547,12 +548,27 @@ Future<OutgoingAttachment?> prepareOutgoing(TransferItem item) async {
     }
     final MediaKind kind = sniffMediaKind(head);
     if (kind == MediaKind.image && size <= kMaxTransferPhotoBytes) {
+      // An animated WebP or PNG goes as the GIF it is made into, still
+      // playing, not as a still JPEG of its first frame.
+      final Uint8List picture = await whole();
+      final Uint8List moving = await gifIfAnimated(picture);
+      if (looksLikeGif(moving)) {
+        final PickedGif gif = preparePickedGif(moving);
+        if (gif.status == PickedGifStatus.ready) {
+          return OutgoingAttachment(
+            kind: OutgoingKind.gif,
+            fileName: gifFileName(item.name),
+            mimeType: 'image/gif',
+            bytes: gif.bytes,
+          );
+        }
+      }
       try {
         return OutgoingAttachment(
           kind: OutgoingKind.photo,
           fileName: '$stem.jpg',
           mimeType: 'image/jpeg',
-          bytes: await sanitizePhoto(await whole()),
+          bytes: await sanitizePhoto(picture),
         );
       } on ArgumentError {
         // Not a picture this can read: it goes as a file below.

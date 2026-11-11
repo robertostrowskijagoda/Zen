@@ -23,8 +23,8 @@ FROM ubuntu:22.04@sha256:e0f80c829509ef4df9e76bd8944eb7b8ec25cbb379b112a7f9448b2
 
 ARG FLUTTER_VERSION=3.47.9
 ARG FLUTTER_SHA256=25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a
-ARG GO_VERSION=1.27.3
-ARG GO_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+ARG GO_VERSION=1.27.4
+ARG GO_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
 
 LABEL org.opencontainers.image.source="https://github.com/robertostrowskijagoda/Zen" \
       org.opencontainers.image.description="Zen CI: Ubuntu 22.04 with Flutter, Go and the Linux build tools" \

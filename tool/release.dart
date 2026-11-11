@@ -23,7 +23,8 @@
 //       test release), the native builds pin what they download (Gradle's
 //       distributionSha256Sum, ios/ and macos/Podfile.lock,
 //       tool/ci/webrtc_sdk.sha256; --allow-unpinned-native only for a test
-//       release), `flutter analyze`, `flutter test` and `go test`
+//       release), `flutter analyze`, `flutter test`, `go test`, the tests
+//       of the CI checks (tool/ci/test_*.py) and the links of the documents
 //       (unless --skip-checks), the check above, then the version everywhere
 //       (pubspec.yaml, app_version.dart, the Linux AppStream metadata),
 //       CHANGELOG "Unreleased" → "1.12.0 — <date>", a commit and the
@@ -405,6 +406,18 @@ Future<bool> _prepare(List<String> args) async {
   if (_flag(args, 'skip-checks')) {
     stdout.writeln('Skipping analyze and tests: make sure CI is green.');
   } else {
+    // CI's docs job runs the tests of its own checks; one of them keeps the
+    // list of tests that read the documents complete, so a test added
+    // without its line there fails the release's CI and not the work before.
+    final String python = Platform.isWindows ? 'python' : 'python3';
+    final List<String> ciTests =
+        Directory('tool/ci')
+            .listSync()
+            .whereType<File>()
+            .map((File f) => f.uri.pathSegments.last)
+            .where((String n) => n.startsWith('test_') && n.endsWith('.py'))
+            .toList()
+          ..sort();
     for (final (String exe, List<String> a, String? dir)
         in <(String, List<String>, String?)>[
           (
@@ -426,6 +439,9 @@ Future<bool> _prepare(List<String> args) async {
             <String>['test', '-count=1', './...'],
             'native/yggdrasil_bridge',
           ),
+          for (final String name in ciTests)
+            (python, <String>['tool/ci/$name'], null),
+          (python, <String>['tool/ci/check_links.py'], null),
         ]) {
       if ((await _run(exe, a, dir: dir)).exitCode != 0) {
         stderr.writeln('$exe ${a.first} failed: no release.');

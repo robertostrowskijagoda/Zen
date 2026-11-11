@@ -1,11 +1,20 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/domain/friends/peer_presence.dart';
+import 'package:zen/src/features/meet/nearby_crypto.dart';
 import 'package:zen/src/features/meet/nearby_look_policy.dart';
+import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
+import 'package:zen/src/features/security/background_keys.dart';
+import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/update/background_update_check.dart';
 
 final class _Alarm implements WakeTimer {
@@ -90,6 +99,320 @@ Future<void> _settle() async {
     await Future<void>.delayed(Duration.zero);
   }
 }
+
+const int _sec = 1000;
+const int _min = 60 * _sec;
+const int _hour = 60 * _min;
+
+/// An alarm as Android's AlarmManager keeps it: from [at] on it may go
+/// off; alone it goes off at [maxAt], the end of its window.
+final class _PhoneAlarm implements WakeTimer {
+  _PhoneAlarm(this.at, this.maxAt, this.fire);
+
+  final int at;
+  final int maxAt;
+  final FutureOr<void> Function() fire;
+  bool done = false;
+
+  @override
+  bool get isActive => !done;
+
+  @override
+  void cancel() => done = true;
+}
+
+/// A phone's alarms on the virtual clock, in one of two models: every
+/// alarm on time (as the tests above take them), or Android's (12 and
+/// later): an inexact alarm (`setAndAllowWhileIdle`, `set`) gets a window
+/// of 3/4 of its delay (from 10 s on) and goes off at the window's end,
+/// unless the phone wakes before for anything else, which takes along every
+/// alarm whose window has begun; an exact one goes off on time. Holds keep
+/// the phone awake for their time, under their tag.
+final class _PhoneAlarms implements ZenWakePlatform {
+  _PhoneAlarms({required this.windows, required this.now});
+
+  final bool windows;
+  final int Function() now;
+  final List<_PhoneAlarm> alarms = <_PhoneAlarm>[];
+  final Map<String, int> holds = <String, int>{};
+
+  List<_PhoneAlarm> get live =>
+      alarms.where((_PhoneAlarm a) => a.isActive).toList(growable: false);
+
+  /// Until when the phone is held awake.
+  int get awakeUntil =>
+      holds.values.fold<int>(-1 << 40, (int a, int b) => math.max(a, b));
+
+  @override
+  WakeTimer after(
+    String name,
+    Duration delay,
+    FutureOr<void> Function() fire, {
+    required Duration hold,
+    required bool exact,
+    bool whileIdle = true,
+  }) {
+    final int t = now();
+    final int d = math.max(0, delay.inMilliseconds);
+    final int window = windows && !exact && d >= 10 * _sec
+        ? (d * 0.75).round()
+        : 0;
+    final _PhoneAlarm alarm = _PhoneAlarm(t + d, t + d + window, fire);
+    alarms.add(alarm);
+    return alarm;
+  }
+
+  @override
+  Future<void> hold(String tag, Duration duration) async {
+    holds[tag] = math.max(holds[tag] ?? 0, now() + duration.inMilliseconds);
+  }
+
+  @override
+  Future<void> release(String tag, {Duration after = Duration.zero}) async {
+    holds[tag] = now() + after.inMilliseconds;
+  }
+
+  @override
+  Future<void> holdForCall(bool on) async {}
+
+  @override
+  Stream<void> get appGone => const Stream<void>.empty();
+}
+
+/// What a locked phone did in [_lockedPhoneHours]: when the phone woke for
+/// Zen, and when the rounds, looks and polls ran.
+final class _Hours {
+  final List<int> wakes = <int>[];
+  final List<int> rounds = <int>[];
+  final List<int> looks = <int>[];
+  final List<int> polls = <int>[];
+
+  double perHour(List<int> times, int from, int to) =>
+      times.where((int t) => t >= from && t < to).length /
+      ((to - from) / _hour);
+
+  List<int> gaps(List<int> times, int from, int to) {
+    final List<int> t = times.where((int x) => x >= from && x < to).toList();
+    return <int>[for (int i = 1; i < t.length; i++) t[i] - t[i - 1]];
+  }
+
+  int maxGap(List<int> times, int from, int to) =>
+      gaps(times, from, to).fold<int>(0, math.max);
+
+  /// The longest a friend goes without a round when one round in a row is
+  /// lost (the link dead between wakes: only the rounds reach them).
+  int maxGapOneLost(List<int> times, int from, int to) {
+    final List<int> t = times.where((int x) => x >= from && x < to).toList();
+    int most = 0;
+    for (int i = 2; i < t.length; i++) {
+      most = math.max(most, t[i] - t[i - 2]);
+    }
+    return most;
+  }
+}
+
+/// Signals of the locked phone, with the time each one went.
+final class _FriendAir extends MemorySignalTransport {
+  _FriendAir(this.now);
+
+  final int Function() now;
+  final List<int> sentAt = <int>[];
+
+  @override
+  Future<void> send({
+    required String remoteAddress,
+    required Map<String, dynamic> payload,
+  }) {
+    sentAt.add(now());
+    return super.send(remoteAddress: remoteAddress, payload: payload);
+  }
+}
+
+const String _simFriend = '200:1111:2222:3333:4444:5555:6666:7777';
+const String _simMailbox = '200:1111:2222:3333:4444:5555:6666:aaaa';
+
+/// A locked phone with nobody around for [hours]: the real receiver (polls
+/// with their back-off, rounds to one friend who answers), the look around
+/// by the default policy (each look keeps the phone 8 s + 1 s), a work as
+/// often as the update check, and the link check on every wake, on the
+/// shared beat, its alarms delivered by [alarms]' model. [timing]: what
+/// the beat is told of the alarms (`null`: plain timers, as before this
+/// version). [rotation]: the phone is shown nearby, so the token changes on
+/// an exact alarm 0.5 s past every 10-minute boundary. [latencyMs]: how
+/// long after the phone wakes the beat reads its clock. [otherPerHour]:
+/// other apps' wakes, which take along every alarm whose window has begun
+/// (not counted as Zen's).
+Future<_Hours> _lockedPhoneHours({
+  required bool windows,
+  required bool rotation,
+  required WakeAlarmTiming? timing,
+  int hours = 13,
+  int startAt = 1000 * _hour + 7 * _min + 13 * _sec,
+  int latencyMs = 0,
+  double otherPerHour = 0,
+  int seed = 3,
+}) async {
+  final math.Random random = math.Random(seed);
+  int nextOther(int t) => otherPerHour <= 0
+      ? 1 << 62
+      : t + (-math.log(1 - random.nextDouble()) / otherPerHour * _hour).round();
+  int clock = startAt;
+  int wakeAt = clock;
+  final _PhoneAlarms phone = _PhoneAlarms(windows: windows, now: () => clock);
+  ZenWake.platform = phone;
+  ZenWake.nowMillis = () => clock;
+  ZenWake.alarmTiming = () => timing;
+  final Directory dir = await Directory.systemTemp.createTemp('zen-wake-');
+  final _FriendAir air = _FriendAir(() => clock);
+  final _Hours result = _Hours();
+  final LockedReceiver receiver = LockedReceiver(
+    transport: air,
+    capability: BackgroundCapability.fromDraft(
+      BackgroundCapabilityDraft(
+        inboxPublicKey: Uint8List(32),
+        friends: const <String>{_simFriend},
+        mailboxes: const <String>[_simMailbox],
+      ),
+      backgroundKey: Uint8List.fromList(List<int>.filled(32, 7)),
+    ),
+    inbox: SealedInboxWriter(
+      file: File('${dir.path}/inbox.zbox'),
+      recipientPublicKey: Uint8List(32),
+    ),
+    presenceSnapshot: SealedSnapshotWriter(
+      file: File('${dir.path}/presence.zbox'),
+      recipientPublicKey: await inboxPublicKeyFor(
+        Uint8List.fromList(List<int>.generate(32, (int i) => i + 7)),
+      ),
+    ),
+    notices: MemoryRuntimeSystemNotificationService(),
+    presence: const LockedPresenceKit(shownTo: <String>{_simFriend}),
+    pollAnswerGrace: Duration.zero,
+    now: () => clock,
+  );
+  await receiver.start();
+  const NearbyLookPolicy policy = NearbyLookPolicy();
+  late BeatTimer look;
+  look = ZenWake.beat(
+    'nearby-look',
+    policy.every,
+    () async {
+      result.looks.add(clock);
+      // The scan keeps the phone awake for its window and a moment more.
+      clock = math.max(clock, wakeAt + policy.window.inMilliseconds + _sec);
+      final Duration next = nextNearbyLookWait(
+        last: look.every,
+        fresh: false,
+        base: policy.every,
+        max: policy.longest,
+      );
+      if (next != look.every) {
+        look.setEvery(next);
+      }
+    },
+    hold: policy.window + const Duration(seconds: 5),
+    whileIdle: false,
+  );
+  final BeatTimer update = ZenWake.beat(
+    'update-check',
+    kUpdateBeatAtMost,
+    () async {},
+    whileIdle: false,
+  );
+  final WakeTimer links = checkLinksOnWakes(
+    () async => <String, dynamic>{'probed': 1, 'answered': 1, 'dropped': 0},
+  );
+  final int slot = kWakeGrid.inMilliseconds;
+  int nextRotation(int t) =>
+      (t ~/ slot + 1) * slot + kWakeGridRotationLag.inMilliseconds;
+  int rot = nextRotation(clock);
+  int other = nextOther(clock);
+  int seen = 0;
+  final int end = startAt + hours * _hour;
+  while (true) {
+    final List<_PhoneAlarm> live = phone.live;
+    int next = live.isEmpty
+        ? end
+        : live.map((_PhoneAlarm a) => a.maxAt).reduce(math.min);
+    bool byOther = false;
+    if (rotation && rot <= next) {
+      next = rot;
+    }
+    if (other < next) {
+      next = other;
+      byOther = true;
+    }
+    if (next >= end) {
+      break;
+    }
+    clock = math.max(clock, next);
+    wakeAt = clock;
+    if (byOther) {
+      other = nextOther(clock);
+    } else if (clock > phone.awakeUntil) {
+      result.wakes.add(clock);
+    }
+    if (rotation && rot <= clock) {
+      rot = nextRotation(clock);
+      // The token's change: a moment's work under its own hold.
+      await phone.hold('rotation', const Duration(milliseconds: 200));
+    }
+    final List<_PhoneAlarm> due =
+        phone.live.where((_PhoneAlarm a) => a.at <= clock).toList()
+          ..sort((_PhoneAlarm a, _PhoneAlarm b) => a.at.compareTo(b.at));
+    if (due.isNotEmpty) {
+      // The wake reaches Dart a moment later.
+      clock += latencyMs;
+    }
+    for (final _PhoneAlarm a in due) {
+      if (!a.isActive) {
+        continue;
+      }
+      a.done = true;
+      final FutureOr<void> work = a.fire();
+      if (work is Future<void>) {
+        await work;
+      }
+      await _settle();
+      // Dart lets the alarm's hold go a second after the work.
+      await phone.hold('alarm', const Duration(seconds: 1));
+    }
+    await _settle();
+    // The friend's phone answers each ping at once.
+    final int sent = air.sentSignals.length;
+    for (int k = seen; k < sent; k++) {
+      final ({String remoteAddress, Map<String, dynamic> payload}) s =
+          air.sentSignals[k];
+      if (s.payload['type'] == 'ping' && s.remoteAddress == _simFriend) {
+        result.rounds.add(air.sentAt[k]);
+        await receiver.handleFrame(
+          SignalTransportFrame(
+            from: _simFriend,
+            payload: <String, dynamic>{
+              'type': 'pong',
+              'state': 'background',
+              'sq': clock,
+            },
+            receivedAtMillis: clock,
+          ),
+        );
+      } else if (s.payload['type'] == 'rly_poll') {
+        result.polls.add(air.sentAt[k]);
+      }
+    }
+    seen = sent;
+  }
+  update.cancel();
+  links.cancel();
+  look.cancel();
+  await receiver.stop();
+  ZenWake.resetForTest();
+  await dir.delete(recursive: true);
+  return result;
+}
+
+String _mmss(int ms) =>
+    '${ms ~/ _min}:${((ms % _min) ~/ _sec).toString().padLeft(2, '0')}';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -543,6 +866,248 @@ void main() {
     ZenWake.signalArrived();
     ZenWake.signalArrived();
     expect(platform.calls, <String>['hold signal 3']);
+  });
+
+  group('a locked phone, its alarms as Android delivers them', () {
+    // Hours 2..13: past the first hour's back-offs.
+    const int from = 1000 * _hour + 7 * _min + 13 * _sec + _hour;
+    const int to = from + 12 * _hour;
+    const WakeAlarmTiming android12 = WakeAlarmTiming(
+      exactAllowed: true,
+      lateWindows: true,
+    );
+    const WakeAlarmTiming android12Nearby = WakeAlarmTiming(
+      exactAllowed: true,
+      lateWindows: true,
+      rotation: true,
+    );
+    const WakeAlarmTiming noExactAlarms = WakeAlarmTiming(lateWindows: true);
+
+    test('the grid is the nearby token\'s slot', () {
+      expect(kWakeGrid, kNearbySlot);
+      expect(
+        kLockedPresenceRoundEvery.inMilliseconds % kWakeGrid.inMilliseconds,
+        0,
+      );
+      expect(
+        kLockedMailboxPollMaxInterval.inMilliseconds % kWakeGrid.inMilliseconds,
+        0,
+      );
+      expect(
+        const NearbyLookPolicy().longest.inMilliseconds %
+            kWakeGrid.inMilliseconds,
+        0,
+      );
+    });
+
+    /// What a phone must do, whatever delivers its alarms: a round at
+    /// least every 10 minutes and a moment (never two within the early
+    /// rule), a look at least every 20 and a moment (the documents' words),
+    /// and a friend who hears only the rounds never sees "poza siecią" when
+    /// one of them is lost.
+    void expectAsDocumented(_Hours r, String label) {
+      for (final int gap in r.gaps(r.rounds, from, to)) {
+        expect(gap, greaterThanOrEqualTo(6 * _min + 39 * _sec), reason: label);
+      }
+      expect(
+        r.maxGap(r.rounds, from, to),
+        lessThanOrEqualTo(10 * _min + _sec),
+        reason: '$label: rounds',
+      );
+      expect(
+        r.maxGap(r.looks, from, to),
+        lessThanOrEqualTo(20 * _min + _sec),
+        reason: '$label: looks',
+      );
+      expect(
+        r.maxGapOneLost(r.rounds, from, to),
+        lessThan(kPresenceBackgroundFor.inMilliseconds),
+        reason: '$label: one round lost',
+      );
+    }
+
+    String line(_Hours r) =>
+        'wakes/h=${r.perHour(r.wakes, from, to).toStringAsFixed(2)} '
+        'rounds/h=${r.perHour(r.rounds, from, to).toStringAsFixed(2)} '
+        'longest round gap=${_mmss(r.maxGap(r.rounds, from, to))} '
+        'one lost=${_mmss(r.maxGapOneLost(r.rounds, from, to))} '
+        'looks/h=${r.perHour(r.looks, from, to).toStringAsFixed(2)} '
+        'longest look gap=${_mmss(r.maxGap(r.looks, from, to))} '
+        'polls/h=${r.perHour(r.polls, from, to).toStringAsFixed(2)}';
+
+    test('alarms on time, not shown nearby: a wake every 10 minutes, as '
+        'before', () async {
+      final _Hours r = await _lockedPhoneHours(
+        windows: false,
+        rotation: false,
+        timing: null,
+      );
+      // ignore: avoid_print
+      print('on time, not shown: ${line(r)}');
+      expect(r.perHour(r.wakes, from, to), closeTo(6, 0.1));
+      expectAsDocumented(r, 'on time');
+    });
+
+    test('alarms on time, shown nearby: the beat and the token\'s change '
+        'share their wakes (12 an hour before, 6 now)', () async {
+      final _Hours before = await _lockedPhoneHours(
+        windows: false,
+        rotation: true,
+        timing: null,
+      );
+      final _Hours now = await _lockedPhoneHours(
+        windows: false,
+        rotation: true,
+        timing: const WakeAlarmTiming(exactAllowed: true, rotation: true),
+      );
+      // ignore: avoid_print
+      print('on time, shown: before ${line(before)}\n  now ${line(now)}');
+      expect(before.perHour(before.wakes, from, to), closeTo(12, 0.1));
+      expect(now.perHour(now.wakes, from, to), closeTo(6, 0.1));
+      expectAsDocumented(now, 'on time, shown');
+    });
+
+    test('Android, shown nearby: 8.25 wakes an hour and rounds up to 17:30 '
+        'apart before; now 6, on the token\'s wakes', () async {
+      for (final double others in <double>[0, 12]) {
+        final _Hours before = await _lockedPhoneHours(
+          windows: true,
+          rotation: true,
+          timing: null,
+          latencyMs: 150,
+          otherPerHour: others,
+        );
+        final _Hours now = await _lockedPhoneHours(
+          windows: true,
+          rotation: true,
+          timing: android12Nearby,
+          latencyMs: 150,
+          otherPerHour: others,
+        );
+        // ignore: avoid_print
+        print(
+          'Android, shown, other apps $others/h: before ${line(before)}\n'
+          '  now ${line(now)}',
+        );
+        if (others == 0) {
+          expect(before.perHour(before.wakes, from, to), closeTo(8.25, 0.1));
+          expect(
+            before.maxGap(before.rounds, from, to),
+            greaterThan(17 * _min),
+          );
+        }
+        expect(now.perHour(now.wakes, from, to), lessThanOrEqualTo(6.01));
+        expectAsDocumented(now, 'Android, shown, others $others');
+      }
+    });
+
+    test('Android, not shown nearby: rounds up to 17:23 apart before (3.42 '
+        'wakes an hour); now every 10 minutes, on exact alarms where they '
+        'are allowed and on the end of the window where not', () async {
+      for (final double others in <double>[0, 12, 60]) {
+        final _Hours before = await _lockedPhoneHours(
+          windows: true,
+          rotation: false,
+          timing: null,
+          latencyMs: 150,
+          otherPerHour: others,
+        );
+        if (others == 0) {
+          expect(before.perHour(before.wakes, from, to), closeTo(3.42, 0.05));
+          expect(
+            before.maxGapOneLost(before.rounds, from, to),
+            greaterThanOrEqualTo(kPresenceBackgroundFor.inMilliseconds),
+            reason: 'a friend saw "poza siecią" after one lost round',
+          );
+        }
+        for (final WakeAlarmTiming timing in <WakeAlarmTiming>[
+          android12,
+          noExactAlarms,
+        ]) {
+          final _Hours now = await _lockedPhoneHours(
+            windows: true,
+            rotation: false,
+            timing: timing,
+            latencyMs: 150,
+            otherPerHour: others,
+          );
+          // ignore: avoid_print
+          print(
+            'Android, not shown, exact ${timing.exactAllowed}, other apps '
+            '$others/h: before ${line(before)}\n  now ${line(now)}',
+          );
+          expect(now.perHour(now.wakes, from, to), lessThanOrEqualTo(6.01));
+          expectAsDocumented(
+            now,
+            'Android, not shown, exact ${timing.exactAllowed}, others $others',
+          );
+        }
+      }
+    });
+
+    test('a wake on the grid runs what it was planned for, and the round '
+        'keeps to the grid', () async {
+      int clock = 1000 * _hour + 3 * _min + 7 * _sec;
+      final _PhoneAlarms phone = _PhoneAlarms(windows: false, now: () => clock);
+      ZenWake.platform = phone;
+      ZenWake.nowMillis = () => clock;
+      ZenWake.alarmTiming = () => android12;
+      final List<int> ran = <int>[];
+      ZenWake.beat(
+        'presence-round',
+        kLockedPresenceRoundEvery,
+        () async => ran.add(clock),
+      );
+      for (int i = 0; i < 6; i++) {
+        final _PhoneAlarm next = phone.live.single;
+        clock = next.at;
+        await next.fire();
+      }
+      // Early by a third of the period at most, towards the boundary,
+      // then a second before each boundary's token change.
+      final int grid = kWakeGrid.inMilliseconds;
+      final List<int> offsets = <int>[
+        for (final int t in ran) (t + _sec - 500) % grid,
+      ];
+      expect(offsets.skip(2), everyElement(0));
+      for (int i = 1; i < ran.length; i++) {
+        expect(
+          ran[i] - ran[i - 1],
+          greaterThanOrEqualTo(
+            (kLockedPresenceRoundEvery -
+                    wakeBeatEarly(kLockedPresenceRoundEvery))
+                .inMilliseconds,
+          ),
+        );
+        expect(
+          ran[i] - ran[i - 1],
+          lessThanOrEqualTo(kLockedPresenceRoundEvery.inMilliseconds),
+        );
+      }
+      // Work due every few minutes (here, the first polls; the parked
+      // service's watchdog) is asked for when due, as before.
+      ZenWake.beat('mailbox-poll', const Duration(minutes: 5), () async {});
+      final _PhoneAlarm poll = phone.live.single;
+      expect(poll.at - clock, 5 * _min);
+    });
+
+    test('without exact alarms a wake is asked for so its window ends when '
+        'it is due', () {
+      const int clock = 1000 * _hour;
+      final _PhoneAlarms phone = _PhoneAlarms(windows: true, now: () => clock);
+      ZenWake.platform = phone;
+      ZenWake.nowMillis = () => clock;
+      ZenWake.alarmTiming = () => noExactAlarms;
+      ZenWake.beat('presence-round', kLockedPresenceRoundEvery, () async {});
+      final _PhoneAlarm alarm = phone.live.single;
+      expect(alarm.maxAt - clock, closeTo(10 * _min, 2));
+      expect(alarm.at - clock, closeTo(10 * _min / 1.75, 2));
+      // Plain timers are asked for when the work is due, as before.
+      ZenWake.resetForTest();
+      ZenWake.alarmTiming = () => null;
+      ZenWake.beat('presence-round', kLockedPresenceRoundEvery, () async {});
+      expect(phone.live.last.at - clock, 10 * _min);
+    });
   });
 
   group('Android', () {

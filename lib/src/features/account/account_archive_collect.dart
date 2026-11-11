@@ -5,6 +5,7 @@ import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
+import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
 
 /// The profile photos in a copy (keys of the profile section naming their
@@ -111,6 +112,16 @@ Future<AccountArchiveBuild> buildAccountArchive(
     );
   }
 
+  if (b.has(AccountScope.keys)) {
+    // The passwords go with the key: every copy that brings the account
+    // back (a backup file, a move to another device) brings them too.
+    final Map<String, Object?>? passwords = passwordVaultSectionOf(
+      await source.readState(kPasswordVaultKey),
+    );
+    if (passwords != null) {
+      b.sections[CircleBackupSections.passwords] = passwords;
+    }
+  }
   if (b.has(AccountScope.contacts)) {
     b.sections[CircleBackupSections.contacts] = source.contacts();
     b.sections[CircleBackupSections.levels] = source.levels();

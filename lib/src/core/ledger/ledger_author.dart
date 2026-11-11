@@ -60,7 +60,66 @@ final class LedgerAuthor {
   /// the log may be held and handed on without what came before.
   Future<LogEntry> checkpoint(String space) =>
       append(space, kLedgerCheckpointKind, const <String, dynamic>{});
+
+  /// Appends [drafts] to [space] as one run: every entry is signed first,
+  /// then all join the log together ([LedgerStore.ingestRun]), so neither
+  /// a save nor a peer ever finds only some of them here. Calls are
+  /// serialized with [append].
+  Future<List<LogEntry>> appendRun(String space, List<LedgerDraft> drafts) {
+    final Future<List<LogEntry>> result = _tail.then((_) async {
+      int seq = store.headOf(space, writer);
+      String prev = store.lastIdOf(space, writer);
+      final List<LogEntry> run = <LogEntry>[];
+      for (final LedgerDraft draft in drafts) {
+        final LogEntry entry = await LogEntry.create(
+          deviceKey: deviceKey,
+          certificate: certificate,
+          space: space,
+          writer: writer,
+          seq: ++seq,
+          prev: prev,
+          hlc: store.clock.now(),
+          kind: draft.kind,
+          body: draft.body,
+          blobs: draft.blobs,
+        );
+        run.add(entry);
+        prev = entry.id;
+      }
+      if (!await store.ingestRun(run)) {
+        throw StateError('Nie udało się zapisać wpisów.');
+      }
+      return run;
+    });
+    _tail = result.then((_) {}, onError: (Object _) {});
+    return result;
+  }
+
+  /// Starts [space] over: a checkpoint saying that [drafts], written right
+  /// after it in the same run ([appendRun]), carry everything of the log
+  /// still valid ([rebaseCountOf]); every holder may then drop what came
+  /// before it. Returns the checkpoint and the entries.
+  Future<List<LogEntry>> rebase(String space, List<LedgerDraft> drafts) {
+    if (drafts.length > kMaxRebaseEntries) {
+      throw ArgumentError('too many entries after a checkpoint');
+    }
+    return appendRun(space, <LedgerDraft>[
+      (
+        kind: kLedgerCheckpointKind,
+        body: <String, dynamic>{'n': drafts.length},
+        blobs: const <String>[],
+      ),
+      ...drafts,
+    ]);
+  }
 }
+
+/// One entry to be written ([LedgerAuthor.appendRun]).
+typedef LedgerDraft = ({
+  String kind,
+  Map<String, dynamic> body,
+  List<String> blobs,
+});
 
 /// A brand-new account with its first device.
 final class LedgerAccountSetup {

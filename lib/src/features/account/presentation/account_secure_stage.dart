@@ -6,9 +6,9 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
-import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/presentation/account_import_layer.dart';
+import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/name_step.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
@@ -124,8 +124,8 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
     final ZenColors zen = ZenColors.of(context);
     // Rebuilds when the person comes back from one of the screens.
     final bool secured = !ref.watch(accountSecureReminderProvider);
-    // The circle needs friends and a brand-new account has none: it waits
-    // (Zen reminds once there are enough, see CircleReminderCard).
+    // The pieces need close friends and a brand-new account has none: the
+    // password can be set now, the pieces follow the friends by themselves.
     return Scaffold(
       key: const Key('account-secure-stage'),
       body: SafeArea(
@@ -183,7 +183,7 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   Text(
-                    t('Krąg odzyskiwania'),
+                    t('Klucz u przyjaciół'),
                     style: TextStyle(
                       color: zen.textPrimary,
                       fontWeight: FontWeight.w700,
@@ -193,13 +193,11 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                   const SizedBox(height: 4),
                   Text(
                     t(
-                      'Od 2 do 6 zaufanych znajomych dostaje po kawałku '
-                      'klucza. Na nowym telefonie wystarczy dwóch z nich i '
-                      'Twoje hasło konta, a wrócisz ze znajomymi i '
-                      'rozmowami. Bez hasła konta nie da się odzyskać: '
-                      'zapisz je w bezpiecznym miejscu. Dostępny od {n} '
-                      'znajomych: gdy ich dodasz, Zen Ci o nim przypomni.',
-                      <String, Object?>{'n': kRecoveryCircleMinimum},
+                      'Ustaw hasło konta, a każdy, kogo oznaczysz jako '
+                      '„Przyjaciel”, sam dostanie kawałek klucza. Na nowym '
+                      'telefonie wystarczy hasło konta i zgoda kilku z nich, '
+                      'a wrócisz ze znajomymi i rozmowami. Bez hasła konta '
+                      'nie da się odzyskać: zapisz je w bezpiecznym miejscu.',
                     ),
                     style: TextStyle(
                       color: zen.textSecondary,
@@ -213,13 +211,10 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(48),
                     ),
-                    onPressed: null,
+                    onPressed: () =>
+                        unawaited(AccountRecoveryScreen.open(context)),
                     icon: const Icon(Icons.groups_2_outlined),
-                    label: Text(
-                      t('Dostępny od {n} znajomych', <String, Object?>{
-                        'n': kRecoveryCircleMinimum,
-                      }),
-                    ),
+                    label: Text(t('Ustaw hasło konta')),
                   ),
                 ],
               ),

@@ -371,11 +371,13 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
   /// A picture the keyboard inserted (a GIF or a sticker): a GIF goes as
   /// an animated GIF, anything else as a fresh photo.
   Future<void> _sendKeyboardContent(KeyboardInsertedContent content) async {
-    final Uint8List? data = content.data;
-    if (data == null || data.isEmpty) {
+    final Uint8List? inserted = content.data;
+    if (inserted == null || inserted.isEmpty) {
       _showComposerSnackBar(t('Klawiatura nie przekazała obrazka.'));
       return;
     }
+    // An animated sticker (WebP or PNG) plays as a GIF instead of a still.
+    final Uint8List data = await gifIfAnimated(inserted);
     final String name = 'klawiatura-${DateTime.now().millisecondsSinceEpoch}';
     if (await _sendPickedGif(data, name)) {
       return;
@@ -565,9 +567,12 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
           : (option == _CaptureOption.video
                 ? 'video-${DateTime.now().millisecondsSinceEpoch}.mp4'
                 : 'photo-${DateTime.now().millisecondsSinceEpoch}.jpg');
-      if (option == _CaptureOption.gallery &&
-          await _sendPickedGif(bytes, fileName)) {
-        return;
+      if (option == _CaptureOption.gallery) {
+        // An animated WebP or PNG plays as a GIF instead of a still.
+        bytes = await gifIfAnimated(bytes);
+        if (await _sendPickedGif(bytes, fileName)) {
+          return;
+        }
       }
       String? sendPath = fromCamera ? null : file.path;
       if (option != _CaptureOption.video) {

@@ -211,6 +211,10 @@ void _expectSameBubbles(Map<int, double> now, Map<int, double> before) {
 void _back() => zenRootNavigatorKey.currentState!.pop();
 
 Future<void> _openConversation(WidgetTester tester) async {
+  // A reminder card above the list may leave the conversation under the
+  // bottom bar on this small screen.
+  await tester.ensureVisible(find.byKey(const Key('conversation-card-$_ada')));
+  await tester.pump();
   await tester.tap(find.byKey(const Key('conversation-card-$_ada')));
   await tester.pump();
   await tester.pump(const Duration(seconds: 1));

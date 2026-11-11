@@ -93,6 +93,62 @@ final class _DartWakeTimer implements WakeTimer {
   void cancel() => _timer.cancel();
 }
 
+/// How the phone's alarms keep time, as far as the shared beat plans by it
+/// ([WakeBeat]); `null` from [ZenWake.alarmTiming]: plain timers, on time.
+@immutable
+final class WakeAlarmTiming {
+  const WakeAlarmTiming({
+    this.exactAllowed = false,
+    this.lateWindows = false,
+    this.rotation = false,
+  });
+
+  /// An exact alarm comes on time, also in Doze (Android 12 and later:
+  /// the person allowed exact alarms; before, always).
+  final bool exactAllowed;
+
+  /// An inexact alarm comes as late as its window lets it unless something
+  /// else wakes the phone first (Android 12 and later): up to 3/4 of its
+  /// delay late, so a wake asked for in 10 minutes comes after 17 or 18.
+  final bool lateWindows;
+
+  /// The nearby token changes on an exact alarm at every [kWakeGrid]
+  /// boundary of the wall clock ([kWakeGridRotationLag] past it): the phone
+  /// is shown nearby, and exact alarms are allowed.
+  final bool rotation;
+
+  static WakeAlarmTiming fromMap(Map<Object?, Object?>? map) => WakeAlarmTiming(
+    exactAllowed: map?['exact'] == true,
+    lateWindows: map?['lateWindows'] == true,
+    rotation: map?['rotation'] == true,
+  );
+}
+
+/// The grid the beat's wakes keep to where its alarms can be on time
+/// ([WakeAlarmTiming]): the nearby token changes on every 10-minute
+/// boundary of the wall clock (kNearbySlot; an exact alarm in
+/// ZenNearbyBridge.kt), and the locked phones of friends, whose clocks go
+/// by the network's time, wake on the same boundaries, so a presence round
+/// reaches a friend's phone while it is awake for its own.
+const Duration kWakeGrid = Duration(minutes: 10);
+
+/// How long after a [kWakeGrid] boundary the token's alarm comes
+/// (ROTATION_MARGIN_MS in ZenNearbyBridge.kt).
+const Duration kWakeGridRotationLag = Duration(milliseconds: 500);
+
+/// How much before the token's alarm the beat's wake on the grid is asked
+/// for: an inexact alarm whose window has begun goes off with the exact one,
+/// and an exact one comes while the phone is still awake for it.
+const Duration kWakeGridLead = Duration(seconds: 1);
+
+/// What part of its delay an inexact alarm may come late at most (Android's
+/// window for alarms set without one): a wake is asked for this much
+/// sooner, so its window ends when it is due.
+const double kInexactWindowStretch = 1.75;
+
+/// Shorter delays get no window on Android.
+const Duration kInexactWindowFrom = Duration(seconds: 10);
+
 /// Android: alarms and timed holds through `zen/power` (ZenPower.kt).
 final class AndroidWakePlatform implements ZenWakePlatform {
   AndroidWakePlatform({
@@ -111,6 +167,45 @@ final class AndroidWakePlatform implements ZenWakePlatform {
   final Map<String, _AlarmWakeTimer> _pending = <String, _AlarmWakeTimer>{};
   final StreamController<void> _appGone = StreamController<void>.broadcast();
   StreamSubscription<Object?>? _subscription;
+
+  /// How the alarms keep time, as Kotlin told it last: until it answers,
+  /// inexact alarms that come when asked (the beat plans as it always did).
+  WakeAlarmTiming _timing = const WakeAlarmTiming();
+  final Stopwatch _sinceTiming = Stopwatch();
+  bool _askingTiming = false;
+
+  /// Asked again at most this often (the person may allow exact alarms, or
+  /// show the phone nearby, while the service runs).
+  static const Duration _timingEvery = Duration(minutes: 1);
+
+  /// The last answer; a new one is asked for in the background, for the
+  /// next plan of the beat (the beat plans synchronously, on its wakes).
+  WakeAlarmTiming get timing {
+    _refreshTiming();
+    return _timing;
+  }
+
+  void _refreshTiming() {
+    if (_askingTiming ||
+        (_sinceTiming.isRunning && _sinceTiming.elapsed < _timingEvery)) {
+      return;
+    }
+    _askingTiming = true;
+    _sinceTiming
+      ..reset()
+      ..start();
+    unawaited(
+      _channel
+          .invokeMapMethod<Object?, Object?>('alarmTiming')
+          .then<void>(
+            (Map<Object?, Object?>? map) =>
+                _timing = WakeAlarmTiming.fromMap(map),
+            // An older service, or a test host: as before.
+            onError: (Object _) {},
+          )
+          .whenComplete(() => _askingTiming = false),
+    );
+  }
 
   void _listen() {
     _subscription ??= _events.receiveBroadcastStream().listen(
@@ -589,8 +684,27 @@ final class WakeBeat {
     }
   }
 
-  /// An inexact alarm: nothing on the beat needs the minute, and Android
-  /// may then wake the phone for other apps' alarms at the same time.
+  /// The wake for [due] at [at]. Where the platform says nothing of its
+  /// alarms (plain timers) an inexact alarm at [at]: nothing on the beat
+  /// needs the minute, and Android may then wake the phone for other apps'
+  /// alarms at the same time. That too on Android ([WakeAlarmTiming]) for
+  /// wakes only for work due every minute or quarter of an hour (the parked
+  /// service's watchdog, the update check, the first hour's polls). Work
+  /// whose period is a whole number of [kWakeGrid]s (the presence rounds,
+  /// the backed-off polls and looks, the locked outbox) keeps to the
+  /// documented periods there:
+  ///
+  /// * When it is all that is due by [at], it wakes on the grid's
+  ///   boundaries, a little early within the slack of each work due: with
+  ///   the nearby token's change when the phone is shown nearby (an inexact
+  ///   alarm asked a moment before the token's exact one goes off with it,
+  ///   so the two share one wake), else on an exact alarm where those are
+  ///   allowed and the work must run in Doze. A wake off the grid is asked
+  ///   for as early as its works allow, which brings it onto the grid within
+  ///   two periods, and keeps it there.
+  /// * Otherwise, where an inexact alarm comes as late as its window lets
+  ///   it, it is asked for sooner, so the window ends when the work is due:
+  ///   a 10-minute round would come after 17 or 18 minutes.
   WakeTimer _wake(
     String name,
     int at,
@@ -603,26 +717,145 @@ final class WakeBeat {
         hold = w.hold;
       }
     }
+    final int now = ZenWake.nowMillis();
+    final WakeAlarmTiming? timing = ZenWake.alarmTiming();
+    int askAt = at;
+    bool exact = false;
+    int? rotationAt;
+    int? gridAt;
+    if (timing != null && due.any(_gridPeriod)) {
+      final bool punctual = timing.rotation || timing.exactAllowed;
+      final int? grid = punctual && _onGridPeriods(at, due)
+          ? _gridWake(at, due, now)
+          : null;
+      if (grid != null && timing.rotation && _onGrid(grid)) {
+        askAt = gridAt = grid;
+        rotationAt = grid + kWakeGridLead.inMilliseconds;
+      } else if (grid != null && timing.exactAllowed && whileIdle) {
+        askAt = gridAt = grid;
+        exact = true;
+      } else {
+        final int ms = at - now;
+        if (timing.lateWindows && ms > kInexactWindowFrom.inMilliseconds) {
+          askAt = now + (ms / kInexactWindowStretch).ceil();
+        }
+      }
+    }
+    final List<_BeatWork> planned = List<_BeatWork>.of(due);
     return ZenWake.platform.after(
       name,
-      Duration(milliseconds: at - ZenWake.nowMillis()),
-      _fire,
+      Duration(milliseconds: askAt - now),
+      () => _fire(planned: planned, from: gridAt, rotationAt: rotationAt),
       hold: hold,
-      exact: false,
+      exact: exact,
       whileIdle: whileIdle,
     );
   }
 
-  Future<void> _fire() {
+  /// How long after the token's alarm a wake planned to go off with it
+  /// keeps the phone awake, should it come first: the token's alarm then
+  /// comes during the same wake.
+  static const int _rotationWait = 1000;
+
+  /// Whether [at] is a wake on the grid (a [kWakeGridLead] before the
+  /// token's change after a [kWakeGrid] boundary).
+  static bool _onGrid(int at) =>
+      (at - _gridOffsetMs) % kWakeGrid.inMilliseconds == 0;
+
+  /// Where a wake on the grid lies after its boundary (negative: before
+  /// it).
+  static int get _gridOffsetMs =>
+      kWakeGridRotationLag.inMilliseconds - kWakeGridLead.inMilliseconds;
+
+  /// Whether every work of [due] due by [at] comes every whole number of
+  /// [kWakeGrid]s (what rides along early, [_dueBy], may come at any
+  /// period): a shorter or odd period would be cut short on every wake
+  /// that keeps to the grid.
+  static bool _onGridPeriods(int at, List<_BeatWork> due) {
+    bool any = false;
+    for (final _BeatWork w in due) {
+      if (w.dueAt > at) {
+        continue;
+      }
+      if (!_gridPeriod(w)) {
+        return false;
+      }
+      any = true;
+    }
+    return any;
+  }
+
+  /// Whether [w] comes every whole number of [kWakeGrid]s.
+  static bool _gridPeriod(_BeatWork w) {
+    final int grid = kWakeGrid.inMilliseconds;
+    final int every = w.every.inMilliseconds;
+    return every >= grid && every % grid == 0;
+  }
+
+  /// The wake for [due] (due at [at], [_onGridPeriods]) towards the grid,
+  /// or `null` when it keeps to [at]: the latest wake on the grid by [at]
+  /// when every work due by [at] may run then (within its slack,
+  /// [wakeBeatEarly]), else the earliest moment they all may, which comes a
+  /// slack nearer to the grid each period. What rides along early comes
+  /// with them.
+  static int? _gridWake(int at, List<_BeatWork> due, int now) {
+    final int grid = kWakeGrid.inMilliseconds;
+    int earliest = now;
+    for (final _BeatWork w in due) {
+      if (w.dueAt <= at) {
+        earliest = math.max(earliest, w.dueAt - w.slackMs);
+      }
+    }
+    if (earliest >= at) {
+      return null;
+    }
+    final int offset = _gridOffsetMs;
+    final int onGrid = ((at - offset) ~/ grid) * grid + offset;
+    if (onGrid >= earliest && onGrid > now) {
+      return onGrid;
+    }
+    return earliest > now ? earliest : null;
+  }
+
+  /// [planned]: what the wake was planned for. A wake towards the grid
+  /// ([from]: the moment it was asked for) runs all of it once that moment
+  /// has come, as it would have run it when due; any other wake runs each
+  /// only if it may by now. [rotationAt]: the nearby token's alarm this
+  /// wake was planned to go off with; should it come first, the phone stays
+  /// awake until that one has come too.
+  Future<void> _fire({
+    List<_BeatWork> planned = const <_BeatWork>[],
+    int? from,
+    int? rotationAt,
+  }) {
     final int now = ZenWake.nowMillis();
     final List<Future<void>> running = <Future<void>>[];
     // How long each work took, for the technical log.
     final Map<String, int> took = <String, int>{};
     final Stopwatch wake = Stopwatch()..start();
     _clampDue(now);
+    if (rotationAt != null && now < rotationAt + _rotationWait) {
+      unawaited(
+        ZenWake.platform.hold(
+          'beat-rotation',
+          Duration(
+            milliseconds: math.min(rotationAt + _rotationWait - now, 3000),
+          ),
+        ),
+      );
+    }
+    final List<_BeatWork> dueNow = _dueBy(now);
+    final bool asPlanned = from != null && now >= from;
+    // In the order they were added, as always.
+    final List<_BeatWork> works = <_BeatWork>[
+      for (final _BeatWork w in _works)
+        if (dueNow.contains(w) ||
+            (planned.contains(w) && (asPlanned || w.dueAt - w.slackMs <= now)))
+          w,
+    ];
     _firing = true;
     try {
-      for (final _BeatWork w in _dueBy(now)) {
+      for (final _BeatWork w in works) {
         if (w._cancelled) {
           continue;
         }
@@ -672,6 +905,16 @@ abstract final class ZenWake {
   static int Function() nowMillis = _wallMillis;
 
   static int _wallMillis() => DateTime.now().millisecondsSinceEpoch;
+
+  /// How the platform's alarms keep time, for the shared beat's plans
+  /// (`null`: plain timers, which come on time); tests set it.
+  @visibleForTesting
+  static WakeAlarmTiming? Function() alarmTiming = _platformTiming;
+
+  static WakeAlarmTiming? _platformTiming() {
+    final ZenWakePlatform current = platform;
+    return current is AndroidWakePlatform ? current.timing : null;
+  }
 
   /// How long the phone stays awake for a signal that came: long enough to
   /// read it and drop it (most of what reaches a locked phone: answers to
@@ -755,6 +998,7 @@ abstract final class ZenWake {
   static void resetForTest() {
     _beat.clear();
     _busy.clear();
+    alarmTiming = _platformTiming;
     _sinceSignalHold
       ..stop()
       ..reset();

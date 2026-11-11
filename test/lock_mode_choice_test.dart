@@ -77,6 +77,7 @@ void main() {
       WidgetTester tester, {
       AppSettings settings = fiveMinutes,
       bool password = true,
+      bool confirmsLaterLock = true,
       ZenAccountScope? account,
     }) async {
       tester.view.physicalSize = const Size(420, 1600);
@@ -107,8 +108,12 @@ void main() {
           ],
           child: MaterialApp(
             theme: ZenTheme.dark(),
-            home: const Scaffold(
-              body: SingleChildScrollView(child: LockModeSettingChoice()),
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: LockModeSettingChoice(
+                  confirmsLaterLock: confirmsLaterLock,
+                ),
+              ),
             ),
           ),
         ),
@@ -170,6 +175,27 @@ void main() {
       await tester.tap(find.text('Anuluj'));
       await tester.pumpAndSettle();
       expect(now().backgroundLockDelaySeconds, 60);
+    });
+
+    testWidgets('where the question is off (the setup of a first start) a '
+        'later lock and a longer delay apply at once; "Nigdy" still takes '
+        'the password', (WidgetTester tester) async {
+      await pump(tester, confirmsLaterLock: false);
+      await tap(tester, 'settings-lock-delay-3600');
+      expect(dialog, findsNothing);
+      expect(now().backgroundLockDelaySeconds, 3600);
+      await tap(tester, 'settings-lock-mode-systemRestart');
+      expect(dialog, findsNothing);
+      expect(now().lockMode, AppLockMode.systemRestart);
+
+      await tap(tester, 'settings-lock-mode-never');
+      expect(
+        find.byKey(const Key('settings-never-lock-dialog')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Anuluj'));
+      await tester.pumpAndSettle();
+      expect(now().lockMode, AppLockMode.systemRestart);
     });
 
     testWidgets('a sooner lock needs no password', (WidgetTester tester) async {

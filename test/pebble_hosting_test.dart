@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -88,6 +89,28 @@ final class _Peers implements PebblePeers {
   ];
 }
 
+/// A disk that counts how often the pebbles' index is written.
+final class _CountingDisk implements LedgerDisk {
+  final MemoryLedgerDisk _disk = MemoryLedgerDisk();
+  int indexWrites = 0;
+
+  Map<String, Uint8List> get files => _disk.files;
+
+  @override
+  Future<Uint8List?> read(String key) => _disk.read(key);
+
+  @override
+  Future<void> write(String key, Uint8List data) {
+    if (key == 'pebbles/index') {
+      indexWrites++;
+    }
+    return _disk.write(key, data);
+  }
+
+  @override
+  Future<void> delete(String key) => _disk.delete(key);
+}
+
 /// The pebbles of every phone of a world.
 final class _Net {
   _Net(this.world, {this.keeperTarget = 3});
@@ -98,6 +121,8 @@ final class _Net {
   final Map<FriendsPhone, PebbleHosting> hosts =
       <FriendsPhone, PebbleHosting>{};
   final Map<FriendsPhone, _Peers> peers = <FriendsPhone, _Peers>{};
+  final Map<FriendsPhone, _CountingDisk> disks =
+      <FriendsPhone, _CountingDisk>{};
 
   /// Whether a phone serves what it collected (the settings' switch).
   final Map<FriendsPhone, bool> serves = <FriendsPhone, bool>{};
@@ -118,7 +143,7 @@ final class _Net {
     final _Peers pp = peers[p] = _Peers(this, p);
     final PebbleHosting h = hosts[p] = PebbleHosting(
       transport: p.appTransport,
-      store: PebbleStore(MemoryLedgerDisk(), clock: () => world.now),
+      store: PebbleStore(disks[p] = _CountingDisk(), clock: () => world.now),
       peers: pp,
       accountKey: () => keys[p],
       serveCollected: () => serves[p] ?? true,
@@ -1064,6 +1089,187 @@ void main() {
     await net.beat();
     expect(net.store(w['A']).finderCount(card.id), 2);
     expect(net.store(w['F']).entry(card.id)!.foundSent, isTrue);
+  });
+
+  /// [from] sends [to] a found note for [id] signed with [key].
+  Future<void> sendFoundNote(
+    FriendsPhone from,
+    FriendsPhone to,
+    LedgerKeyPair key,
+    PebbleId id, {
+    int? atSeconds,
+  }) async {
+    final PebbleFoundNote note = await PebbleFoundNote.sign(
+      key: key,
+      id: id,
+      atSeconds: atSeconds ?? 1,
+    );
+    await from.appTransport.send(
+      remoteAddress: to.address,
+      payload: <String, dynamic>{
+        'type': PebbleFrames.found,
+        'n': note.toJson(),
+      },
+    );
+  }
+
+  test('a friend cannot make up finders: keys made on the spot count for '
+      'nothing and the index is not rewritten for them', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'M']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A']);
+    final int written = net.disks[w['A']]!.indexWrites;
+    for (int i = 0; i < 20; i++) {
+      await sendFoundNote(
+        w['M'],
+        w['A'],
+        await LedgerKeyPair.generate(),
+        card.id,
+      );
+    }
+    await net.settle();
+    expect(net.store(w['A']).finderCount(card.id), 0);
+    expect(net.disks[w['A']]!.indexWrites, written);
+  });
+
+  test('a found note counts only from a device of the account that signed '
+      'it', () async {
+    final FriendsWorld w = await _world(
+      <String>['A', 'F', 'G', 'S'],
+      <(String, String)>[('A', 'F'), ('A', 'G')],
+    );
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A']);
+    // G hands on F's note; S, nobody's friend, signs with its own key; the
+    // author's own account does not find its own pebble.
+    await sendFoundNote(w['G'], w['A'], net.keys[w['F']]!, card.id);
+    await sendFoundNote(w['S'], w['A'], net.keys[w['S']]!, card.id);
+    await sendFoundNote(w['F'], w['A'], net.keys[w['A']]!, card.id);
+    await net.settle();
+    expect(net.store(w['A']).finderCount(card.id), 0);
+    // Each friend's own note counts, once.
+    await sendFoundNote(w['F'], w['A'], net.keys[w['F']]!, card.id);
+    await sendFoundNote(w['G'], w['A'], net.keys[w['G']]!, card.id);
+    await net.settle();
+    expect(net.store(w['A']).finderCount(card.id), 2);
+  });
+
+  test('a finder told twice counts once and the second note writes '
+      'nothing', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'F']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final PebbleCard card = await net.publish(w['A']);
+    await sendFoundNote(w['F'], w['A'], net.keys[w['F']]!, card.id);
+    await net.settle();
+    expect(net.store(w['A']).finderCount(card.id), 1);
+    final int written = net.disks[w['A']]!.indexWrites;
+    // The same note again and a newer one of the same finder.
+    await sendFoundNote(w['F'], w['A'], net.keys[w['F']]!, card.id);
+    await sendFoundNote(
+      w['F'],
+      w['A'],
+      net.keys[w['F']]!,
+      card.id,
+      atSeconds: 99,
+    );
+    await net.settle();
+    expect(net.store(w['A']).finderCount(card.id), 1);
+    expect(net.disks[w['A']]!.indexWrites, written);
+  });
+
+  test('an account adds at most a day of new finders, over all '
+      'pebbles of the author', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'F']);
+    final _Net net = await _Net.of(w, keeperTarget: 0);
+    final int count = kFoundNotesPerDay + 5;
+    final List<PebbleId> ids = <PebbleId>[];
+    for (int i = 0; i < count; i++) {
+      final Uint8List design = Uint8List.fromList(<int>[i & 0xFF, i >> 8, 7]);
+      final PebbleCard card = await PebbleCard.sign(
+        key: net.keys[w['A']]!,
+        design: design,
+        createdSeconds: 1000 + i,
+        look: _look,
+        name: 'p$i',
+        note: '',
+        authorName: 'A',
+      );
+      await net.store(w['A']).addCreated(card, design);
+      ids.add(card.id);
+    }
+    int counted() => <int>[
+      for (final PebbleId id in ids) net.store(w['A']).finderCount(id),
+    ].fold(0, (int a, int b) => a + b);
+
+    Future<void> notify(Iterable<PebbleId> some) async {
+      int n = 0;
+      for (final PebbleId id in some) {
+        await sendFoundNote(w['F'], w['A'], net.keys[w['F']]!, id);
+        // The frames' own budget lets 30 a minute through.
+        if (++n % 20 == 0) {
+          await net.settle();
+          await w.advance(const Duration(minutes: 1));
+        }
+      }
+      await net.settle();
+    }
+
+    await notify(ids);
+    expect(counted(), kFoundNotesPerDay);
+    await w.advance(const Duration(days: 1));
+    await notify(ids.skip(kFoundNotesPerDay));
+    expect(counted(), count);
+  });
+
+  test('the finders of a pebble are bounded, and an index from an older '
+      'Zen with more is cut down to the caps', () async {
+    final LedgerKeyPair key = await LedgerKeyPair.generate();
+    final _CountingDisk disk = _CountingDisk();
+    final PebbleStore made = PebbleStore(disk);
+    final Uint8List design = Uint8List.fromList(<int>[1, 2, 3]);
+    final PebbleCard card = await PebbleCard.sign(
+      key: key,
+      design: design,
+      createdSeconds: 5,
+      look: _look,
+      name: 'x',
+      note: '',
+      authorName: 'A',
+    );
+    await made.addCreated(card, design);
+    // Not a pebble made here: nothing to count for.
+    final PebbleId other = PebbleId(List<int>.filled(16, 9));
+    final int base = disk.indexWrites;
+    expect(await made.addFinder(other, 'k'), isFalse);
+    expect(disk.indexWrites, base);
+    // An index that holds far more finders than the caps allow.
+    final Map<String, dynamic> index =
+        jsonDecode(utf8.decode(disk.files['pebbles/index']!))
+            as Map<String, dynamic>;
+    index['fd'] = <String, dynamic>{
+      card.id.text: <String>[
+        for (int i = 0; i < 3 * kPebbleMaxFinders; i++) 'finder$i',
+      ],
+      for (int p = 0; p < 30; p++)
+        PebbleId(List<int>.filled(16, p + 20)).text: <String>[
+          for (int i = 0; i < kPebbleMaxFinders; i++) 'p$p-$i',
+        ],
+    };
+    disk.files['pebbles/index'] = Uint8List.fromList(
+      utf8.encode(jsonEncode(index)),
+    );
+    final PebbleStore store = PebbleStore(disk);
+    await store.load();
+    expect(store.finderCount(card.id), kPebbleMaxFinders);
+    int total = store.finderCount(card.id);
+    for (int p = 0; p < 30; p++) {
+      total += store.finderCount(PebbleId(List<int>.filled(16, p + 20)));
+    }
+    expect(total, kPebbleMaxFindersTotal);
+    // A full pebble takes no more and writes nothing.
+    final int written = disk.indexWrites;
+    expect(await store.addFinder(card.id, 'one-more'), isFalse);
+    expect(disk.indexWrites, written);
   });
 
   test('a retired pebble leaves its keepers, collectors keep it', () async {

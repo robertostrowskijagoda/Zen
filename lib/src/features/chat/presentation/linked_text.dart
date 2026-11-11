@@ -15,9 +15,16 @@ Future<void> openTextLink(BuildContext context, String link) async {
   if (await openWebLink(link, allowHttp: true)) {
     return;
   }
-  await copyWithExpiry(link);
+  // A copy the clipboard refused is not called a copy.
+  final bool copied = await copyWithExpiry(link);
   messenger?.showSnackBar(
-    SnackBar(content: Text(t('Skopiowano link: {link}', {'link': link}))),
+    SnackBar(
+      content: Text(
+        copied
+            ? t('Skopiowano link: {link}', {'link': link})
+            : t('Nie udało się. Spróbuj jeszcze raz.'),
+      ),
+    ),
   );
 }
 

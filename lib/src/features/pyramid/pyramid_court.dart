@@ -8,6 +8,15 @@
 /// top, whose refusal is final. Each next level gets twice as long
 /// ([pyrStepTimeMs]), so the top is not flooded. Accepting at any level
 /// overturns the decision.
+///
+/// The court decides without names: who may judge a matter is fixed by the
+/// rules (its ring, `PyramidState.courtRing`), each judge's phone
+/// registers a one-time card for that matter with the others, the ring
+/// signs the list of cards ([PyrBench]), and a verdict, a dismissal or an
+/// answer to an appeal is signed by as many of those cards as the court
+/// needs ([PyrT.ruled]) — never by a member's own key, and with no more
+/// signatures than that, so the record says that the court decided, not
+/// who, nor how many agreed.
 library;
 
 import 'dart:math';
@@ -220,7 +229,8 @@ final class PyrVerdict {
   final String text;
   final int at;
 
-  /// The place whose head (or the top) gave it.
+  /// The place of the court that gave it ('' = the top): where an appeal
+  /// against it goes from. The record names none of its judges.
   final String judge;
 
   /// The accused's device addresses when it was given (checked by the
@@ -230,6 +240,37 @@ final class PyrVerdict {
   bool overturned = false;
 
   bool activeAt(int now) => !overturned && (until == null || now < until!);
+}
+
+/// The cards of the court in one matter ([PyrT.bench]): a complaint's
+/// first instance or one appeal. Its ring is who may judge the matter as
+/// the rules stand when it was signed; once that changes (a judge left,
+/// moved, or a new head took the place) it counts no more and the judges
+/// there now make new cards.
+@immutable
+final class PyrBench {
+  const PyrBench({
+    required this.id,
+    required this.of,
+    required this.ring,
+    required this.tokens,
+    required this.need,
+  });
+
+  /// The bench record that counted.
+  final String id;
+
+  /// The complaint or the appeal it judges.
+  final String of;
+
+  /// The judges' keys, sorted.
+  final List<String> ring;
+
+  /// One-time key (Ed25519 id) → the fingerprint of its ML-DSA key.
+  final Map<String, String> tokens;
+
+  /// How many of its cards a decision needs.
+  final int need;
 }
 
 /// A change of the emission limit waiting its 30 days.
@@ -268,8 +309,8 @@ final class PyrEmitChange {
 }
 
 /// A verdict as somebody outside the pyramid reads it: the verdict signed
-/// by its judge (a [PyrT.verdict], or the [PyrT.appealAnswer] of a higher
-/// level that gave it), passed on by a friend who is a member, with the
+/// by its court's cards (a [PyrT.verdict], or the [PyrT.appealAnswer] of a
+/// higher level that gave it), passed on by a friend who is a member, with the
 /// address records the accused signed (where it shows) and, when it was
 /// overturned, the accused's appeal and the answer that accepted it.
 /// What only the friend says (the pseudonym) is not signed.

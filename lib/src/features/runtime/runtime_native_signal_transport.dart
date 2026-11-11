@@ -310,6 +310,9 @@ final class RuntimeNodeSession {
     this.sessionKey = '',
     this.pinSessionKeys,
     this.hintSessionKeys,
+    this.dropSessionKeyHints,
+    this.setKnownPeers,
+    this.keyConflicts,
     this.setOnScreen,
   });
 
@@ -354,10 +357,23 @@ final class RuntimeNodeSession {
   pinSessionKeys;
 
   /// Hands the bridge device keys (address → fingerprint) that only someone
-  /// else names (a friend's friend list): hints, which never move a pin.
-  /// Returns the pins they contradict (address → the pinned fingerprint).
+  /// else names (a friend's friend list or device record): hints, which
+  /// never move a pin. Returns the pins they contradict (address → the
+  /// pinned fingerprint).
   final Map<String, String> Function(Map<String, String> hints)?
   hintSessionKeys;
+
+  /// Takes hints back (address → fingerprint): nobody names them any more.
+  final void Function(Map<String, String> hints)? dropSessionKeyHints;
+
+  /// Names the addresses the app knows (its friends, this person's own
+  /// devices) to the bridge: only they use the known peers' KEM budget and
+  /// keep their peer entries and pins (pq_session.go, setKnown).
+  final void Function(List<String> addresses)? setKnownPeers;
+
+  /// Addresses whose record the bridge refused because it contradicts a
+  /// device key vouched for there (read with the pins once a minute).
+  final Stream<String>? keyConflicts;
 
   /// Tells the bridge whether the app that runs the node is on screen
   /// (node_identity.go).
@@ -402,8 +418,9 @@ final class RuntimeNodeOwner {
     'claim': claim,
     'onScreen': onScreen,
     if (goneApp > 0) 'goneApp': goneApp,
-    // Where the bridge writes a fatal Go error (ZenTechLog.noteGoCrash).
-    if (ZenTechLog.goCrashPath case final String crash) 'crashFile': crash,
+    // Where the bridge writes a fatal Go error (ZenTechLog.noteGoCrash);
+    // not the device's file while a hidden account is open.
+    if (ZenTechLog.goCrashOutput case final String crash) 'crashFile': crash,
   };
 
   /// Notes the number a start's answer ([result]) gave this owner.
@@ -796,16 +813,29 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// restarts.
   final Set<String> _extraPeers = <String>{};
 
-  /// Device keys others vouched for (address → fingerprint): friends'
-  /// hybrid-signed device records and hellos. Kept so they are pinned
-  /// again after the node restarts.
+  /// Device keys their devices proved (address → fingerprint): hellos
+  /// signed by the device's hybrid key over a session with that key. Kept
+  /// so they are pinned again after the node restarts.
   final Map<String, String> _vouchedKeys = <String, String>{};
   static const int _maxVouchedKeys = 20000;
 
-  /// Device keys only friends' friend lists name, kept the same way and
-  /// handed to the bridge as hints; the oldest go first.
+  /// Device keys only someone's word names, by who said so (a friend's
+  /// address for its friend list, `account:` and the account for its
+  /// device records, '' for anyone): what each said last, in full.
+  final Map<String, Map<String, String>> _hintsBy =
+      <String, Map<String, String>>{};
+
+  /// Who names each hinted address, the latest last.
+  final Map<String, Set<String>> _hintSources = <String, Set<String>>{};
+
+  /// The hint the bridge has per address (the latest word), kept so it is
+  /// handed over again after the node restarts; the oldest go first.
   final Map<String, String> _hintedKeys = <String, String>{};
   static const int _maxHintedKeys = 8192;
+  static const String _anyone = '';
+
+  /// The addresses the app knows (null: not said in this run).
+  List<String>? _knownPeers;
   final StreamController<String> _keyConflicts =
       StreamController<String>.broadcast();
   final Set<String> _reportedConflicts = <String>{};
@@ -822,53 +852,186 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// Hands [keys] (address → device key fingerprint) to the bridge. Who
   /// says so decides how far they count:
   ///
-  /// * [force] left out: only someone's word, a friend's friend list. The
-  ///   keys are hints: they never move a pin or end a session, and the
-  ///   device's own signed record decides on first contact.
-  /// * [force] false: a hybrid-signed device record or hello names them.
-  ///   They are pinned before any contact, so someone holding only an
-  ///   address's broken node key is refused even on first contact; a
-  ///   different pin already there stays.
+  /// * [force] left out: only someone's word. The keys are hints: they
+  ///   never move a pin or end a session, and the device's own signed
+  ///   record decides on first contact. Better given with their source
+  ///   ([replaceSessionKeyHints]), so they go when it does.
+  /// * [force] false: a hello signed by the device's hybrid key named them
+  ///   and came over a session with that key: the device proved it. They
+  ///   are pinned; a different pin already there stays and is reported on
+  ///   [sessionKeyConflicts].
   /// * [force] true: a hybrid-signed hello of a known friend contradicts
   ///   the session; the key replaces whatever was pinned.
   ///
-  /// A key that contradicts a pin is reported on [sessionKeyConflicts].
   /// Safe to call before the node is up.
   void vouchSessionKeys(Map<String, String> keys, {bool? force}) {
-    final Map<String, String> pins = <String, String>{};
-    keys.forEach((String address, String key) {
-      final String normalized = PeerShareCodec.normalizeAddress(address);
-      final String fingerprint = key.trim().toLowerCase();
-      if (normalized.isEmpty || fingerprint.length != 64) {
-        return;
-      }
-      if (force == null) {
-        if (_vouchedKeys.containsKey(normalized)) {
-          return;
-        }
-        _hintedKeys.remove(normalized);
-        if (_hintedKeys.length >= _maxHintedKeys) {
-          _hintedKeys.remove(_hintedKeys.keys.first);
-        }
-        _hintedKeys[normalized] = fingerprint;
-        pins[normalized] = fingerprint;
-        return;
-      }
-      if (!_vouchedKeys.containsKey(normalized) &&
-          _vouchedKeys.length >= _maxVouchedKeys) {
-        return;
-      }
-      _hintedKeys.remove(normalized);
-      _vouchedKeys[normalized] = fingerprint;
-      pins[normalized] = fingerprint;
-    });
-    if (pins.isEmpty) {
+    final Map<String, String> valid = _validSessionKeys(keys);
+    if (valid.isEmpty) {
       return;
     }
     if (force == null) {
-      _hintNow(pins);
-    } else {
+      final Map<String, String> merged = <String, String>{
+        ...?_hintsBy[_anyone],
+      };
+      valid.forEach((String address, String fingerprint) {
+        merged
+          ..remove(address)
+          ..[address] = fingerprint;
+      });
+      while (merged.length > _maxHintedKeys) {
+        merged.remove(merged.keys.first);
+      }
+      _setHints(_anyone, merged);
+      return;
+    }
+    final Map<String, String> pins = <String, String>{};
+    valid.forEach((String address, String fingerprint) {
+      if (!_vouchedKeys.containsKey(address) &&
+          _vouchedKeys.length >= _maxVouchedKeys) {
+        return;
+      }
+      // Proven: nobody's word on it is needed (the bridge drops the hint).
+      _hintedKeys.remove(address);
+      _vouchedKeys[address] = fingerprint;
+      pins[address] = fingerprint;
+    });
+    if (pins.isNotEmpty) {
       _pinNow(pins, keep: !force);
+    }
+  }
+
+  /// The device keys [source] names now (a friend's address for its
+  /// friend list, `account:` and the account for its device records), in
+  /// full: what it named before and no longer does goes, unless someone
+  /// else still names it. Hints only (see [vouchSessionKeys]). Safe to
+  /// call before the node is up.
+  void replaceSessionKeyHints(String source, Map<String, String> keys) {
+    if (source.isEmpty) {
+      return;
+    }
+    final Map<String, String> valid = _validSessionKeys(keys);
+    while (valid.length > _maxHintedKeys) {
+      valid.remove(valid.keys.first);
+    }
+    _setHints(source, valid);
+  }
+
+  /// Forgets what every source but [sources] named: a friend removed takes
+  /// back what only that friend said.
+  void keepSessionKeyHintsOf(Set<String> sources) {
+    for (final String source in _hintsBy.keys.toList()) {
+      if (source != _anyone && !sources.contains(source)) {
+        _setHints(source, const <String, String>{});
+      }
+    }
+  }
+
+  /// Names the addresses this person knows (friends, own devices) to the
+  /// bridge, again after every restart of the node. Safe to call before
+  /// the node is up.
+  void setKnownPeers(Iterable<String> addresses) {
+    final List<String> known = <String>{
+      for (final String a in addresses)
+        if (PeerShareCodec.normalizeAddress(a).isNotEmpty)
+          PeerShareCodec.normalizeAddress(a),
+    }.toList()..sort();
+    if (listEquals(known, _knownPeers)) {
+      return;
+    }
+    _knownPeers = known;
+    _setKnownNow(known);
+  }
+
+  void _setKnownNow(List<String> known) {
+    final void Function(List<String>)? set = _session?.setKnownPeers;
+    if (set == null) {
+      return;
+    }
+    try {
+      set(known);
+    } on Object catch (error) {
+      logZenWarning('Known peers were not handed over: $error');
+    }
+  }
+
+  static Map<String, String> _validSessionKeys(Map<String, String> keys) {
+    final Map<String, String> valid = <String, String>{};
+    keys.forEach((String address, String key) {
+      final String normalized = PeerShareCodec.normalizeAddress(address);
+      final String fingerprint = key.trim().toLowerCase();
+      if (normalized.isNotEmpty && fingerprint.length == 64) {
+        valid[normalized] = fingerprint;
+      }
+    });
+    return valid;
+  }
+
+  /// Makes [keys] all that [source] names, and hands the bridge what
+  /// changes: the latest word per address, or the hint taken back when
+  /// nobody names the address any more.
+  void _setHints(String source, Map<String, String> keys) {
+    final Map<String, String> before =
+        _hintsBy[source] ?? const <String, String>{};
+    if (mapEquals(before, keys)) {
+      return;
+    }
+    if (keys.isEmpty) {
+      _hintsBy.remove(source);
+    } else {
+      _hintsBy[source] = Map<String, String>.of(keys);
+    }
+    final Map<String, String> give = <String, String>{};
+    final Map<String, String> drop = <String, String>{};
+    for (final String address in <String>{...before.keys, ...keys.keys}) {
+      final Set<String> sources = _hintSources.putIfAbsent(
+        address,
+        () => <String>{},
+      )..remove(source);
+      if (keys.containsKey(address)) {
+        sources.add(source);
+      } else if (sources.isEmpty) {
+        _hintSources.remove(address);
+      }
+      final String? had = _hintedKeys[address];
+      if (_vouchedKeys.containsKey(address)) {
+        _hintedKeys.remove(address);
+        continue;
+      }
+      final String? want =
+          keys[address] ??
+          (sources.isEmpty ? null : _hintsBy[sources.last]?[address]);
+      if (want == had) {
+        continue;
+      }
+      _hintedKeys.remove(address);
+      if (want == null) {
+        drop[address] = had!;
+      } else {
+        _hintedKeys[address] = want;
+        give[address] = want;
+      }
+    }
+    while (_hintedKeys.length > _maxHintedKeys) {
+      _hintedKeys.remove(_hintedKeys.keys.first);
+    }
+    if (drop.isNotEmpty) {
+      _dropHintsNow(drop);
+    }
+    if (give.isNotEmpty) {
+      _hintNow(give);
+    }
+  }
+
+  void _dropHintsNow(Map<String, String> hints) {
+    final void Function(Map<String, String>)? drop =
+        _session?.dropSessionKeyHints;
+    if (drop == null) {
+      return;
+    }
+    try {
+      drop(hints);
+    } on Object catch (error) {
+      logZenWarning('Device key hints were not taken back: $error');
     }
   }
 
@@ -892,7 +1055,13 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       return;
     }
     try {
-      _reportConflicts(hint(hints).keys);
+      // A hint that contradicts a pin is someone's word against a key the
+      // device itself signed: no reason to warn about that device (a friend
+      // could accuse anyone). Only counted in the log.
+      final int contradicted = hint(hints).length;
+      if (contradicted > 0) {
+        logZenMessage('$contradicted device key hints contradict pins.');
+      }
     } on Object catch (error) {
       logZenWarning('Device key hints were not handed over: $error');
     }
@@ -1485,12 +1654,20 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         for (final String uri in _extraPeers) {
           _addPeerNow(uri);
         }
+        final List<String>? known = _knownPeers;
+        if (known != null) {
+          _setKnownNow(known);
+        }
         if (_vouchedKeys.isNotEmpty) {
           _pinNow(Map<String, String>.of(_vouchedKeys), keep: true);
         }
         if (_hintedKeys.isNotEmpty) {
           _hintNow(Map<String, String>.of(_hintedKeys));
         }
+        // Ends with the session (its transport closes it).
+        session.keyConflicts?.listen(
+          (String address) => _reportConflicts(<String>[address]),
+        );
         _applyDoorNow();
         _applyMailboxDoorsNow();
         _applyLocalLinksNow();
@@ -1836,15 +2013,23 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   );
   owner?.started(startResult);
   final int handle = _readNodeHandle(startResult);
-  // The device keys pinned in earlier runs, before any signal comes in.
+  // The device keys pinned in earlier runs, and who is known, before any
+  // signal comes in.
   final Directory runtimeDirectory = (await _runtimeConfigFile(
     config.supportDirectory,
   )).parent;
+  final StreamController<String> keyConflicts =
+      StreamController<String>.broadcast();
   final NodeKeyPinKeeper pins = NodeKeyPinKeeper(
     readPins: () => bridge.pqPins(handle),
     writePins: (String pinsJson) => bridge.setPqPins(handle, pinsJson),
     file: () => nodeKeyPinsFile(runtimeDirectory),
     protector: config.nodeConfigProtector,
+    onConflicts: (Map<String, String> conflicts) {
+      if (!keyConflicts.isClosed) {
+        conflicts.keys.forEach(keyConflicts.add);
+      }
+    },
   );
   await pins.restore();
   pins.start();
@@ -1855,12 +2040,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   // A node that only receives has one public peer: whether its link still
   // answers is checked on every wake the phone has anyway.
   final WakeTimer? linkCheck = config.peerTarget == kReceiveOnlyPeerTarget
-      ? checkLinksOnWakes(
-          () => runNodeCallOffThread<Map<String, dynamic>>(
-            () => YggdrasilBridgeFfi.load().checkLinks(handle),
-            what: 'link check',
-          ),
-        )
+      ? checkLinksOnWakes(() => checkNodeLinksOffThread(handle))
       : null;
   return RuntimeNodeSession(
     transport: ManagedSignalTransport(
@@ -1878,6 +2058,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
       onStop: () async {
         linkCheck?.cancel();
         await pins.stop();
+        await keyConflicts.close();
         await stopNodeOffThread(handle);
         ZenTechLog.nodeStopped(handle);
       },
@@ -1915,9 +2096,23 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
         jsonEncode(<String, Object?>{'pins': hints, 'hint': true}),
       ),
     ),
+    dropSessionKeyHints: (Map<String, String> hints) => bridge.setPqPins(
+      handle,
+      jsonEncode(<String, Object?>{'pins': hints, 'hint': true, 'drop': true}),
+    ),
+    setKnownPeers: (List<String> addresses) => bridge.setPqPins(
+      handle,
+      jsonEncode(<String, Object?>{'known': addresses}),
+    ),
+    keyConflicts: keyConflicts.stream,
     setOnScreen: (bool onScreen) => bridge.setNodeOnScreen(handle, onScreen),
   );
 }
+
+/// Who device keys an account's device records name are hints from
+/// ([RuntimeNodeRuntime.replaceSessionKeyHints]); a friend's friend list
+/// is a hint source under the friend's address.
+String sessionKeySourceOfAccount(String account) => 'account:$account';
 
 /// The conflicts in the bridge's answer to a pin request (`{taken,
 /// conflicts: {address: pinned}}`).
@@ -2196,6 +2391,23 @@ Future<Map<String, dynamic>> _startNodeInHelper(String configJson) =>
       () => YggdrasilBridgeFfi.load().startNode(configJson),
       debugName: 'zen-node-start',
     );
+
+/// Asks the bridge whether the links of the node [handle] still answer, off
+/// this isolate's thread. In a function of its own: the closure sent to the
+/// helper isolate must hold nothing but the handle. Written inside the
+/// function that starts the session it carried that function's whole
+/// context along (the pin keeper and its futures), which no isolate
+/// takes, so every check failed before it began.
+Future<Map<String, dynamic>> checkNodeLinksOffThread(
+  int handle, {
+  Map<String, dynamic> Function(int handle) check = _checkLinksInBridge,
+}) => runNodeCallOffThread<Map<String, dynamic>>(
+  () => check(handle),
+  what: 'link check',
+);
+
+Map<String, dynamic> _checkLinksInBridge(int handle) =>
+    YggdrasilBridgeFfi.load().checkLinks(handle);
 
 /// Stops the node [handle] in the bridge off this isolate's thread.
 Future<void> stopNodeOffThread(

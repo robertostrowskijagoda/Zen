@@ -266,6 +266,34 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <!-- Filling logins saved in Zen into other apps and browsers
+             (ZenAutofillService.kt): off until the person picks Zen as the
+             autofill service in Android's settings. Exported only as far as
+             Android needs to find and bind it; the permission lets nothing
+             but the system bind it. -->
+        <service
+            android:name=".ZenAutofillService"
+            android:label="@string/launcher_label"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+            android:exported="true"
+            tools:targetApi="o">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/zen_autofill_service" />
+        </service>
+        <!-- The autofill suggestion's authentication: started for a result
+             by the autofill framework through Zen's own PendingIntent (other
+             apps cannot start it), in the task of the app being filled. It
+             brings up MainActivity and returns the entry picked there. -->
+        <activity
+            android:name=".ZenAutofillActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

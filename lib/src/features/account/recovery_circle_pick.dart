@@ -1,61 +1,34 @@
-import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'dart:convert';
+
+import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// Most people who keep recovery pieces.
-const int kMaxRecoveryHelpers = 6;
+/// Most people who keep pieces of one account's key.
+///
+/// Shamir's scheme over GF(256) would take up to 255 and a piece is a few
+/// kilobytes with its signature, so neither sets the limit. The recovery
+/// does: it tries at most 600 combinations of the halves that came, and
+/// every 4 of 12 (the largest band, [pieceThreshold]) is 495 of them, so
+/// even with some halves spoilt the right ones are always tried. Twelve
+/// also keeps a hand-out (a message and an answer each) small when the
+/// close friends change.
+const int kMaxPieceHolders = 12;
 
-/// Who keeps the recovery pieces unless the person picks otherwise: the
-/// mailbox circle and the other friends, "Przyjaciel" first, then
-/// "Znajomy"; within a level mailboxes come before the rest, in their
-/// order. Weak acquaintances only with [includeWeak] (and then last): a
-/// piece of the account key is not for someone barely known. At most
-/// [max] people, each once.
-List<String> pickRecoveryHelpers({
-  required Iterable<String> mailboxes,
-  required Iterable<String> friends,
-  required FriendLevel Function(String address) levelOf,
-  int max = kMaxRecoveryHelpers,
-  bool includeWeak = false,
+/// Who keeps the pieces of [account]'s key: its close friends, each once,
+/// at most [kMaxPieceHolders]. With more of them, an order of their own
+/// for each account (not the same friends keep everyone's), stable when
+/// one more is added: only the last place changes.
+List<String> pieceHolders({
+  required Iterable<String> close,
+  required String account,
 }) {
   final Set<String> seen = <String>{};
   final List<String> all = <String>[
-    for (final String a in <String>[...mailboxes, ...friends])
-      if (a.isNotEmpty &&
-          seen.add(PeerShareCodec.normalizeAddress(a)) &&
-          (includeWeak || levelOf(a) != FriendLevel.weak))
-        a,
+    for (final String a in close)
+      if (a.isNotEmpty && seen.add(PeerShareCodec.normalizeAddress(a)))
+        PeerShareCodec.normalizeAddress(a),
   ];
-  return closestFirst(all, levelOf).take(max).toList();
+  String rank(String a) => sha256Hex(utf8.encode('pieces|$account|$a'));
+  all.sort((String a, String b) => rank(a).compareTo(rank(b)));
+  return all.take(kMaxPieceHolders).toList();
 }
-
-/// Everyone who can be picked for the circle, closest first (weak
-/// acquaintances last), each once.
-List<String> recoveryHelperCandidates({
-  required Iterable<String> friends,
-  required FriendLevel Function(String address) levelOf,
-}) {
-  final Set<String> seen = <String>{};
-  return closestFirst(<String>[
-    for (final String a in friends)
-      if (a.isNotEmpty && seen.add(PeerShareCodec.normalizeAddress(a))) a,
-  ], levelOf);
-}
-
-/// Whether [picked] can become the circle: at least [minimum] people (the
-/// number a recovery without the password needs), at most
-/// [kMaxRecoveryHelpers]. Returns `null` when it can, else what is wrong.
-RecoveryCircleProblem? checkRecoveryCircle(
-  Iterable<String> picked, {
-  required int minimum,
-}) {
-  final int n = picked.toSet().length;
-  if (n < minimum) {
-    return RecoveryCircleProblem.tooFew;
-  }
-  if (n > kMaxRecoveryHelpers) {
-    return RecoveryCircleProblem.tooMany;
-  }
-  return null;
-}
-
-enum RecoveryCircleProblem { tooFew, tooMany }

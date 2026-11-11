@@ -63,6 +63,51 @@ abstract interface class AccountSyncChannel {
   Future<bool> publish(Map<String, dynamic> body);
 }
 
+/// A channel whose log of this device's changes can start over
+/// ([AccountStateSync] prunes it with this, see [kAccountSyncRebaseEvery]).
+abstract interface class AccountSyncLog {
+  /// Starts this device's log of changes over (a checkpoint); returns
+  /// where it starts, or null when nothing can be written now.
+  Future<Object?> startOver();
+
+  /// Drops what this device holds of its log before [start] (what
+  /// [startOver] returned); returns how many changes went.
+  Future<int> dropBefore(Object start);
+
+  /// Zen is locked: every change opened so far is forgotten (no plain copy
+  /// of one stays in memory) and none is opened until [reopen].
+  void close();
+
+  /// Zen is unlocked: the changes are opened again, and those of the other
+  /// devices come once more through [AccountSyncChannel.incoming].
+  Future<void> reopen();
+}
+
+/// A domain that drops units on purpose when it takes a state (the
+/// passwords drop the versions a deletion saw): a unit missing after a
+/// write is then a deletion here, never a newer build's field to keep
+/// aside with its value.
+abstract interface class AccountSyncPruning {}
+
+/// How often, at most, a device starts its log of changes over: a
+/// checkpoint, every unit as it is now (and the deletions of the last
+/// [kAccountSyncTombstoneLife]) written again after it, and everything
+/// before it dropped, here and (when they get the checkpoint) on the
+/// account's other devices. Only when something was overwritten or deleted
+/// since the last time. So an overwritten or deleted value (an old
+/// password, a deleted note) leaves this device's log within this time of
+/// the next look at the states (at most [kAccountSyncScanEvery]).
+const Duration kAccountSyncRebaseEvery = Duration(hours: 6);
+
+/// How long a deletion is written again into the log when it starts over.
+/// A device away for less than this gets the deletion itself; one away
+/// longer gets the state as it is now: a password's or a note's deletion
+/// is also a marker inside the state, which stays (up to the markers each
+/// keeps), so nothing deleted comes back; and every device keeps its own
+/// record of each deletion (no value in it) for good, so a returning
+/// device's old units are never taken over newer deletions.
+const Duration kAccountSyncTombstoneLife = Duration(days: 30);
+
 // ---- units ----
 
 const String _sep = '\u001f';
@@ -208,12 +253,17 @@ final class _Unit {
     this.hash, {
     this.deleted = false,
     this.held = false,
+    this.at = 0,
   });
 
   final int clock;
   final String writer;
   final String hash;
   final bool deleted;
+
+  /// For a deletion: when this device learnt of it (wall clock), so it is
+  /// written again into the log only for [kAccountSyncTombstoneLife].
+  final int at;
 
   /// Sent by another device, but this build's domain does not keep it (a
   /// field a newer build added): kept aside with its value
@@ -225,7 +275,7 @@ final class _Unit {
     clock,
     writer,
     hash,
-    if (deleted) 1 else if (held) 2,
+    if (deleted) ...<Object>[1, at] else if (held) 2,
   ];
 
   static _Unit? fromJson(Object? json) {
@@ -242,6 +292,7 @@ final class _Unit {
       json[2] as String,
       deleted: json.length > 3 && json[3] == 1,
       held: json.length > 3 && json[3] == 2,
+      at: json.length > 4 && json[4] is int ? json[4] as int : 0,
     );
   }
 
@@ -256,6 +307,11 @@ final class _Unit {
 /// it.
 const Duration kAccountSyncScanEvery = Duration(minutes: 15);
 
+/// Most bytes of units (plain JSON) in one change sent to the other
+/// devices: sealed (base64, a third more), signed (several KiB) and framed,
+/// it stays under the 64 KiB an entry of the account's log may have.
+const int kAccountSyncPartBytes = 24 * 1024;
+
 /// Keeps [domains] the same on the account's devices through [channel];
 /// its own bookkeeping lives on [disk].
 final class AccountStateSync {
@@ -266,7 +322,11 @@ final class AccountStateSync {
     this.delay = const Duration(seconds: 2),
     this.scanEvery = kAccountSyncScanEvery,
     this.mayRead,
-  }) : _domains = <String, AccountSyncDomain>{
+    this.rebaseEvery = kAccountSyncRebaseEvery,
+    this.tombstoneLife = kAccountSyncTombstoneLife,
+    int Function()? now,
+  }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
+       _domains = <String, AccountSyncDomain>{
          for (final AccountSyncDomain d in domains) d.id: d,
        };
 
@@ -287,7 +347,30 @@ final class AccountStateSync {
   /// are sent as they come, and the next scan looks at everything again.
   final Future<bool> Function()? mayRead;
 
+  /// [kAccountSyncRebaseEvery].
+  final Duration rebaseEvery;
+
+  /// [kAccountSyncTombstoneLife].
+  final Duration tombstoneLife;
+  final int Function() _now;
+
   static const String _stateKey = 'account/sync/state';
+
+  /// When this device's log last started over.
+  int _rebasedAt = 0;
+
+  /// Something was overwritten or deleted since (the log holds values no
+  /// longer current).
+  bool _superseded = false;
+
+  /// Zen is locked: nothing opened is kept ([lock]).
+  bool _locked = false;
+
+  /// Changes that came while locked were let go: taken again at [unlock].
+  bool _retake = false;
+
+  /// How many times the log started over (tests).
+  int rebased = 0;
 
   int _lamport = 0;
   final Map<String, Map<String, _Unit>> _units = <String, Map<String, _Unit>>{};
@@ -317,6 +400,10 @@ final class AccountStateSync {
 
   Future<void> start() async {
     await _load();
+    if (_rebasedAt == 0) {
+      // The bound counts from the first start.
+      _rebasedAt = _now();
+    }
     for (final Map<String, dynamic> body in channel.existing()) {
       _enqueue(() => _take(body));
     }
@@ -400,6 +487,9 @@ final class AccountStateSync {
         return;
       }
       _lamport = json['l'] is int ? json['l'] as int : 0;
+      _rebasedAt = json['rb'] is int ? json['rb'] as int : 0;
+      // A state saved by an earlier build: its log never started over.
+      _superseded = json['sp'] == true || !json.containsKey('rb');
       final Object? d = json['d'];
       if (d is Map) {
         for (final MapEntry<Object?, Object?> e in d.entries) {
@@ -449,6 +539,8 @@ final class AccountStateSync {
               },
           },
           'n': _unsent.toList(),
+          'rb': _rebasedAt,
+          'sp': _superseded,
           if (_held.values.any((Map<String, Object?> m) => m.isNotEmpty))
             'h': <String, Object>{
               for (final MapEntry<String, Map<String, Object?>> e
@@ -492,6 +584,9 @@ final class AccountStateSync {
           continue;
         }
         if (old == null || old.deleted || old.hash != h) {
+          if (old != null && !old.deleted) {
+            _superseded = true;
+          }
           final int c = ++_lamport;
           known[u.key] = _Unit(c, channel.device, h);
           delta[u.key] = <String, Object?>{
@@ -504,7 +599,14 @@ final class AccountStateSync {
       for (final MapEntry<String, _Unit> u in known.entries.toList()) {
         if (!u.value.deleted && !u.value.held && !units.containsKey(u.key)) {
           final int c = ++_lamport;
-          known[u.key] = _Unit(c, channel.device, '', deleted: true);
+          known[u.key] = _Unit(
+            c,
+            channel.device,
+            '',
+            deleted: true,
+            at: _now(),
+          );
+          _superseded = true;
           delta[u.key] = <String, Object?>{'c': c, 'w': channel.device, 'x': 1};
         }
       }
@@ -512,8 +614,7 @@ final class AccountStateSync {
         continue;
       }
       dirty = true;
-      if (!channel.hasOtherDevices ||
-          !await channel.publish(<String, dynamic>{'d': d.id, 'u': delta})) {
+      if (!channel.hasOtherDevices || !await _publishUnits(d.id, delta)) {
         _unsent.add(d.id);
       } else {
         published++;
@@ -526,6 +627,133 @@ final class AccountStateSync {
     if (dirty) {
       await _save();
     }
+    await _rebase();
+  }
+
+  /// Every unit of [d] as it is now, to write again: values (held ones
+  /// too) and the deletions of the last [tombstoneLife].
+  Map<String, Object?> _allUnits(
+    AccountSyncDomain d,
+    Map<String, Object?> state,
+  ) {
+    final Map<String, _Unit> known = _units[d.id] ?? const <String, _Unit>{};
+    final Map<String, Object?> units = flattenAccountState(
+      state,
+      whole: d.wholeKeys,
+    );
+    final int now = _now();
+    final Map<String, Object?> all = <String, Object?>{};
+    for (final MapEntry<String, _Unit> u in known.entries) {
+      final _Unit unit = u.value;
+      if (unit.deleted) {
+        if (unit.at == 0 || now - unit.at < tombstoneLife.inMilliseconds) {
+          all[u.key] = <String, Object?>{
+            'c': unit.clock,
+            'w': unit.writer,
+            'x': 1,
+          };
+        }
+      } else if (unit.held && _heldOf(d.id).containsKey(u.key)) {
+        all[u.key] = <String, Object?>{
+          'c': unit.clock,
+          'w': unit.writer,
+          'v': _heldOf(d.id)[u.key],
+        };
+      } else if (units.containsKey(u.key)) {
+        all[u.key] = <String, Object?>{
+          'c': unit.clock,
+          'w': unit.writer,
+          'v': units[u.key],
+        };
+      }
+    }
+    return all;
+  }
+
+  /// Starts this device's log over ([kAccountSyncRebaseEvery]) when it
+  /// holds values no longer current: a checkpoint, every state as it is
+  /// now after it, then everything before it dropped. Nothing is dropped
+  /// unless all was written again (a device that has not seen a value
+  /// finds it after the checkpoint), nor while a state cannot be read.
+  Future<void> _rebase() async {
+    final AccountSyncChannel channel = this.channel;
+    if (channel is! AccountSyncLog ||
+        _locked ||
+        !_superseded ||
+        _now() - _rebasedAt < rebaseEvery.inMilliseconds) {
+      return;
+    }
+    final AccountSyncLog log = channel as AccountSyncLog;
+    final Map<String, Map<String, Object?>> states =
+        <String, Map<String, Object?>>{};
+    for (final AccountSyncDomain d in _domains.values) {
+      final Map<String, Object?>? state = await d.read();
+      if (state == null) {
+        return;
+      }
+      states[d.id] = state;
+    }
+    final Object? start = await log.startOver();
+    if (start == null) {
+      return;
+    }
+    bool all = true;
+    if (channel.hasOtherDevices) {
+      for (final AccountSyncDomain d in _domains.values) {
+        final Map<String, Object?> units = _allUnits(d, states[d.id]!);
+        if (units.isNotEmpty && !await _publishUnits(d.id, units)) {
+          all = false;
+        }
+      }
+    }
+    if (!all) {
+      // Tried again at the next look: the old changes stay meanwhile.
+      return;
+    }
+    await log.dropBefore(start);
+    if (channel.hasOtherDevices) {
+      _unsent.clear();
+    }
+    _rebasedAt = _now();
+    _superseded = false;
+    rebased++;
+    await _save();
+  }
+
+  /// Zen is locked: the changes not taken yet (they wait for the states to
+  /// open) and every change the channel opened are let go, so no plain copy
+  /// of one (a password) stays in memory; they are taken again at [unlock].
+  void lock() {
+    _locked = true;
+    if (_deferred.isNotEmpty) {
+      _deferred.clear();
+      _retake = true;
+    }
+    final AccountSyncChannel channel = this.channel;
+    if (channel is AccountSyncLog) {
+      (channel as AccountSyncLog).close();
+    }
+  }
+
+  /// Zen is unlocked: what was let go at [lock] is opened and taken again.
+  void unlock() {
+    if (!_locked) {
+      return;
+    }
+    _locked = false;
+    _enqueue(() async {
+      final AccountSyncChannel channel = this.channel;
+      if (channel is AccountSyncLog) {
+        // The changes of the other devices come again through incoming.
+        await (channel as AccountSyncLog).reopen();
+      } else if (_retake) {
+        for (final Map<String, dynamic> body in channel.existing()) {
+          await _take(body);
+        }
+      }
+      _retake = false;
+      await _scan();
+    });
   }
 
   /// Sends every unit of the states (a device was linked): the others take
@@ -543,37 +771,55 @@ final class AccountStateSync {
       if (state == null || known == null || known.isEmpty) {
         continue;
       }
-      final Map<String, Object?> units = flattenAccountState(
-        state,
-        whole: d.wholeKeys,
-      );
-      final Map<String, Object?> all = <String, Object?>{
-        for (final MapEntry<String, _Unit> u in known.entries)
-          if (u.value.deleted)
-            u.key: <String, Object?>{
-              'c': u.value.clock,
-              'w': u.value.writer,
-              'x': 1,
-            }
-          else if (u.value.held && _heldOf(d.id).containsKey(u.key))
-            u.key: <String, Object?>{
-              'c': u.value.clock,
-              'w': u.value.writer,
-              'v': _heldOf(d.id)[u.key],
-            }
-          else if (units.containsKey(u.key))
-            u.key: <String, Object?>{
-              'c': u.value.clock,
-              'w': u.value.writer,
-              'v': units[u.key],
-            },
-      };
-      if (await channel.publish(<String, dynamic>{'d': d.id, 'u': all})) {
+      final Map<String, Object?> all = _allUnits(d, state);
+      if (await _publishUnits(d.id, all)) {
         published++;
         _unsent.remove(d.id);
       }
     }
     await _save();
+  }
+
+  /// Sends [units] of the state [domain], in as many changes as it takes
+  /// for each to stay well under the largest entry the account's log
+  /// carries (`kMaxEntryBytes`, with sealing and signatures on top): a
+  /// large state (every password of the vault, sent to a newly linked
+  /// device) would otherwise be one entry the other devices refuse, sent
+  /// again and refused for ever. Each part is a change on its own: a
+  /// device takes it as it comes, an older build too. False when a part
+  /// did not go out (it is all sent again later).
+  Future<bool> _publishUnits(String domain, Map<String, Object?> units) async {
+    final List<Map<String, Object?>> parts = <Map<String, Object?>>[];
+    Map<String, Object?> part = <String, Object?>{};
+    int size = 0;
+    for (final MapEntry<String, Object?> u in units.entries) {
+      final int bytes = utf8
+          .encode(jsonEncode(<String, Object?>{u.key: u.value}))
+          .length;
+      if (part.isNotEmpty && size + bytes > kAccountSyncPartBytes) {
+        parts.add(part);
+        part = <String, Object?>{};
+        size = 0;
+      }
+      part[u.key] = u.value;
+      size += bytes;
+    }
+    if (part.isNotEmpty || parts.isEmpty) {
+      parts.add(part);
+    }
+    bool all = true;
+    for (final Map<String, Object?> p in parts) {
+      try {
+        if (!await channel.publish(<String, dynamic>{'d': domain, 'u': p})) {
+          all = false;
+        }
+      } on Object catch (error) {
+        // One part refused does not stop the others, nor the other states.
+        logZenWarning('Account state $domain not sent: ${error.runtimeType}');
+        all = false;
+      }
+    }
+    return all;
   }
 
   /// Takes a change another device sent.
@@ -586,7 +832,12 @@ final class AccountStateSync {
     }
     final Map<String, Object?>? current = await d.read();
     if (current == null) {
-      _deferred.add(body);
+      if (_locked) {
+        // Not kept in memory while locked: taken again at the unlock.
+        _retake = true;
+      } else {
+        _deferred.add(body);
+      }
       return;
     }
     final Map<String, Object?> units = flattenAccountState(
@@ -614,9 +865,12 @@ final class AccountStateSync {
       if (old != null && !old.loses(c, w)) {
         continue;
       }
+      if (old != null && !old.deleted) {
+        _superseded = true;
+      }
       if (r['x'] == 1) {
         units.remove(key);
-        known[key] = _Unit(c, w, '', deleted: true);
+        known[key] = _Unit(c, w, '', deleted: true, at: _now());
       } else {
         units[key] = r['v'];
         known[key] = _Unit(c, w, accountStateHash(r['v']));
@@ -648,9 +902,20 @@ final class AccountStateSync {
         if (now.containsKey(key)) {
           known[key] = _Unit(got.clock, got.writer, accountStateHash(now[key]));
           _heldOf(d.id).remove(key);
-        } else if (got.deleted) {
-          known[key] = _Unit(got.clock, got.writer, '', deleted: true);
+        } else if (got.deleted || d is AccountSyncPruning) {
+          // Deleted, or dropped by the domain on purpose (a password
+          // version a deletion saw): a deletion here.
+          known[key] = _Unit(
+            got.clock,
+            got.writer,
+            '',
+            deleted: true,
+            at: got.deleted ? got.at : _now(),
+          );
           _heldOf(d.id).remove(key);
+          if (!got.deleted) {
+            _superseded = true;
+          }
         } else {
           // Not kept by this build (a newer build's field): held with its
           // value, not deleted — after an update it is written in first

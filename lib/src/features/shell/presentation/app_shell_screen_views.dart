@@ -982,6 +982,22 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                 icon: const Icon(Icons.checklist_rounded),
                 label: Text(t('Ponownie przeprowadź konfigurację')),
               ),
+              // The passwords: their own row right here. The top bar has no
+              // room for another button on a 320 dp phone (its connection
+              // status would be cut in most languages).
+              _SettingsGroup(
+                title: '',
+                tiles: <Widget>[
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-passwords'),
+                    icon: Icons.key_rounded,
+                    tone: ZenTone.privacy,
+                    title: t('Hasła'),
+                    subtitle: t('Loginy i hasła do stron i aplikacji'),
+                    onTap: () => unawaited(PasswordVaultScreen.open(context)),
+                  ),
+                ],
+              ),
               // Inviting someone and the app's own page come next.
               _SettingsGroup(
                 title: '',
@@ -1038,15 +1054,16 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                       subtitle: ref.watch(accountSecureReminderProvider)
                           ? t(
                               'Zabezpiecz konto na wypadek zgubionego telefonu: '
-                              'kopia klucza albo krąg odzyskiwania',
+                              'kopia klucza albo hasło konta i bliscy znajomi',
                             )
                           : ref.watch(circleReminderProvider)
                           ? t(
-                              'Masz już dość znajomych — ustaw krąg '
-                              'odzyskiwania',
+                              'Masz już znajomych — ustaw hasło konta, żeby '
+                              'bliscy znajomi mogli pomóc odzyskać konto',
                             )
                           : t(
-                              'Hasło konta, krąg odzyskiwania, nowe urządzenie',
+                              'Hasło konta, klucz u bliskich znajomych, nowe '
+                              'urządzenie',
                             ),
                       onTap: () =>
                           unawaited(AccountRecoveryScreen.open(context)),
@@ -3799,12 +3816,18 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
   }
 
   Future<void> _copy() async {
-    await copyWithExpiry(_contents ?? '');
+    final bool copied = await copyWithExpiry(_contents ?? '');
     if (!mounted) {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(t('Skopiowano dziennik do schowka.'))),
+      SnackBar(
+        content: Text(
+          copied
+              ? t('Skopiowano dziennik do schowka.')
+              : t('Nie udało się. Spróbuj jeszcze raz.'),
+        ),
+      ),
     );
   }
 
@@ -4447,7 +4470,8 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
                   tone: zen.danger,
                   title: t('To konto nie ma kopii'),
                   text: t(
-                    'Nie ma kopii klucza ani kręgu odzyskiwania. Jeśli nie '
+                    'Nie ma kopii klucza ani części klucza u bliskich '
+                    'znajomych. Jeśli nie '
                     'masz tego konta na innym urządzeniu ani w pliku kopii, '
                     'po usunięciu nie da się go odzyskać: znajomi zobaczą '
                     'Cię jako nową osobę, a miejsce w piramidzie przepadnie.',

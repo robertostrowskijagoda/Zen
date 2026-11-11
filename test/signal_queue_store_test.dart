@@ -71,6 +71,36 @@ void main() {
       expect(restored.last.signal.chunkCount, 2);
     });
 
+    test('keeps how many messages a folded copy stands for', () async {
+      final Directory tempDir = await Directory.systemTemp.createTemp(
+        'zen-queue-store-count-',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+      final FileSignalQueueStore store = FileSignalQueueStore(
+        store: FileBinaryStore(
+          tempDir,
+          codec: BinaryCodec(compressor: const _PassThroughCompressor()),
+        ),
+      );
+      await store.save(<QueuedSignal>[
+        const QueuedSignal(
+          id: 'one',
+          signal: ZenSignal(type: ZenSignalType.message, sender: 'ada.ygg'),
+          receivedAtMillis: 1,
+        ),
+        const QueuedSignal(
+          id: 'many',
+          signal: ZenSignal(type: ZenSignalType.message, sender: 'ada.ygg'),
+          receivedAtMillis: 2,
+        ).folding(6),
+      ]);
+      final List<QueuedSignal> restored = await store.load();
+      expect(
+        <int>[for (final QueuedSignal q in restored) q.count],
+        <int>[1, 7],
+      );
+    });
+
     test(
       'keeps group fields: a queued invite must not lose its group',
       () async {

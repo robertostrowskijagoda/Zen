@@ -178,25 +178,36 @@ SocialHubState _applySignal(
             openConversationAddress ?? '',
           ) &&
           current.lifecycle.isInteractive;
+      // Written a moment before it came: straight from them, who are there
+      // now. A copy that waited in a mailbox (or a retry from long ago)
+      // says nothing of whether they are there, and leaves their presence.
+      final bool heardNow = _messageHeardNow(signal, receivedAtMillis);
+      // An older message than one of theirs already here (a late copy from
+      // a mailbox): counted, but the chat list keeps the newer line.
+      final bool late = signal.chatExtras?[_kLateCopyKey] == true;
       return current.copyWith(
         book: book.edit(
           signal.sender,
           (FriendProfile currentFriend) => currentFriend.copyWith(
-            isOnline: true,
+            isOnline: heardNow ? true : null,
             isTyping: false,
-            lastPresenceAtMillis: receivedAtMillis,
-            lastMessagePreview: _clipText(
-              chatPreviewLine(
-                signal.content ?? t('Nowa wiadomość'),
-                type: signal.messageType,
-                fileName: signal.fileName,
-                mimeType: signal.mimeType,
-              ),
-              kMaxStoredPreviewChars,
-            ),
-            lastActivityLabel: activityStamp(
-              DateTime.now().millisecondsSinceEpoch,
-            ),
+            lastPresenceAtMillis: heardNow
+                ? max(currentFriend.lastPresenceAtMillis, receivedAtMillis)
+                : null,
+            lastMessagePreview: late
+                ? null
+                : _clipText(
+                    chatPreviewLine(
+                      signal.content ?? t('Nowa wiadomość'),
+                      type: signal.messageType,
+                      fileName: signal.fileName,
+                      mimeType: signal.mimeType,
+                    ),
+                    kMaxStoredPreviewChars,
+                  ),
+            lastActivityLabel: late
+                ? null
+                : activityStamp(DateTime.now().millisecondsSinceEpoch),
             unreadCount: isConversationOpen ? 0 : currentFriend.unreadCount + 1,
           ),
         ),
@@ -214,31 +225,32 @@ SocialHubState _applySignal(
       final GroupProfile? existingGroup = current.groups[groupId];
       if (existingGroup != null) {
         // Already a member of this group: merge what the sender may add (see
-        // `_groupMembersAfterInvite`), never re-add the invite to the inbox.
+        // `_groupAfterInvite`), never re-add the invite to the inbox.
         // Anyone outside the group who learned the id adds nothing.
-        final List<String>? updatedMembers = _groupMembersAfterInvite(
-          existingGroup,
-          signal,
-        );
-        // The inviter's list of the members, asked for after joining.
-        final bool membersCame =
-            updatedMembers != null &&
+        // The inviter's list of the members, asked for after joining (an
+        // update that adds someone is not that list).
+        final bool awaited =
             signal.inviteId == null &&
+            _groupInviteNewcomerOf(signal) == null &&
             existingGroup.awaitingMembersFrom.isNotEmpty &&
             PeerShareCodec.addressesEqual(
               existingGroup.awaitingMembersFrom,
               signal.sender,
             );
-        if (updatedMembers == null ||
-            (updatedMembers.length == existingGroup.memberAddresses.length &&
-                !membersCame)) {
+        final GroupProfile? updated = _groupAfterInvite(
+          existingGroup,
+          signal,
+          takeDepartures: awaited,
+        );
+        final bool membersCame = updated != null && awaited;
+        if (updated == null ||
+            (_sameGroupMembership(updated, existingGroup) && !membersCame)) {
           return current;
         }
         final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
           current.groups,
         );
-        groups[groupId] = existingGroup.copyWith(
-          memberAddresses: updatedMembers,
+        groups[groupId] = updated.copyWith(
           awaitingMembersFrom: membersCame ? '' : null,
         );
         return current.copyWith(groups: groups);
@@ -357,25 +369,10 @@ SocialHubState _applySignal(
       );
       final GroupProfile? existing = groups[groupId];
       if (existing != null) {
-        final List<String> updated = existing.memberAddresses
-            .where(
-              (String m) => !PeerShareCodec.addressesEqual(m, signal.sender),
-            )
-            .toList();
-        final List<String> pending = existing.pendingInviteAddresses
-            .where(
-              (String m) => !PeerShareCodec.addressesEqual(m, signal.sender),
-            )
-            .toList();
-        groups[groupId] = existing.copyWith(
-          memberAddresses: updated,
-          pendingInviteAddresses: pending,
-          pendingInviteIds: <String, String>{
-            for (final MapEntry<String, String> e
-                in existing.pendingInviteIds.entries)
-              if (!PeerShareCodec.addressesEqual(e.key, signal.sender))
-                e.key: e.value,
-          },
+        groups[groupId] = _groupAfterLeave(
+          existing,
+          signal.sender,
+          _groupStampOf(signal.sentAtMillis) ?? receivedAtMillis,
         );
       }
       return current.copyWith(groups: groups);
@@ -672,6 +669,98 @@ int _estimateInboxEntryBytes(InboxEntry entry) {
 /// otherwise its text.
 String? _signalPreviewText(ZenSignal signal) => signalNoticePreview(signal);
 
+/// The id the entry about the group message [signal] keeps
+/// ([InboxEntry.messageId]): the one its sender gave it, by which the
+/// members change and delete it.
+String? _noticeGroupMessageId(ZenSignal signal) {
+  final String? id = signal.messageId?.trim();
+  return id == null || id.isEmpty ? null : id;
+}
+
+/// Whether [entry] tells of [message] of the conversation [key] (a friend's
+/// address, or `group:<id>`): the same sender, the same chat, the same id.
+bool _entryTellsOf(InboxEntry entry, String key, ChatMessage message) {
+  final String? id = entry.messageId;
+  if (id == null || message.isOutgoing || message.isSystem) {
+    return false;
+  }
+  if (!PeerShareCodec.addressesEqual(entry.peerAddress ?? '', message.sender)) {
+    return false;
+  }
+  final String? groupId = _groupIdOfRouteKey(entry.routeKey);
+  if (key.startsWith('group:')) {
+    return groupId == key.substring('group:'.length) &&
+        id == groupMessageWireId(message.id);
+  }
+  return groupId == null && id == message.id;
+}
+
+/// Whether the queued copy [queued] (kept for the app's return) is
+/// [message] of the conversation [key]: replayed, it would put the
+/// message's words back into the list.
+bool _queuedSignalIs(QueuedSignal queued, String key, ChatMessage message) {
+  final ZenSignal signal = queued.signal;
+  if (message.isOutgoing ||
+      message.isSystem ||
+      !PeerShareCodec.addressesEqual(signal.sender, message.sender)) {
+    return false;
+  }
+  if (key.startsWith('group:')) {
+    return signal.type == ZenSignalType.groupMessage &&
+        signal.groupId == key.substring('group:'.length) &&
+        signal.messageId?.trim() == groupMessageWireId(message.id);
+  }
+  return signal.type == ZenSignalType.message &&
+      _incomingMessageIdOf(signal) == message.id;
+}
+
+/// [signal] saying [text] instead (its queued copy after an edit).
+ZenSignal _signalWithContent(ZenSignal signal, String text) => ZenSignal(
+  type: signal.type,
+  sender: signal.sender,
+  callId: signal.callId,
+  messageId: signal.messageId,
+  routeKey: signal.routeKey,
+  displayName: signal.displayName,
+  content: text,
+  messageType: signal.messageType,
+  attachmentData: signal.attachmentData,
+  attachmentEncoding: signal.attachmentEncoding,
+  fileName: signal.fileName,
+  mimeType: signal.mimeType,
+  attachmentSizeBytes: signal.attachmentSizeBytes,
+  durationMs: signal.durationMs,
+  isPlaceholder: signal.isPlaceholder,
+  attachmentTransferBytes: signal.attachmentTransferBytes,
+  chunkIndex: signal.chunkIndex,
+  chunkCount: signal.chunkCount,
+  chunkData: signal.chunkData,
+  sessionDescription: signal.sessionDescription,
+  groupId: signal.groupId,
+  groupName: signal.groupName,
+  memberAddresses: signal.memberAddresses,
+  memberNames: signal.memberNames,
+  avatarPreset: signal.avatarPreset,
+  bio: signal.bio,
+  isTyping: signal.isTyping,
+  sentAtMillis: signal.sentAtMillis,
+  inviteId: signal.inviteId,
+  cameraOn: signal.cameraOn,
+  disappearSeconds: signal.disappearSeconds,
+  miniProfile: signal.miniProfile,
+  chatExtras: signal.chatExtras,
+);
+
+/// The notification slots that can show the messages of conversation
+/// [key] from [sender] (see [_notificationDedupKeyForSignal]).
+List<String> _chatNoticeSlots(String key, String sender) {
+  if (key.startsWith('group:')) {
+    final String groupId = key.substring('group:'.length);
+    return <String>['group-message:$groupId', 'group-mention:$groupId'];
+  }
+  return <String>['message:${sender.trim()}'];
+}
+
 /// The in-app list's entry about [signal]. Group messages name their
 /// sender as [_groupSenderLabel] does and their group by the name this
 /// device keeps for it ([groups]).
@@ -766,6 +855,7 @@ InboxEntry _buildInboxEntry({
         title: label,
       ),
       peerAddress: signal.sender,
+      messageId: _incomingMessageIdOf(signal),
     ),
     ZenSignalType.callInvite => InboxEntry.fromEvents(
       id: 'call-invite-$receivedAtMillis-${signal.sender}',
@@ -899,9 +989,15 @@ InboxEntry _buildInboxEntry({
         routeKey: buildGroupRouteKey(
           groupId: signal.groupId ?? 'grp-${signal.sender}',
           title: groupName,
-          messageId: signal.messageId,
+          // The key the message is kept under here: its id, or the
+          // sender's own key when another member's message holds the id.
+          messageId: switch (signal.chatExtras?[_kStoredKeyKey]) {
+            final String key when key.isNotEmpty => key,
+            _ => signal.messageId,
+          },
         ),
         peerAddress: signal.sender,
+        messageId: _noticeGroupMessageId(signal),
       ),
     ZenSignalType.groupMessage => InboxEntry.fromEvents(
       id: 'group-message-$receivedAtMillis-${signal.sender}',
@@ -918,6 +1014,7 @@ InboxEntry _buildInboxEntry({
         title: groupName,
       ),
       peerAddress: signal.sender,
+      messageId: _noticeGroupMessageId(signal),
     ),
     ZenSignalType.groupCallInvite => InboxEntry.fromEvents(
       id: 'group-call-$receivedAtMillis-${signal.sender}',
@@ -1250,11 +1347,8 @@ RuntimeSystemNotification _systemNotificationFromEntry({
     contentRedacted: chat != null,
     // What the notification switches of the settings see.
     kind: switch (signal.type) {
-      ZenSignalType.message => NoticeKind.message,
-      ZenSignalType.groupMessage =>
-        signalMentionsYou(signal)
-            ? NoticeKind.mention
-            : NoticeKind.groupMessage,
+      ZenSignalType.message ||
+      ZenSignalType.groupMessage => chatNoticeKind(signal),
       ZenSignalType.friendRequest ||
       ZenSignalType.friendAccept ||
       ZenSignalType.groupInvite => NoticeKind.invitation,
@@ -1515,10 +1609,7 @@ GroupProfile? _noticeGroupOf(
   if (group == null || group.isInvitePending) {
     return null;
   }
-  return groupHasMember(group, signal.sender) ||
-          PeerShareCodec.addressesEqual(group.createdById, signal.sender)
-      ? group
-      : null;
+  return speaksInGroup(group, signal.sender) ? group : null;
 }
 
 /// Who wrote a group message, as its notices and inbox entries name them:
@@ -1720,6 +1811,31 @@ FriendshipBook _withRememberedPresence(
   },
 );
 
+/// [stored] (the friends read back from the store) with each friend's
+/// presence as [known] (memory, with its latest confirmations) has it when
+/// memory's was confirmed later: the state, its time, whether they are
+/// reachable and when last seen, and the last opening that goes with it.
+/// The rest of each friend is the stored one.
+FriendshipBook _withNewerPresence(
+  FriendshipBook stored,
+  FriendshipBook known,
+) => stored.editAll((FriendProfile friend) {
+  final FriendProfile? mine = known.profileOf(friend.address);
+  if (mine == null || mine.presenceAtMillis <= friend.presenceAtMillis) {
+    return friend;
+  }
+  return friend.copyWith(
+    isOnline: mine.isOnline,
+    lastPresenceAtMillis: max(
+      mine.lastPresenceAtMillis,
+      friend.lastPresenceAtMillis,
+    ),
+    presence: mine.presence,
+    presenceAtMillis: mine.presenceAtMillis,
+    lastOpenedAtMillis: mine.lastOpenedAtMillis,
+  );
+});
+
 /// Friend gate: every signal arriving over the mesh must come from a peer
 /// with a relationship that authorizes that signal type. The mesh itself
 /// authenticates senders (address = identity key) and encrypts payloads
@@ -1734,6 +1850,11 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
   }
   if (_isManagedGroupMembershipSignal(signal)) {
     return false;
+  }
+  if (signal.type == ZenSignalType.callInvite ||
+      signal.type == ZenSignalType.groupCallInvite) {
+    // Who may ring this phone: the rule the locked receiver keeps too.
+    return callInviteAdmitted(signal, _HubAlertFacts(hubState));
   }
   switch (signal.type) {
     case ZenSignalType.friendRequest:
@@ -1781,11 +1902,7 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
       final GroupProfile? callGroup = hubState.groups[signal.groupId ?? ''];
       return callGroup != null &&
           !callGroup.isInvitePending &&
-          (groupHasMember(callGroup, signal.sender) ||
-              PeerShareCodec.addressesEqual(
-                callGroup.createdById,
-                signal.sender,
-              ));
+          speaksInGroup(callGroup, signal.sender);
     case ZenSignalType.profileUpdate:
       // Anyone the user has a relationship with (the photo of someone who
       // just accepted can arrive before the acceptance itself).
@@ -1809,9 +1926,9 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
       }
       // Membership, not friendship, decides: a friend outside the group (or
       // a late message from someone who already left) must not post into
-      // it - it used to silently re-add them as a member.
-      return groupHasMember(targetGroup, signal.sender) ||
-          PeerShareCodec.addressesEqual(targetGroup.createdById, signal.sender);
+      // it - it used to silently re-add them as a member. Nor does a
+      // creator who left.
+      return speaksInGroup(targetGroup, signal.sender);
     case ZenSignalType.groupUpdate:
     case ZenSignalType.groupLeave:
     case ZenSignalType.groupInviteAck:
@@ -1819,9 +1936,7 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
         return true;
       }
       final GroupProfile? grp = hubState.groups[signal.groupId ?? ''];
-      return grp != null &&
-          (groupHasMember(grp, signal.sender) ||
-              PeerShareCodec.addressesEqual(grp.createdById, signal.sender));
+      return grp != null && speaksInGroup(grp, signal.sender);
     case ZenSignalType.disappearTimer:
     case ZenSignalType.messageReaction:
     case ZenSignalType.messageEdit:
@@ -1834,11 +1949,7 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
       final GroupProfile? timerGroup = hubState.groups[timerGroupId];
       return timerGroup != null &&
           !timerGroup.isInvitePending &&
-          (groupHasMember(timerGroup, signal.sender) ||
-              PeerShareCodec.addressesEqual(
-                timerGroup.createdById,
-                signal.sender,
-              ));
+          speaksInGroup(timerGroup, signal.sender);
     case ZenSignalType.deepLink:
     case ZenSignalType.presence:
     case ZenSignalType.typing:
@@ -1884,7 +1995,12 @@ bool _shouldKeepCurrentCallOnIncomingSignal(
     return _shouldPreferLocalOutgoingCall(call, incomingCallId);
   }
   if (call.isIncoming && call.status == CallSessionStatus.ringing) {
-    return false;
+    // A call ringing in stays, whoever else calls (they hear "busy" from
+    // the signal's own handling); only its caller may replace it with a
+    // new call of theirs. Taken in, another caller's offer or invite put
+    // their call on the screen in its place, and their invite left an
+    // incoming-call entry in the inbox for a call refused as "busy".
+    return _secondCallAgainst(call, signal) != _SecondCall.takesOver;
   }
   return true;
 }
@@ -1984,31 +2100,64 @@ String groupMessageWireId(String localId) {
 /// author's message with it goes under [groupMessageLocalId]. An id that
 /// already looks like such a key never takes a bare slot, so nobody can
 /// take another's key in advance.
+///
+/// Only the same author's message under the id or under one of the
+/// author's keys makes it a copy. A key held by another author's message is
+/// no copy but a conflict: before 1.16.4 every id was kept as it came, so a
+/// member could have sent the very key another's message would need; the
+/// message then goes under the author's next key ([_groupMessageKey]).
 String? groupMessageSlot(
   List<ChatMessage> thread,
   String wireId,
   String author,
   bool Function(ChatMessage message) byAuthor,
 ) {
-  final String alt = groupMessageLocalId(wireId, author);
-  ChatMessage? bare;
+  // The keys that read back to this id: held, and held by this author.
+  final Set<String> held = <String>{};
+  final Set<String> own = <String>{};
   for (final ChatMessage m in thread) {
-    if (m.id == alt) {
-      return null;
-    }
-    if (m.id == wireId) {
-      bare = m;
-    }
-  }
-  if (!wireId.contains(_altIdMark)) {
-    if (bare == null) {
-      return wireId;
-    }
-    if (byAuthor(bare)) {
-      return null;
+    if (m.id == wireId || groupMessageWireId(m.id) == wireId) {
+      held.add(m.id);
+      if (byAuthor(m)) {
+        own.add(m.id);
+      }
     }
   }
-  return alt.length <= kMaxSignalIdChars ? alt : null;
+  if (own.contains(wireId)) {
+    return null;
+  }
+  // Each of the author's keys is the id with a mark, so each one held is
+  // one of [held]: among one more than that many keys one is free. Every
+  // key up to there is looked at, as the author's message may sit past a
+  // free one (a message before it disappeared).
+  String? free;
+  for (int n = 0; n <= held.length; n++) {
+    final String key = _groupMessageKey(wireId, author, n);
+    if (own.contains(key)) {
+      return null;
+    }
+    if (!held.contains(key)) {
+      free ??= key;
+    }
+  }
+  if (!wireId.contains(_altIdMark) && !held.contains(wireId)) {
+    return wireId;
+  }
+  return free != null && free.length <= kMaxSignalIdChars ? free : null;
+}
+
+/// The [n]th key of a group message with the id [wireId] by [author]: the
+/// first is [groupMessageLocalId], each next one is for when the one before
+/// is held by another author's message. All of them are [wireId] with a
+/// mark and a part of the same length, so [groupMessageWireId] reads the id
+/// back from any of them.
+String _groupMessageKey(String wireId, String author, int n) {
+  if (n == 0) {
+    return groupMessageLocalId(wireId, author);
+  }
+  final String who = PeerShareCodec.normalizeAddress(author);
+  return '$wireId$_altIdMark'
+      '${sha256Hex(utf8.encode('$who$_altIdMark$n')).substring(0, 16)}';
 }
 
 /// Whether another feature keeps [group]'s member list
@@ -2031,6 +2180,48 @@ bool _isManagedGroupMembershipSignal(ZenSignal signal) =>
     } &&
     isManagedGroupId(signal.groupId ?? '');
 
+/// What the rules shared with the locked receiver ([incomingAlertOf]) read
+/// in the app: friends and joined groups from [state], the switches from
+/// [settings], this device's address [self].
+final class _HubAlertFacts implements AlertFacts {
+  _HubAlertFacts(
+    this.state, {
+    this.settings = const AppSettings(),
+    this.self = '',
+  });
+
+  final SocialHubState state;
+  final AppSettings settings;
+
+  @override
+  final String self;
+
+  @override
+  bool isFriend(String address) =>
+      state.friendByAddress(address)?.status ==
+      FriendRelationshipStatus.accepted;
+
+  @override
+  bool speaksIn(String groupId, String address) {
+    final GroupProfile? group = state.groups[groupId];
+    return group != null &&
+        !group.isInvitePending &&
+        speaksInGroup(group, address);
+  }
+
+  @override
+  bool mutes(NoticeKind kind) => settings.mutes(kind);
+
+  @override
+  bool chatMuted(String key, int nowMillis) => state.isMuted(key, nowMillis);
+
+  @override
+  bool groupNotifiesAll(String groupKey) => state.groupNotifiesAll(
+    groupKey,
+    mentionsOnly: settings.groupMentionsOnly,
+  );
+}
+
 /// Membership test that tolerates the different spellings of one address.
 bool groupHasMember(GroupProfile group, String address) {
   if (group.hasMember(address)) {
@@ -2041,53 +2232,242 @@ bool groupHasMember(GroupProfile group, String address) {
   );
 }
 
-/// The member list of [group] - a group this device already has - after a
-/// `group_invite` (an invitation or a member-list sync) from its sender, or
-/// null when that signal may not change it.
+/// How far ahead of this phone's clock a time a member gives for a leave
+/// or an addition may lie: as much leeway as an edit gets. A later one
+/// counts as this moment plus the leeway, so nobody can stamp a change
+/// that no real one could ever follow.
+const int _kGroupStampLeewayMillis = 60 * 60 * 1000;
+
+/// A time a peer gave for a change of a group's members (its own clock),
+/// or null when it gave none usable.
+int? _groupStampOf(int? at) {
+  if (at == null || at <= 0) {
+    return null;
+  }
+  final int latest =
+      DateTime.now().millisecondsSinceEpoch + _kGroupStampLeewayMillis;
+  return at > latest ? latest : at;
+}
+
+/// The time [stamps] hold for [address] (any spelling of it), or null.
+int? _groupStampFor(Map<String, int> stamps, String address) {
+  final int? exact = stamps[address];
+  if (exact != null) {
+    return exact;
+  }
+  for (final MapEntry<String, int> e in stamps.entries) {
+    if (PeerShareCodec.addressesEqual(e.key, address)) {
+      return e.value;
+    }
+  }
+  return null;
+}
+
+/// [stamps] without [address] (any spelling of it).
+Map<String, int> _withoutGroupStamp(Map<String, int> stamps, String address) {
+  if (_groupStampFor(stamps, address) == null) {
+    return stamps;
+  }
+  return <String, int>{
+    for (final MapEntry<String, int> e in stamps.entries)
+      if (!PeerShareCodec.addressesEqual(e.key, address)) e.key: e.value,
+  };
+}
+
+/// [stamps] with [address] at [at], or at the later time it had already;
+/// bounded ([boundedGroupMembershipStamps]).
+Map<String, int> _withGroupStamp(
+  Map<String, int> stamps,
+  String address,
+  int at,
+) {
+  final int? had = _groupStampFor(stamps, address);
+  return boundedGroupMembershipStamps(<String, int>{
+    ..._withoutGroupStamp(stamps, address),
+    PeerShareCodec.normalizeAddress(address): had != null && had > at
+        ? had
+        : at,
+  });
+}
+
+/// The one address a `group_invite` member-list update says its sender
+/// adds ([kGroupAddedKey]), or null (an invitation, the members' list for
+/// someone who joined, or an update from a Zen before 1.16.5).
+String? _groupInviteNewcomerOf(ZenSignal signal) =>
+    switch (signal.chatExtras?[kGroupAddedKey]) {
+      final String address when address.isNotEmpty => address,
+      _ => null,
+    };
+
+/// Who left the group and when, as the members' list for someone who just
+/// joined tells it ([kGroupLeftKey]).
+Map<String, int> _groupInviteDeparturesOf(ZenSignal signal) {
+  final Object? left = signal.chatExtras?[kGroupLeftKey];
+  if (left is! Map) {
+    return const <String, int>{};
+  }
+  return <String, int>{
+    for (final MapEntry<dynamic, dynamic> e in left.entries)
+      if (e.key is String && e.value is int) e.key as String: e.value as int,
+  };
+}
+
+/// Who left [group] and when, for the members' list sent to someone who
+/// just joined ([kGroupLeftKey]).
+Map<String, dynamic> _groupDeparturesPayload(GroupProfile group) =>
+    <String, dynamic>{
+      if (group.departedAt.isNotEmpty)
+        kGroupLeftKey: Map<String, int>.of(group.departedAt),
+    };
+
+/// Whether [a] and [b] say the same of a group's members: the same list,
+/// the same leaves and additions on record.
+bool _sameGroupMembership(GroupProfile a, GroupProfile b) =>
+    listEquals(a.memberAddresses, b.memberAddresses) &&
+    mapEquals(a.departedAt, b.departedAt) &&
+    mapEquals(a.addedAt, b.addedAt);
+
+/// [group] after its member [leaver] left at [at] (the leaver's own clock,
+/// else when the leave arrived): out of the members and the invitations
+/// waiting for an answer, and on record as gone, so no list a step behind
+/// brings them back. A leave stamped before the leaver was last added by
+/// name is an older one (it arrived late, or a copy of it did) and changes
+/// nothing. Only the leaver's own `group_leave` comes here: nobody can
+/// record someone else's leave.
+GroupProfile _groupAfterLeave(GroupProfile group, String leaver, int at) {
+  final int? added = _groupStampFor(group.addedAt, leaver);
+  if (added != null && added > at) {
+    return group;
+  }
+  bool stays(String m) => !PeerShareCodec.addressesEqual(m, leaver);
+  return group.copyWith(
+    memberAddresses: group.memberAddresses.where(stays).toList(),
+    pendingInviteAddresses: group.pendingInviteAddresses.where(stays).toList(),
+    pendingInviteIds: <String, String>{
+      for (final MapEntry<String, String> e in group.pendingInviteIds.entries)
+        if (stays(e.key)) e.key: e.value,
+    },
+    departedAt: _withGroupStamp(group.departedAt, leaver, at),
+    addedAt: _withoutGroupStamp(group.addedAt, leaver),
+  );
+}
+
+/// Whether [signal], a `group_leave`, is older than the last time its
+/// sender was added to [group] by name: a late copy of a leave the person
+/// took back by joining again.
+bool _isStaleGroupLeave(
+  GroupProfile group,
+  ZenSignal signal,
+  int receivedAtMillis,
+) {
+  final int? added = _groupStampFor(group.addedAt, signal.sender);
+  return added != null &&
+      added > (_groupStampOf(signal.sentAtMillis) ?? receivedAtMillis);
+}
+
+/// [group] - a group this device already has - after a `group_invite` (an
+/// invitation or a member-list update) from its sender, or null when that
+/// signal may not change it.
 ///
 /// The creator, as this device recorded it (whoever brought this device
-/// in), speaks for the group: its list is merged as it comes. Any other
-/// member brings in at most one address per signal: adding someone in the
-/// app adds one person, and the sync that follows names exactly one address
-/// the others have not seen yet. A list with more unknown addresses from an
-/// ordinary member is no addition anyone made in the app - it could pull
-/// any number of strangers into everyone's group traffic and presence - so
-/// it changes nothing. Neither does anything from outside the group.
-/// [selfAddress] (this device; may be unknown) never counts as unknown.
-List<String>? _groupMembersAfterInvite(
+/// in), speaks for the group: every address of its list is taken. Any
+/// other member brings in one person per signal: the one its update names
+/// ([kGroupAddedKey]), or from a Zen before 1.16.5, the one address its
+/// list has that this device has not seen - a list with more such
+/// addresses is no addition anyone made in the app (it could pull any
+/// number of strangers into everyone's group traffic and presence), so
+/// none of them is taken. Nothing from outside the group, nor from a
+/// creator who left it, changes anything.
+///
+/// Nobody's list brings back someone who left ([GroupProfile.departedAt]):
+/// a list carries no time, and a member a step behind (offline when the
+/// leave went out) still lists them. Only an addition by name stamped
+/// later than the leave does: a new invitation of that person.
+///
+/// [takeDepartures]: this is the members' list this device waited for
+/// after joining (from the inviter, whose list it takes whole anyway), so
+/// the leaves it tells of are taken too ([kGroupLeftKey]); anyone else's
+/// word on who left is never taken - a member could otherwise put anyone
+/// out of the group on everybody's phone.
+/// [selfAddress] (this device; may be unknown) never counts as someone
+/// unknown, and no leave told of takes it out.
+GroupProfile? _groupAfterInvite(
   GroupProfile group,
   ZenSignal signal, {
   String selfAddress = '',
+  bool takeDepartures = false,
 }) {
   if (isManagedGroup(group)) {
     return null;
   }
-  final bool fromCreator = PeerShareCodec.addressesEqual(
-    group.createdById,
-    signal.sender,
-  );
+  bool isSelf(String address) =>
+      selfAddress.isNotEmpty &&
+      PeerShareCodec.addressesEqual(address, selfAddress);
+  final bool fromCreator =
+      PeerShareCodec.addressesEqual(group.createdById, signal.sender) &&
+      _groupStampFor(group.departedAt, signal.sender) == null;
   if (!fromCreator && !groupHasMember(group, signal.sender)) {
     return null;
+  }
+  Map<String, int> departed = group.departedAt;
+  Map<String, int> added = group.addedAt;
+  List<String> members = group.memberAddresses;
+  if (takeDepartures) {
+    _groupInviteDeparturesOf(signal).forEach((String address, int raw) {
+      final int? at = _groupStampOf(raw);
+      final int? addedAt = _groupStampFor(added, address);
+      if (at == null ||
+          isSelf(address) ||
+          PeerShareCodec.addressesEqual(address, signal.sender) ||
+          (addedAt != null && addedAt > at)) {
+        return;
+      }
+      departed = _withGroupStamp(departed, address, at);
+      added = _withoutGroupStamp(added, address);
+      members = members
+          .where((String m) => !PeerShareCodec.addressesEqual(m, address))
+          .toList();
+    });
+  }
+  final List<String> taken = <String>[];
+  final String? newcomer = _groupInviteNewcomerOf(signal);
+  if (newcomer != null && !isSelf(newcomer)) {
+    final int? at = _groupStampOf(signal.sentAtMillis);
+    final int? left = _groupStampFor(departed, newcomer);
+    // An addition stamped after the leave is a new invitation; one without
+    // a time can prove nothing against a leave.
+    if (left == null || (at != null && at > left)) {
+      taken.add(newcomer);
+      departed = _withoutGroupStamp(departed, newcomer);
+      if (at != null) {
+        added = _withGroupStamp(added, newcomer, at);
+      }
+    }
   }
   final List<String> incoming = normalizedGroupMembers(<String>[
     signal.sender,
     ...?signal.memberAddresses,
   ]);
-  if (!fromCreator) {
-    final int unknown = incoming
-        .where(
-          (String address) =>
-              !groupHasMember(group, address) &&
-              (selfAddress.isEmpty ||
-                  !PeerShareCodec.addressesEqual(address, selfAddress)),
-        )
-        .length;
-    if (unknown > 1) {
-      return null;
-    }
+  final List<String> unknown = <String>[
+    for (final String address in incoming)
+      if (!groupHasMember(group, address) &&
+          !isSelf(address) &&
+          _groupStampFor(departed, address) == null &&
+          (newcomer == null ||
+              !PeerShareCodec.addressesEqual(address, newcomer)))
+        address,
+  ];
+  // This device in the sender's list is no stranger to anyone.
+  taken.addAll(incoming.where(isSelf));
+  if (fromCreator || (newcomer == null && unknown.length <= 1)) {
+    taken.addAll(unknown);
   }
-  return cappedGroupMembers(
-    normalizedGroupMembers(<String>[...group.memberAddresses, ...incoming]),
+  return group.copyWith(
+    memberAddresses: cappedGroupMembers(
+      normalizedGroupMembers(<String>[...members, ...taken]),
+    ),
+    departedAt: departed,
+    addedAt: added,
   );
 }
 
@@ -2263,6 +2643,17 @@ List<String> cappedGroupMembers(List<String> members) {
       : members.sublist(0, kMaxGroupMemberCount);
 }
 
+/// What the person creating a group, or adding to one, is told when it
+/// would list more than [kMaxGroupMemberCount] people (themselves too).
+String groupFullText() =>
+    t('Grupa może mieć najwyżej {n} osób.', {'n': kMaxGroupMemberCount});
+
+/// Whether [group] lists [kMaxGroupMemberCount] people already: nobody more
+/// can be added ([groupFullText]).
+bool isGroupFull(GroupProfile group) =>
+    normalizedGroupMembers(group.memberAddresses).length >=
+    kMaxGroupMemberCount;
+
 /// Most friend requests / group invitations kept in the background queue.
 const int kMaxQueuedInvitations = 64;
 
@@ -2288,4 +2679,30 @@ List<QueuedSignal> _withoutOldestQueuedInvitations(
     kept.add(entry);
   }
   return kept;
+}
+
+/// How long before its arrival a message may have been written for it to
+/// count as a sign that its sender is there (a direct one takes moments;
+/// one written longer ago waited in a mailbox or in its sender's queue, and
+/// says nothing of now).
+const Duration _kMessageAsPresence = Duration(minutes: 2);
+
+/// Set by the hub on a message older than one of its sender's already in
+/// the chat ([ZenSignal.chatExtras], never sent): see `_applySignal`.
+const String _kLateCopyKey = 'zLateCopy';
+
+/// Set by the hub on a group message kept under a key other than its id
+/// ([groupMessageSlot]: another member's message holds the id), with that
+/// key ([ZenSignal.chatExtras], never sent): a mention's notification opens
+/// the chat at it, not at the other member's message.
+const String _kStoredKeyKey = 'zKey';
+
+/// Whether [signal] (a chat message that came at [receivedAtMillis]) was
+/// written so shortly before that its sender is there now. One without its
+/// time counts as heard now, as before, and so does one dated after its
+/// arrival (the sender's clock runs ahead).
+bool _messageHeardNow(ZenSignal signal, int receivedAtMillis) {
+  final int? sentAt = signal.sentAtMillis;
+  return sentAt == null ||
+      receivedAtMillis - sentAt <= _kMessageAsPresence.inMilliseconds;
 }

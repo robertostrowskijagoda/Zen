@@ -17,6 +17,11 @@ const Set<String> kRelayNoticeTypes = <String>{
   'group_invite',
   'call_invite',
   'group_call_invite',
+  // A ring that ended unanswered, told afterwards (the newest per caller
+  // waits): the app shows it as a missed call, so a locked phone that gets
+  // it from a mailbox says something came, and the caller's "Czeka na
+  // doręczenie" counts it as the call notice it is until it arrives.
+  'call_missed',
 };
 
 /// One end-to-end sealed payload in transit through relays.
@@ -30,7 +35,25 @@ final class RelayEnvelope {
     required this.expiresAtMillis,
     required this.box,
     this.notice,
+    this.replace,
+    this.automatic,
   });
+
+  /// True on what the app sends by itself rather than what a person sent
+  /// (see `relayIsPersonalPayload`): a mailbox drops it for a device taken
+  /// for gone, and keeps the rest. One bit beside the box like [notice];
+  /// `null` from a Zen before 1.16.5 (kept, as before).
+  final bool? automatic;
+
+  /// Set on a payload of a kind where only the newest matters (a profile,
+  /// a friend list, a status, a read receipt; see `relayReplaceKeyOf`): a
+  /// tag only its sender can make, the same for every payload of that kind
+  /// to [recipient]. A mailbox that holds an older envelope of the sender
+  /// with the same tag drops it when the newer one comes, so a friend who
+  /// is away does not find a pile of profiles. Not bound into the box: a
+  /// mailbox lets only the sender itself replace (see `_replacedBy`), and
+  /// the recipient never reads it. `null` from a Zen before 1.16.5.
+  final String? replace;
 
   /// Whether what is inside deserves a notice ([kRelayNoticeTypes]): the
   /// recipient's locked phone cannot open the box, and told "Odblokuj Zen"
@@ -91,6 +114,8 @@ final class RelayEnvelope {
     'n': base64Url.encode(box.nonce),
     'b': base64Url.encode(box.cipherText),
     if (notice != null) 'k': notice! ? 1 : 0,
+    if (replace != null) 'rp': replace,
+    if (automatic == true) 'a': 1,
   };
 
   /// Parses an envelope from untrusted input; `null` when anything is off.
@@ -143,6 +168,11 @@ final class RelayEnvelope {
         notice: switch (json['k']) {
           1 => true,
           0 => false,
+          _ => null,
+        },
+        automatic: json['a'] == 1 ? true : null,
+        replace: switch (json['rp']) {
+          final String tag when tag.isNotEmpty && tag.length <= 32 => tag,
           _ => null,
         },
       );
@@ -796,7 +826,9 @@ final class RelayState {
     this.mailboxChangedAtMillis = 0,
     this.announcedClass = '',
     Map<String, int>? quietTold,
+    Map<String, int>? goneDevices,
   }) : peers = peers ?? <String, RelayPeerInfo>{},
+       goneDevices = goneDevices ?? <String, int>{},
        reach = reach ?? <String, RelayReach>{},
        quietTold = quietTold ?? <String, int>{},
        tracked = tracked ?? <String, RelayTrackedMessage>{},
@@ -841,6 +873,11 @@ final class RelayState {
   /// Mailboxes the person was told stopped answering (an entry in the
   /// notifications): device address -> since when it is quiet.
   final Map<String, int> quietTold;
+
+  /// Friends' devices taken for gone (a phone replaced by another of the
+  /// friend's account, Zen removed from it): device address -> since when.
+  /// Nothing is queued or held for them until they are heard from again.
+  final Map<String, int> goneDevices;
 
   /// Last announcement version each friend confirmed.
   final Map<String, int> announcedVersions;
@@ -954,6 +991,7 @@ final class RelayState {
     if (mailboxChangedAtMillis > 0) 'mch': mailboxChangedAtMillis,
     if (announcedClass.isNotEmpty) 'acl': announcedClass,
     if (quietTold.isNotEmpty) 'qt': quietTold,
+    if (goneDevices.isNotEmpty) 'gone': goneDevices,
     ...extra,
   });
 
@@ -1064,6 +1102,7 @@ final class RelayState {
       mailboxChangedAtMillis: (decoded['mch'] as num?)?.toInt() ?? 0,
       announcedClass: decoded['acl'] is String ? decoded['acl'] as String : '',
       quietTold: _intMap(decoded['qt']),
+      goneDevices: _intMap(decoded['gone']),
     );
   }
 }

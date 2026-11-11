@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -37,7 +38,7 @@ ChatMessage _msg(String id, {int at = 1000, ChatMessageDirection? dir}) =>
     );
 
 final class _Harness {
-  _Harness(this.dir) {
+  _Harness(this.dir, {Map<String, int> disappeared = const <String, int>{}}) {
     container = ProviderContainer(
       overrides: [
         signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
@@ -74,6 +75,7 @@ final class _Harness {
                 ),
               },
             ),
+            disappearedMessages: disappeared,
             groups: <String, GroupProfile>{
               'g1': GroupProfile(
                 id: 'g1',
@@ -111,6 +113,63 @@ final class _Harness {
 
 void main() {
   group('DisappearingTimelineStore', () {
+    test('a message that arrives while a change is written stays', () async {
+      final FileMessageTimelineStore file = FileMessageTimelineStore.onDisk(
+        MemoryLedgerDisk(),
+      );
+      final DisappearingTimelineStore store = DisappearingTimelineStore(
+        file,
+        now: () => 10000,
+      )..timerFor = (String _) => 3600;
+      ChatMessage incoming(String id, int at) => ChatMessage(
+        id: id,
+        sender: ada,
+        text: 'text $id',
+        sentAtMillis: at,
+        direction: ChatMessageDirection.incoming,
+      );
+      await store.append(ada, incoming('first', 1000));
+      final List<ChatMessage> read = await store.load(ada);
+      // The change is written while a message comes in: the change reads
+      // the chat as it is when it writes, so the message is not written over.
+      final Future<void> saving = store.save(ada, <ChatMessage>[
+        for (final ChatMessage m in read) m.copyWith(text: 'changed'),
+      ]);
+      final Future<void> arrival = store.append(ada, incoming('new', 9000));
+      await Future.wait(<Future<void>>[saving, arrival]);
+      expect(
+        <String>[for (final ChatMessage m in await store.load(ada)) m.id],
+        <String>['first', 'new'],
+      );
+    });
+
+    test('a message that arrives while the sweep runs stays', () async {
+      final FileMessageTimelineStore file = FileMessageTimelineStore.onDisk(
+        MemoryLedgerDisk(),
+      );
+      final DisappearingTimelineStore store = DisappearingTimelineStore(
+        file,
+        now: () => 10000,
+      )..timerFor = (String _) => 3600;
+      ChatMessage incoming(String id, int at, {int? expires}) => ChatMessage(
+        id: id,
+        sender: ada,
+        text: 'text $id',
+        sentAtMillis: at,
+        direction: ChatMessageDirection.incoming,
+        expiresAtMillis: expires,
+      );
+      await store.append(ada, incoming('old', 1000, expires: 5000));
+      await store.append(ada, incoming('kept', 2000, expires: 50000));
+      final Future<int> sweep = store.sweep(<String>[ada]);
+      final Future<void> arrival = store.append(ada, incoming('new', 9000));
+      await Future.wait(<Future<Object?>>[sweep, arrival]);
+      expect(
+        <String>[for (final ChatMessage m in await store.load(ada)) m.id],
+        <String>['kept', 'new'],
+      );
+    });
+
     test('stamps new messages, hides expired ones and sweeps them', () async {
       int now = 10000;
       final MemoryMessageTimelineStore raw = MemoryMessageTimelineStore();
@@ -481,6 +540,88 @@ void main() {
         (await h.timelines.load(ada)).where((ChatMessage m) => m.id == 'm2'),
         hasLength(1),
         reason: 'not stored a second time with a new clock',
+      );
+    });
+
+    group('in a group, where members choose the ids', () {
+      Map<String, dynamic> said(String id, String text) => <String, dynamic>{
+        'type': 'group_message',
+        'groupId': 'g1',
+        'msgId': id,
+        'text': text,
+        'ttl': 3600,
+      };
+      Future<List<String>> chat() async => <String>[
+        for (final ChatMessage m in await h.timelines.load('group:g1'))
+          if (!m.isSystem && !m.isExpiredAt(5000)) '${m.sender}: ${m.text}',
+      ];
+      Future<void> expire(String sender) async {
+        await h.timelines.save('group:g1', <ChatMessage>[
+          for (final ChatMessage m in await h.timelines.load('group:g1'))
+            m.sender == sender ? m.copyWith(expiresAtMillis: 1) : m,
+        ]);
+      }
+
+      test('a member\'s disappeared message does not hide another member\'s '
+          'message with the same id', () async {
+        await h.receive(ada, said('gm1', 'od Ady'));
+        await expire(ada);
+        await h.hub.sweepDisappearingMessages();
+        expect(await chat(), isEmpty);
+
+        await h.receive(bob, said('gm1', 'od Boba'));
+        expect(await chat(), <String>['$bob: od Boba']);
+        // Ada's own late copy stays gone.
+        await h.receive(ada, said('gm1', 'od Ady'));
+        expect(await chat(), <String>['$bob: od Boba']);
+      });
+
+      test('a disappeared message kept under its second key does not come '
+          'back on a late copy, swept or not', () async {
+        for (final bool swept in <bool>[true, false]) {
+          final String id = swept ? 'gm2' : 'gm3';
+          await h.receive(ada, said(id, 'pierwsza $id'));
+          await h.receive(bob, said(id, 'druga $id'));
+          final List<ChatMessage> before = await h.timelines.load('group:g1');
+          expect(
+            before.firstWhere((ChatMessage m) => m.sender == bob).id,
+            isNot(id),
+            reason: 'Ada holds the id, so Bob\'s goes under his key',
+          );
+          await expire(bob);
+          if (swept) {
+            await h.hub.sweepDisappearingMessages();
+          }
+          await h.receive(bob, said(id, 'druga $id'));
+          expect(
+            (await h.timelines.load('group:g1')).where(
+              (ChatMessage m) => m.sender == bob && m.text == 'druga $id',
+            ),
+            hasLength(swept ? 0 : 1),
+            reason: 'swept=$swept: not stored again with a new clock',
+          );
+          expect(await chat(), contains('$ada: pierwsza $id'));
+          expect(await chat(), isNot(contains('$bob: druga $id')));
+          await h.timelines.save('group:g1', const <ChatMessage>[]);
+        }
+      });
+    });
+
+    test('a group message remembered by Zen 1.16.4 by its id alone stays '
+        'gone', () async {
+      h.container.dispose();
+      h = _Harness(dir, disappeared: <String, int>{'group:g1|gm9': 1});
+      await h.receive(bob, <String, dynamic>{
+        'type': 'group_message',
+        'groupId': 'g1',
+        'msgId': 'gm9',
+        'text': 'stara',
+      });
+      expect(
+        (await h.timelines.load(
+          'group:g1',
+        )).where((ChatMessage m) => !m.isSystem),
+        isEmpty,
       );
     });
 

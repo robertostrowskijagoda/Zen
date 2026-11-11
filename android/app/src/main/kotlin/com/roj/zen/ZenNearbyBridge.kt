@@ -186,6 +186,15 @@ object ZenNearbyBridge {
     private var rotation: Runnable? = null
     private var rotationAt = 0L
 
+    /**
+     * Until when (wall clock) the token changes on an exact alarm at every
+     * slot boundary: a slot past the boundary of the alarm set last, so the
+     * moment between that alarm and the next one counts too. Read without
+     * [radio] ([rotatesOnTime]).
+     */
+    @Volatile
+    private var rotatingUntil = 0L
+
     /** When waves came (main thread): per phone and in all. */
     private val waveTimes = HashMap<String, ArrayDeque<Long>>()
     private val allWaveTimes = ArrayDeque<Long>()
@@ -221,7 +230,10 @@ object ZenNearbyBridge {
     /** A schedule holds at most this many slots (two weeks). */
     private const val MAX_SCHEDULE_SLOTS = 2016
 
-    /** After a slot boundary, so the new slot has surely begun. */
+    /**
+     * After a slot boundary, so the new slot has surely begun. Must match
+     * `kWakeGridRotationLag` in Dart (the beat's wakes go off with it).
+     */
     private const val ROTATION_MARGIN_MS = 500L
 
     /** The alarm of the token's change, and how long it holds the phone awake. */
@@ -624,6 +636,7 @@ object ZenNearbyBridge {
         }
         rotation = null
         if (!wanted) {
+            rotatingUntil = 0L
             return
         }
         val task = Runnable {
@@ -640,6 +653,7 @@ object ZenNearbyBridge {
         }
         rotation = task
         rotationAt = next
+        rotatingUntil = next + NEARBY_SLOT_MS
         ZenPower.scheduleNative(
             context,
             ROTATION_ALARM,
@@ -648,6 +662,13 @@ object ZenNearbyBridge {
             holdMs = ROTATION_HOLD_MS,
         ) { task.run() }
     }
+
+    /**
+     * Whether the token now changes on an alarm at every slot boundary (the
+     * phone is shown nearby): the beat's wakes go off with it (ZenPower's
+     * `alarmTiming`; whether that alarm is exact, ZenPower knows).
+     */
+    fun rotatesOnTime(): Boolean = System.currentTimeMillis() < rotatingUntil
 
     /**
      * Shows the newest wanted token while any engine wants to be visible (both

@@ -217,6 +217,7 @@ class CourtDuties extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: SelectableText('${pyrVerdictLabel(c.kind)}\n${c.text}'),
           ),
+          const _AnonymousNote(),
           SimpleDialogOption(
             key: const Key('case-guilty'),
             onPressed: () => Navigator.of(context).pop(true),
@@ -260,7 +261,17 @@ class CourtDuties extends StatelessWidget {
       );
       await pyr.decideCase(c.id, guilty: false, why: why ?? '');
     }
-    if (context.mounted && c.judge.isEmpty) {
+    if (context.mounted) {
+      _afterRuling(context, c.id, c.judge);
+    }
+  }
+
+  /// What happens to a decision just given: it waits for the court's
+  /// cards, or for the second card at the top.
+  void _afterRuling(BuildContext context, String of, String judge) {
+    if (pyr.rulingWaiting(of)) {
+      snack(context, t('Decyzja czeka na karty sądu i wyjdzie sama.'));
+    } else if (judge.isEmpty) {
       snack(context, t('Potrzebny podpis drugiej osoby ze szczytu.'));
     }
   }
@@ -278,6 +289,7 @@ class CourtDuties extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: SelectableText('${_matterText(m)}\n\n${a.why}'),
           ),
+          const _AnonymousNote(),
           SimpleDialogOption(
             key: const Key('appeal-accept'),
             onPressed: () => Navigator.of(context).pop(true),
@@ -329,8 +341,8 @@ class CourtDuties extends StatelessWidget {
       text: v?.text ?? '',
       until: v?.until,
     );
-    if (context.mounted && a.judge.isEmpty) {
-      snack(context, t('Potrzebny podpis drugiej osoby ze szczytu.'));
+    if (context.mounted) {
+      _afterRuling(context, a.id, a.judge);
     }
   }
 
@@ -446,6 +458,23 @@ class CourtDuties extends StatelessWidget {
           Icon(Icons.chevron_right_rounded, color: zen.textMuted),
         ],
       );
+}
+
+/// Tells a judge that the decision goes out as the court's, without them.
+class _AnonymousNote extends StatelessWidget {
+  const _AnonymousNote();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+    child: ZenInfo(
+      icon: Icons.shield_outlined,
+      text: t(
+        'Orzeka sąd, nie Ty: rekord nie nazywa sędziów ani nie mówi, ilu '
+        'się zgodziło.',
+      ),
+    ),
+  );
 }
 
 /// The verdicts of the pyramid's court about whoever uses [address] (null:

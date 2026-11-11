@@ -203,7 +203,7 @@ void main() {
 
         final String storedPath = await AvatarSanitizer.validateAndStoreAvatar(
           sourcePath: testSource.path,
-          storageDir: tempDir,
+          folder: () async => tempDir,
         );
 
         expect(storedPath, isNotEmpty);
@@ -236,7 +236,7 @@ void main() {
         expect(
           () => AvatarSanitizer.validateAndStoreAvatar(
             sourcePath: fakeImage.path,
-            storageDir: tempDir,
+            folder: () async => tempDir,
           ),
           throwsA(isA<FormatException>()),
         );
@@ -257,7 +257,7 @@ void main() {
       expect(
         () => AvatarSanitizer.validateAndStoreAvatar(
           sourcePath: oversizedFile.path,
-          storageDir: tempDir,
+          folder: () async => tempDir,
         ),
         throwsA(isA<FormatException>()),
       );

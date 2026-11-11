@@ -121,11 +121,7 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
       final GroupProfile? group = state.groups[groupId];
       if (group == null ||
           group.isInvitePending ||
-          !(groupHasMember(group, signal.sender) ||
-              PeerShareCodec.addressesEqual(
-                group.createdById,
-                signal.sender,
-              ))) {
+          !speaksInGroup(group, signal.sender)) {
         return null;
       }
       return 'group:$groupId';
@@ -240,30 +236,32 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
   /// would come back with a new clock, be announced and counted unread
   /// again. It is dropped; a friend's message is still acknowledged, so
   /// the sender (and its mailboxes) stop sending it.
+  ///
+  /// In a group a message is known by its id and its author (members choose
+  /// ids themselves, so two members' messages can share one): only a copy
+  /// of the same author's message is dropped, wherever it was kept here.
   @override
   Future<bool> _dropDisappearedCopy(ZenSignal signal) async {
-    final String key;
-    final String id;
-    if (signal.type == ZenSignalType.message) {
-      key = _disappearKey(signal.sender);
-      id = _incomingMessageIdOf(signal);
-    } else if (signal.type == ZenSignalType.groupMessage &&
-        (signal.groupId?.isNotEmpty ?? false) &&
-        (signal.messageId?.isNotEmpty ?? false)) {
-      key = 'group:${signal.groupId}';
-      id = signal.messageId!;
-    } else {
+    if (signal.type == ZenSignalType.groupMessage) {
+      final String? groupId = signal.groupId;
+      final String wireId = signal.messageId?.trim() ?? '';
+      if (groupId == null || groupId.isEmpty || wireId.isEmpty) {
+        return false;
+      }
+      return _groupMessageDisappeared('group:$groupId', wireId, signal.sender);
+    }
+    if (signal.type != ZenSignalType.message) {
       return false;
     }
+    final String key = _disappearKey(signal.sender);
+    final String id = _incomingMessageIdOf(signal);
     if (!state.disappearedMessages.containsKey(
       disappearedMessageKey(key, id),
     )) {
       // Expired but not swept yet (only conversations that ever had a
       // timer can hold such messages).
-      final bool hadTimer =
-          state.disappearingTimers.containsKey(key) ||
-          state.disappearSecondsFor(key) > 0;
-      if (!hadTimer || !await _disappearingStore.holdsExpired(key, id)) {
+      if (!_hadDisappearTimer(key) ||
+          !await _disappearingStore.holdsExpired(key, id)) {
         return false;
       }
     }
@@ -279,6 +277,56 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     return true;
   }
 
+  bool _hadDisappearTimer(String key) =>
+      state.disappearingTimers.containsKey(key) ||
+      state.disappearSecondsFor(key) > 0;
+
+  /// Whether the message [wireId] by [sender] in the group [key] already
+  /// disappeared here: remembered by its id and author, remembered by Zen
+  /// 1.16.4 and earlier by the id alone (kept readable until it is
+  /// forgotten), or expired and not swept yet.
+  Future<bool> _groupMessageDisappeared(
+    String key,
+    String wireId,
+    String sender,
+  ) async {
+    final bool own = _isOwnDeviceAddress(sender);
+    final Map<String, int> gone = state.disappearedMessages;
+    if (gone.containsKey(disappearedMessageKey(key, wireId)) ||
+        gone.containsKey(
+          disappearedMessageKey(key, groupMessageLocalId(wireId, sender)),
+        ) ||
+        (own &&
+            gone.containsKey(
+              disappearedMessageKey(key, groupMessageLocalId(wireId, 'self')),
+            ))) {
+      return true;
+    }
+    if (!_hadDisappearTimer(key)) {
+      return false;
+    }
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    return (await _disappearingStore.delegate.load(key)).any(
+      (ChatMessage m) =>
+          m.isExpiredAt(now) &&
+          (m.id == wireId || groupMessageWireId(m.id) == wireId) &&
+          _sameGroupAuthor(m, sender),
+    );
+  }
+
+  /// The id a disappeared [message] of conversation [key] is remembered by:
+  /// in a group its id with its author ([groupMessageLocalId], 'self' for
+  /// one's own), as another member's message may come with the same id.
+  String _disappearedIdOf(String key, ChatMessage message) {
+    if (!key.startsWith('group:') || message.isSystem) {
+      return message.id;
+    }
+    return groupMessageLocalId(
+      groupMessageWireId(message.id),
+      message.isOutgoing ? 'self' : message.sender,
+    );
+  }
+
   /// True while a sweep runs: it saves what it remembered once, at the end.
   bool _sweepingDisappeared = false;
 
@@ -290,7 +338,7 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
         disappearedMessages: rememberDisappeared(
           state.disappearedMessages,
           key: key,
-          id: message.id,
+          id: _disappearedIdOf(key, message),
           expiredAtMillis: message.expiresAtMillis ?? now,
           nowMillis: now,
         ),
@@ -307,7 +355,53 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
       await _transferStore.deleteIncoming(key, message.id);
       await _transferStore.deleteOutgoing(key, message.id);
     }
+    // Its words go from the list of notifications and from the shade too.
+    if (ref.mounted) {
+      await _forgetNoticesOf(key, <ChatMessage>[
+        message,
+      ], persist: !_sweepingDisappeared);
+    }
   }
+
+  @override
+  void _rememberGone(String key, Iterable<ChatMessage> messages) {
+    if (!ref.mounted) {
+      return;
+    }
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    // Notes of the chat too (another device of the account passes its
+    // whole history on, notes included), but the newest only: copies on
+    // their way are of recent messages, and a long chat cleared must not
+    // crowd out everything else remembered.
+    final List<ChatMessage> newestFirst = messages.toList()
+      ..sort(
+        (ChatMessage a, ChatMessage b) =>
+            b.sentAtMillis.compareTo(a.sentAtMillis),
+      );
+    final List<String> ids = <String>[
+      for (final ChatMessage m in newestFirst.take(
+        kMaxDisappearedMessages ~/ 2,
+      ))
+        _disappearedIdOf(key, m),
+    ];
+    if (ids.isEmpty) {
+      return;
+    }
+    state = state.copyWith(
+      disappearedMessages: rememberGone(
+        state.disappearedMessages,
+        key: key,
+        ids: ids,
+        goneAtMillis: now,
+        nowMillis: now,
+      ),
+    );
+  }
+
+  @override
+  bool _isRememberedGone(String key, String messageId) => state
+      .disappearedMessages
+      .containsKey(disappearedMessageKey(key, messageId));
 
   /// Deletes what expired and waits for the next one.
   @override

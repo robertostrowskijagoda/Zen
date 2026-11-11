@@ -27,6 +27,47 @@ final class MessageTimelineRevisionController extends Notifier<int> {
   }
 }
 
+/// The reference of a group file still to fetch (a group message's
+/// `media`, kept as [ChatMessage.pendingMedia]) with only the fields that
+/// name and open the file, each of its own type and size: the blocks' id
+/// (`id`), key (`k`), nonce (`n`), type (`mime`), length (`ms`) and the
+/// member it came from (`src`). `null` without a usable id. What a peer
+/// sent is never kept as it came: a number no store can write (JSON's
+/// `1e400` is infinity) made the whole message impossible to store.
+Map<String, dynamic>? chatMediaRefFromJson(Object? json) {
+  if (json is! Map) {
+    return null;
+  }
+  String? text(Object? value, int maxChars) =>
+      value is String && value.isNotEmpty && value.length <= maxChars
+      ? value
+      : null;
+  final String? id = text(json['id'], _maxMediaRefIdChars);
+  if (id == null) {
+    return null;
+  }
+  final Object? ms = json['ms'];
+  return <String, dynamic>{
+    'id': id,
+    'k': ?text(json['k'], _maxMediaRefKeyChars),
+    'n': ?text(json['n'], _maxMediaRefKeyChars),
+    'mime': ?text(json['mime'], _maxMediaRefMimeChars),
+    if (ms is int && ms > 0 && ms < _maxMediaRefMillis) 'ms': ms,
+    'src': ?text(json['src'], _maxMediaRefIdChars),
+  };
+}
+
+/// Longest id (and source address), key or nonce, and type in
+/// [chatMediaRefFromJson]: real ones are far shorter (a hash, 32 and 12
+/// bytes in base64).
+const int _maxMediaRefIdChars = 256;
+const int _maxMediaRefKeyChars = 128;
+const int _maxMediaRefMimeChars = 255;
+
+/// A recording or film is shorter than a day (as `post_media.dart` reads
+/// it).
+const int _maxMediaRefMillis = 24 * 3600 * 1000;
+
 abstract interface class MessageTimelineStore {
   Future<List<ChatMessage>> load(String peerAddress);
 
@@ -791,7 +832,19 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
 
   static String? _extrasOf(ChatMessage m) {
     final Map<String, dynamic>? extras = chatMessageExtrasToJson(m);
-    return extras == null ? null : jsonEncode(extras);
+    if (extras == null) {
+      return null;
+    }
+    // A file still to fetch is written with its known fields only, however
+    // the message got it: one value JSON cannot hold would make the whole
+    // piece of the conversation impossible to save.
+    final Map<String, dynamic>? pending = chatMediaRefFromJson(extras['pm']);
+    if (pending == null) {
+      extras.remove('pm');
+    } else {
+      extras['pm'] = pending;
+    }
+    return extras.isEmpty ? null : jsonEncode(extras);
   }
 
   static bool _sameExtras(ChatMessage a, ChatMessage b) =>

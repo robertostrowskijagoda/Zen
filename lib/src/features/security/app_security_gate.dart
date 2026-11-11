@@ -492,6 +492,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
 
   /// The wait left from earlier failures (it survives a restart).
   Future<void> _loadWait() async {
+    _lookAtOtherAccountGuesses(ref.read(otherAccountThrottleProvider));
     final Duration left = await ref.read(unlockThrottleProvider).remaining();
     if (mounted && left > Duration.zero) {
       _startWait(left);
@@ -573,6 +574,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
       _errorText = null;
     });
     final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
+    final UnlockThrottle otherAccounts = ref.read(otherAccountThrottleProvider);
     final Duration left = await throttle.remaining();
     if (!mounted) {
       return;
@@ -584,6 +586,13 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
     }
     final String password = _passwordController.text;
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    // Counted before the password is checked: Zen closed during the check
+    // (two derivations) leaves the attempt counted. The right password
+    // clears it again.
+    final Duration wait = await throttle.recordFailure();
+    if (!mounted) {
+      return;
+    }
     // The panic password wipes all local data and silently lands on a fresh
     // install state — no feedback that anything was erased.
     if (await security.matchesPanicPassword(password)) {
@@ -604,11 +613,9 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
       }
     }
     final bool unlocked = await security.unlock(password);
-    Duration wait = Duration.zero;
     if (unlocked) {
       await throttle.clear();
-    } else {
-      wait = await throttle.recordFailure();
+      _lookAtOtherAccountGuesses(otherAccounts);
     }
     if (!mounted) {
       return;
@@ -619,9 +626,17 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
           ? null
           : t('Nieprawidłowe hasło.');
     });
-    if (wait > Duration.zero) {
+    if (!unlocked && wait > Duration.zero) {
       _startWait(wait);
     }
+  }
+
+  /// A look at the count of guesses at "Inne konto" (the lock screen shown,
+  /// the app unlocked): the time Zen runs between two looks is what lets
+  /// that count be forgiven slowly ([UnlockThrottle.forgives]). It writes
+  /// only while there is a count, the same on every device.
+  static void _lookAtOtherAccountGuesses(UnlockThrottle otherAccounts) {
+    unawaited(otherAccounts.remaining());
   }
 
   Future<void> _unlockWithBiometrics() async {
@@ -629,13 +644,16 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
       _isSubmitting = true;
       _errorText = null;
     });
+    final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
+    final UnlockThrottle otherAccounts = ref.read(otherAccountThrottleProvider);
     // The hardware vault asks for the fingerprint / face / Windows Hello
     // itself and only then releases the key.
     final bool unlocked = await ref
         .read(appSecurityServiceProvider)
         .unlockWithBiometrics();
     if (unlocked) {
-      await ref.read(unlockThrottleProvider).clear();
+      await throttle.clear();
+      _lookAtOtherAccountGuesses(otherAccounts);
     }
     if (!mounted) {
       return;
@@ -894,8 +912,8 @@ class _ForgotPasswordPanel extends StatelessWidget {
             Text(
               t(
                 'Konto wróci z drugiego urządzenia z tym kontem, z pliku '
-                'kopii całego konta, z kopii klucza albo z kręgu '
-                'odzyskiwania. Tego nie da się cofnąć.',
+                'kopii całego konta, z kopii klucza albo z pomocą bliskich '
+                'znajomych i hasła konta. Tego nie da się cofnąć.',
               ),
               textAlign: TextAlign.center,
               style: TextStyle(

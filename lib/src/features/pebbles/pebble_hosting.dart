@@ -36,7 +36,8 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// * `pbl_keep_quit {id}`: a keeper gives the role up;
 /// * `pbl_keepers {k}`: author → keepers, a new signed keeper list (or the
 ///   pebble retired);
-/// * `pbl_found {n}`: finder → author, a signed "znaleziono" note.
+/// * `pbl_found {n}`: finder → author, a signed "znaleziono" note; it
+///   counts only from a device of the account that signed it.
 abstract final class PebbleFrames {
   static const String get = 'pbl_get';
   static const String design = 'pbl_design';
@@ -73,6 +74,10 @@ final int kPebbleMaxParts =
 /// asked for, and how many times they are asked for so.
 const Duration kPebblePartWait = Duration(seconds: 4);
 const int kPebblePartAsks = 6;
+
+/// The most new finders one account adds in a day over all pebbles of an
+/// author (a person who scans a whole trail in one day stays well below).
+const int kFoundNotesPerDay = 100;
 
 /// A friend who could keep a pebble, as this device has seen them.
 @immutable
@@ -218,6 +223,12 @@ final class PebbleHosting {
   final _Budget _partsPerSender = _Budget(kPebbleMaxParts * 3);
   final _Budget _served = _Budget(60);
   final _Budget _forwards = _Budget(10);
+
+  /// New finders one account adds a day over all pebbles of this one.
+  final _Budget _foundPerDay = _Budget(
+    kFoundNotesPerDay,
+    window: const Duration(days: 1),
+  );
 
   /// Backoff between full rounds of asking for a design.
   static const List<Duration> _backoff = <Duration>[
@@ -721,13 +732,30 @@ final class PebbleHosting {
     }
   }
 
+  /// A finder's "znaleziono" note. It counts only when the device that sent
+  /// it is the finder's own: the note travels straight from the finder to
+  /// the author (never through a third phone), so its sender must be a
+  /// device this one knows as belonging to the account that signed it, and
+  /// the author's own account never finds its own pebble. The signature
+  /// alone proves nothing about who sent the frame: anyone can sign with a
+  /// key made a moment ago. With this rule a finder is an account this one
+  /// knows and each counts once per pebble, so one sender cannot make the
+  /// number grow beyond the accounts the author has; a note that changes
+  /// nothing writes nothing. An account adds at most [kFoundNotesPerDay]
+  /// new finders a day over all pebbles.
   Future<void> _onFound(String from, Map<String, dynamic> p) async {
     final PebbleFoundNote? note = PebbleFoundNote.fromJson(p['n']);
     if (note == null) {
       return;
     }
     final PebbleEntry? e = store.entry(note.id);
-    if (e == null || !e.created || !await note.verify()) {
+    if (e == null ||
+        !e.created ||
+        note.finder == e.card.authorAccount ||
+        peers.accountOf(from) != note.finder ||
+        store.hasFinder(note.id, note.finder) ||
+        !await note.verify() ||
+        !_foundPerDay.take(note.finder, _now)) {
       return;
     }
     await store.addFinder(note.id, note.finder);
@@ -1415,23 +1443,24 @@ final class _Parts {
   ];
 }
 
-/// At most [perMinute] per key in a minute.
+/// At most [limit] per key in a [window] (a minute unless set).
 final class _Budget {
-  _Budget(this.perMinute);
+  _Budget(this.limit, {this.window = const Duration(minutes: 1)});
 
-  final int perMinute;
+  final int limit;
+  final Duration window;
   final Map<String, (int, int)> _used = <String, (int, int)>{};
 
   bool take(String key, int now) {
-    final int minute = now ~/ 60000;
-    final (int, int) had = _used[key] ?? (minute, 0);
-    final int count = had.$1 == minute ? had.$2 : 0;
-    if (count >= perMinute) {
+    final int slot = now ~/ window.inMilliseconds;
+    final (int, int) had = _used[key] ?? (slot, 0);
+    final int count = had.$1 == slot ? had.$2 : 0;
+    if (count >= limit) {
       return false;
     }
-    _used[key] = (minute, count + 1);
+    _used[key] = (slot, count + 1);
     if (_used.length > 5000) {
-      _used.removeWhere((String _, (int, int) v) => v.$1 != minute);
+      _used.removeWhere((String _, (int, int) v) => v.$1 != slot);
     }
     return true;
   }

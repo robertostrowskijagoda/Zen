@@ -762,10 +762,18 @@ class _AccountIdCard extends StatelessWidget {
             key: const Key('account-id-copy'),
             tooltip: t('Kopiuj'),
             icon: const Icon(Icons.copy_rounded),
-            onPressed: () {
-              unawaited(copyWithExpiry(formatAccountId(id)));
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                SnackBar(content: Text(t('Skopiowano ID konta.'))),
+            onPressed: () async {
+              final ScaffoldMessengerState? messenger =
+                  ScaffoldMessenger.maybeOf(context);
+              final bool copied = await copyWithExpiry(formatAccountId(id));
+              messenger?.showSnackBar(
+                SnackBar(
+                  content: Text(
+                    copied
+                        ? t('Skopiowano ID konta.')
+                        : t('Nie udało się. Spróbuj jeszcze raz.'),
+                  ),
+                ),
               );
             },
           ),

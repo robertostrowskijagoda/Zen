@@ -8,6 +8,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/atomic_file.dart';
+import 'package:zen/src/core/storage/unmetered_network.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -21,6 +22,7 @@ import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
@@ -68,11 +70,15 @@ const Set<String> _realTimeTypes = <String>{
   'transfer_answer',
 };
 
+/// A missed call told afterwards ([kCallMissedType]) is no part of a call
+/// in progress: it comes reliably, is kept like a message, and leaves the
+/// "missed call" notice ([LockedReceiver._announceMissedCall]).
 bool _isRealTime(String type) =>
-    _realTimeTypes.contains(type) ||
-    type.startsWith('call_') ||
-    type.startsWith('group_call_') ||
-    type.startsWith('gc_');
+    type != kCallMissedType &&
+    (_realTimeTypes.contains(type) ||
+        type.startsWith('call_') ||
+        type.startsWith('group_call_') ||
+        type.startsWith('gc_'));
 
 const Set<String> _ringTypes = <String>{'call_invite', 'group_call_invite'};
 const Set<String> _ringEndTypes = <String>{
@@ -203,20 +209,54 @@ const Duration kLockedFreshPongEvery = Duration(seconds: 20);
 /// [kLockedPongEvery].
 const Duration kLockedPresenceRoundEvery = Duration(minutes: 10);
 
+/// A friend this phone has heard nothing from for this long (no ping, pong
+/// or `away`: their phone is off, or out of reach) gets a round's ping only
+/// every [kLockedSilentRoundEvery]th round: the ping wakes nobody and only
+/// costs this phone a send. Once back, the friend hears this phone at the
+/// latest (kLockedSilentRoundEvery - 1) rounds later, unless their own
+/// ping (Zen on their screen, or their own round) gets its pong first.
+/// [kPresenceRememberedFor]: their status is no longer shown by then.
+const Duration kLockedSilentAfter = Duration(minutes: 30);
+const int kLockedSilentRoundEvery = 3;
+
 /// How old a friend's frame in the locked service's presence file
 /// (`presence.zbox`) may grow while newer frames of theirs say the same,
-/// before it is written again. The app reads the file when it opens and
-/// ages each status from its frame: a friend "w tle" shows as such for
-/// [kPresenceBackgroundFor] (25 min) from it, so a frame up to 5 minutes
-/// older than the newest costs them at most that much of it, while the
-/// friend's pings and pongs (every few minutes each) mostly go unwritten.
+/// before it is written again, and how often at most the file is written
+/// for that: each write seals the whole file anew, and with many friends
+/// one of them comes due on almost every round's ping. A change (a friend's
+/// first frame, another state, another last opening) is written at once.
+/// The app reads the file when it opens and ages each status from its
+/// frame: a friend "w tle" shows as such for [kPresenceBackgroundFor]
+/// (25 min) from it, so a frame older than the newest (by up to a round:
+/// the round's first word opens the write, [kKeptPresenceStaleAfter])
+/// costs them at most that much of it (the app reads the file again once
+/// the receiver stopped and wrote the newest, and asks every friend as it
+/// opens), while the friend's pings and pongs (every few minutes each)
+/// mostly go unwritten. What waits for the next write is written on the first frame
+/// or presence round once the time is up, and when the receiver stops; if
+/// the service is killed meanwhile, only the age of unchanged statuses is
+/// lost: the file shows them from frames older than the newest by this
+/// much and the wait for that frame or round (at most a round), never a
+/// wrong state.
 const Duration kKeptPresenceRefreshEvery = Duration(minutes: 5);
+
+/// A friend's frame in `presence.zbox` this much older than a newer one of
+/// theirs is written at once, whenever the file was last written: the app
+/// shows "w tle" for [kPresenceBackgroundFor] (25 min) from the written
+/// frame, and their next word comes a round later
+/// ([kLockedPresenceRoundEvery]). The file's write a round opens comes on
+/// the first friend's word of the round, the others' words of it wait for
+/// the next round's, so a written frame is up to two rounds old; once a
+/// round with a friend is lost, three, and they showed offline when Zen
+/// opened although their phone answers. Only then: one write more.
+const Duration kKeptPresenceStaleAfter = Duration(minutes: 15);
 
 /// The same for a friend online, who counts as offline 5 minutes after
 /// their last frame (kPresenceForegroundFor) and pings every 2 while Zen is
-/// on their screen: every other ping is written, so the written one is at
-/// most a ping older than the newest and still says "online" when the app
-/// opens while the friend is on the screen.
+/// on their screen: every other ping is written (for all such friends at
+/// once), so the written one is at most a ping older than the newest and
+/// still says "online" when the app opens while the friend is on the
+/// screen.
 const Duration kKeptPresenceOnlineRefreshEvery = Duration(
   minutes: 2,
   seconds: 30,
@@ -491,7 +531,8 @@ BackgroundCapabilityDraft backgroundCapabilityDraftOf(
     }
     for (final String member in <String>[
       ...group.memberAddresses,
-      group.createdById,
+      // Not a creator who left: no member any more ([speaksInGroup]).
+      if (speaksInGroup(group, group.createdById)) group.createdById,
     ]) {
       final String address = normal(member);
       // A friend's unlinked phone in a shared group is no member either.
@@ -523,7 +564,9 @@ String backgroundContactsSignature(SocialHubState state) {
       '${friend.status.name}:${friend.address}',
     for (final GroupProfile group in state.groups.values)
       if (!group.isInvitePending)
-        'g:${group.id}:${group.createdById}:${group.memberAddresses.join(',')}',
+        'g:${group.id}:${group.createdById}:'
+            '${speaksInGroup(group, group.createdById)}:'
+            '${group.memberAddresses.join(',')}',
   ]..sort();
   return parts.join('|');
 }
@@ -540,7 +583,8 @@ String backgroundContactsSignature(SocialHubState state) {
 /// * Presence: a ping from a contact gets a pong, so friends deliver
 ///   directly instead of through mailboxes; to the friends who may see it
 ///   the pong also says "w tle" and when Zen was last open
-///   ([LockedPresenceKit]). It pings no one itself.
+///   ([LockedPresenceKit]). Its own pings go on the presence rounds
+///   ([kLockedPresenceRoundEvery]).
 /// * Its own mailboxes are asked for held mail (`rly_poll`); each envelope
 ///   is kept once (also when it came directly before, or the app already
 ///   took it: `taken`) and confirmed to whoever handed it over, so it is
@@ -593,11 +637,13 @@ final class LockedReceiver {
     this.presenceRoundEvery = kLockedPresenceRoundEvery,
     WakeBeat? beat,
     Future<bool> Function()? meshLinked,
+    Future<bool> Function()? onNetwork,
     this.relinkWait = const Duration(seconds: 10),
     this.relinkStep = const Duration(milliseconds: 500),
   }) : _transport = transport,
        _beat = beat,
        _meshLinked = meshLinked,
+       _onNetwork = onNetwork ?? onAnyNetwork,
        _capability = capability,
        _inbox = inbox,
        _notices = notices,
@@ -644,6 +690,32 @@ final class LockedReceiver {
   /// What a message's notice may say (without a kit: only that it came).
   final LockedNoticeKit _noticeKit;
 
+  /// What decides whether a call rings and a chat message is told about,
+  /// by the app's own rules ([incomingAlertOf]): who is a friend from the
+  /// capability, the rest from the notice kit. Without a kit only friends'
+  /// calls and messages count; with a kit of before 1.16.5, which does not
+  /// say who speaks in which group, the capability's friends and group
+  /// members do, as they did then.
+  late final AlertFacts _alertFacts = _noticeKit.alertFacts(
+    isFriend: (String address) =>
+        _capability.kindOf(address) == BackgroundContactKind.friend,
+    inJoinedGroup: (String address) => switch (_capability.kindOf(address)) {
+      BackgroundContactKind.friend || BackgroundContactKind.groupMember => true,
+      _ => false,
+    },
+  );
+
+  /// The mention notices of this run, per sender, as the app limits them.
+  final MentionAlerts _mentionAlerts = MentionAlerts();
+
+  /// The signal [payload] from [from] is, read as the app reads it; `null`
+  /// for what the app would not take in either.
+  ZenSignal? _signalOf(String from, Map<String, dynamic> payload) =>
+      zenSignalFromTransportPayload(
+        sender: PeerShareCodec.normalizeAddress(from),
+        payload: payload,
+      );
+
   /// What a pong may say about this phone (without a kit: only that it
   /// answers).
   final LockedPresenceKit _presence;
@@ -652,8 +724,25 @@ final class LockedReceiver {
   final Duration presenceRoundEvery;
   int _presenceRoundAt = 0;
 
+  /// The presence rounds of this run, counted, and the round each friend
+  /// was last pinged in ([kLockedSilentRoundEvery]).
+  int _presenceRounds = 0;
+  final Map<String, int> _roundPinged = <String, int>{};
+
+  /// When this run started (a friend not heard from since is silent from
+  /// then on, [kLockedSilentAfter]).
+  int _startedAt = 0;
+
+  /// When this phone last told each friend its status (a ping or a pong
+  /// sent), and last heard theirs (a ping, pong or `away`): a friend who
+  /// did both within a round's period needs no ping of the round
+  /// ([_presenceRound]).
+  final Map<String, int> _toldAt = <String, int>{};
+  final Map<String, int> _heardAt = <String, int>{};
+  static const int _maxPresencePeers = 2000;
+
   /// The newest ping, pong or `away` of each friend, kept up to date in
-  /// [_presenceSnapshot] as their statuses change ([_presenceNews]), so the
+  /// [_presenceSnapshot] as their statuses change ([_presenceChanged]), so the
   /// app shows their statuses the moment it opens
   /// (BackgroundVault.keptPresence), without waiting for this receiver to
   /// stop or for its own node.
@@ -686,6 +775,12 @@ final class LockedReceiver {
   /// is sent once more in the same wake as soon as a link is up, waiting at
   /// most [relinkWait] for it (looking every [relinkStep]).
   final Future<bool> Function()? _meshLinked;
+
+  /// Whether the phone is on any network at all ([onAnyNetwork]): without
+  /// one no link can come up within [relinkWait], so the wake does not wait
+  /// for it. The locked node links only over IP networks (public peers, the
+  /// shared Wi-Fi), never Bluetooth or Wi-Fi Direct.
+  final Future<bool> Function() _onNetwork;
   final Duration relinkWait;
   final Duration relinkStep;
 
@@ -746,6 +841,12 @@ final class LockedReceiver {
   int _keptAtPoll = 0;
   Timer? _ringTimer;
   String? _ringingFrom;
+
+  /// The calls (`<caller>|<call id>`) that rang here in this run, newest
+  /// last: each left its "missed call" when its ring ended, so the caller's
+  /// later word that it went unanswered ([kCallMissedType]) adds none.
+  final List<String> _rangHere = <String>[];
+  static const int _maxRangHere = 64;
   bool _running = false;
 
   /// What was kept in this run (repeats are not kept twice).
@@ -755,6 +856,18 @@ final class LockedReceiver {
   final Map<String, int> _strangerFrames = <String, int>{};
   int _strangerTotal = 0;
   final Map<String, int> _lastNoticeAt = <String, int>{};
+
+  /// The messages (`<author>|<id>`) the message notice may show words of,
+  /// newest last: a deletion or an edit of one of them, or its disappearing
+  /// timer running out, takes the notice down, so the shade does not keep
+  /// what its sender took back until the app is unlocked.
+  final List<String> _noticedMessages = <String>[];
+
+  /// Timers that take the notice down when a disappearing message it shows
+  /// expires.
+  final List<Timer> _noticeExpiryTimers = <Timer>[];
+
+  static const int _maxNoticedMessages = 64;
 
   /// Records kept in this run (tests, logs).
   int get keptCount => _keptCount;
@@ -797,6 +910,7 @@ final class LockedReceiver {
     _keptAtPoll = _keptCount;
     // The app pinged everyone a moment ago: the first round comes later.
     _presenceRoundAt = _now();
+    _startedAt = _presenceRoundAt;
     await _pollMailboxes();
     if (mailboxPollInterval > Duration.zero &&
         _capability.mailboxes.isNotEmpty) {
@@ -860,6 +974,11 @@ final class LockedReceiver {
     _ringTimer?.cancel();
     _ringTimer = null;
     _ringingFrom = null;
+    for (final Timer timer in _noticeExpiryTimers) {
+      timer.cancel();
+    }
+    _noticeExpiryTimers.clear();
+    _noticedMessages.clear();
     await _subscription?.cancel();
     _subscription = null;
     await _doorSubscription?.cancel();
@@ -995,9 +1114,10 @@ final class LockedReceiver {
     if (_running) {
       await Future<void>.delayed(pollAnswerGrace);
     }
-    if (!linked && !_mailboxAnswered && _running) {
+    if (!linked && !_mailboxAnswered && _running && await _onNetwork()) {
       // Asked once more in the same wake as soon as a link is up, rather
-      // than a whole poll period later.
+      // than a whole poll period later. Not on no network at all (flight
+      // mode, no signal): no link comes, and the phone sleeps at once.
       await ZenWake.holdWhile(
         _pollAgainOnceLinked,
         tag: 'relink',
@@ -1058,7 +1178,19 @@ final class LockedReceiver {
   /// early by as much as the beat may run it early ([wakeBeatEarly]: work
   /// due soon on a wake that comes anyway), and [_roundClockSlack] more,
   /// still counts: skipped, the round would wait a whole period more, and
-  /// the friends would hear nothing for up to two rounds.
+  /// the friends would hear nothing for up to two rounds. A wall clock set
+  /// back counts as a round due.
+  ///
+  /// A friend this phone told its status and heard theirs from within that
+  /// much of a period (their own round's ping and this phone's pong, or the
+  /// other way round) is not pinged: each ping woke their locked phone, so
+  /// two locked friends woke each other twice a period. One of the two
+  /// rounds keeps both told, the other finds the exchange and skips; a ping
+  /// or pong lost leaves one side without the other's word, and its next
+  /// round pings again. A friend whose word says Zen is on their screen is
+  /// pinged every round as before (their phone is awake; their pings come
+  /// on their own cadence). A friend silent for long ([kLockedSilentAfter])
+  /// is pinged every [kLockedSilentRoundEvery]th round.
   @visibleForTesting
   Future<void> presenceRoundForTest() => _presenceRound();
 
@@ -1067,16 +1199,31 @@ final class LockedReceiver {
   static const Duration _roundClockSlack = Duration(seconds: 1);
 
   Future<void> _presenceRound() async {
+    try {
+      await _pingRound();
+    } finally {
+      // A wake that comes anyway: what waits to be written goes now if its
+      // time is up.
+      await _keepPresenceDue();
+    }
+  }
+
+  Future<void> _pingRound() async {
     final int at = _now();
     final int every = presenceRoundEvery.inMilliseconds;
     final int soonest =
         every -
         wakeBeatEarly(presenceRoundEvery).inMilliseconds -
         _roundClockSlack.inMilliseconds;
-    if (every <= 0 || !_running || at - _presenceRoundAt < soonest) {
+    final int since = at - _presenceRoundAt;
+    if (every <= 0 || !_running || (since >= 0 && since < soonest)) {
       return;
     }
     _presenceRoundAt = at;
+    _presenceRounds += 1;
+    if (_roundPinged.length >= _maxPresencePeers) {
+      _roundPinged.clear();
+    }
     for (final String friend in _presence.shownTo) {
       if (!_running) {
         return;
@@ -1084,12 +1231,68 @@ final class LockedReceiver {
       if (_capability.kindOf(friend) != BackgroundContactKind.friend) {
         continue;
       }
-      await _sendQuietly(friend, <String, dynamic>{
+      // As frames name their sender ([handleFrame]).
+      final String key = PeerShareCodec.normalizeAddress(friend);
+      if (_exchangedWithin(key, at, soonest) && !_onScreenAt(key, at)) {
+        continue;
+      }
+      final int? pingedIn = _roundPinged[key];
+      if (pingedIn != null &&
+          _presenceRounds - pingedIn < kLockedSilentRoundEvery &&
+          _silentAt(key, at)) {
+        continue;
+      }
+      _roundPinged[key] = _presenceRounds;
+      if (await _sendQuietly(friend, <String, dynamic>{
         'type': 'ping',
         ..._presence.pongFields(friend, at),
         ...versionHello(),
-      });
+      })) {
+        _noteTold(key, at);
+      }
     }
+  }
+
+  /// Whether this phone told [friend] its status and heard theirs, both
+  /// within [withinMs] before [at] (a clock set back: not).
+  bool _exchangedWithin(String friend, int at, int withinMs) {
+    bool lately(int? t) => t != null && at >= t && at - t < withinMs;
+    return lately(_toldAt[friend]) && lately(_heardAt[friend]);
+  }
+
+  /// Whether [friend]'s newest word says Zen is on their screen, and is
+  /// still worth that ([kPresenceForegroundFor]).
+  bool _onScreenAt(String friend, int at) {
+    final SignalTransportFrame? frame = _presenceHeard[friend];
+    if (frame == null) {
+      return false;
+    }
+    final int age = at - frame.receivedAtMillis;
+    return age >= 0 &&
+        age < kPresenceForegroundFor.inMilliseconds &&
+        PresenceReport.fromPayload(frame.payload).presence ==
+            PeerPresence.online;
+  }
+
+  /// Whether nothing came from [friend] for [kLockedSilentAfter] by [at]
+  /// (in this run; a clock set back: not).
+  bool _silentAt(String friend, int at) {
+    final int since = _heardAt[friend] ?? _startedAt;
+    return at >= since && at - since > kLockedSilentAfter.inMilliseconds;
+  }
+
+  void _noteTold(String friend, int at) {
+    if (_toldAt.length >= _maxPresencePeers) {
+      _toldAt.clear();
+    }
+    _toldAt[friend] = at;
+  }
+
+  void _noteHeard(String friend, int at) {
+    if (_heardAt.length >= _maxPresencePeers) {
+      _heardAt.clear();
+    }
+    _heardAt[friend] = at;
   }
 
   /// Done once the statuses heard so far are written down (tests).
@@ -1097,8 +1300,10 @@ final class LockedReceiver {
   Future<void> get presenceKept => _presenceSnapshot.idle;
 
   /// Notes the newest presence frame of a friend ([_presenceHeard]) and
-  /// writes them all down at once ([_keepPresence]) when it tells the app
-  /// something the written one does not ([_presenceNews]).
+  /// writes them all down ([_keepPresence]): at once when it tells the app
+  /// something the written one does not ([_presenceChanged]), and when the
+  /// written one grew old ([_presenceRefresh]) once that much has passed
+  /// since the last write ([_keepPresenceDue]).
   Future<void> _notePresenceHeard(
     String from,
     SignalTransportFrame frame,
@@ -1111,7 +1316,31 @@ final class LockedReceiver {
       return;
     }
     _presenceHeard[from] = frame;
-    if (!_presenceNews(_presenceWritten[from], frame)) {
+    final SignalTransportFrame? written = _presenceWritten[from];
+    if (written == null || _presenceChanged(written, frame)) {
+      await _keepPresence();
+      return;
+    }
+    final Duration? refresh = _presenceRefresh(written, frame);
+    if (refresh == null) {
+      return;
+    }
+    final Duration? within = _presenceWriteWithin;
+    if (within == null || refresh < within) {
+      _presenceWriteWithin = refresh;
+    }
+    await _keepPresenceDue();
+  }
+
+  /// Writes what waits to be written ([_presenceWriteWithin]) once its
+  /// time since the last write is up (a clock set back: at once).
+  Future<void> _keepPresenceDue() async {
+    final Duration? within = _presenceWriteWithin;
+    if (within == null) {
+      return;
+    }
+    final int since = _now() - _presenceWrittenAt;
+    if (since >= 0 && since < within.inMilliseconds) {
       return;
     }
     await _keepPresence();
@@ -1121,50 +1350,69 @@ final class LockedReceiver {
   final Map<String, SignalTransportFrame> _presenceWritten =
       <String, SignalTransportFrame>{};
 
-  /// Whether [frame] is worth writing down over [written], the friend's
-  /// frame the file holds: the first one, another state, another last
-  /// opening while not online (shown only then; a minute's difference, as
-  /// `lo` is told in seconds and goes by the clocks of two phones), or the
-  /// same once the written one is
-  /// [kKeptPresenceRefreshEvery] old (an online friend's
-  /// [kKeptPresenceOnlineRefreshEvery]). A friend's frames come every few
-  /// minutes; each write seals the whole file anew and waits for the disk.
-  static bool _presenceNews(
-    SignalTransportFrame? written,
+  /// When [_presenceSnapshot] was last written (the receiver's clock).
+  int _presenceWrittenAt = 0;
+
+  /// The file is behind what was heard, and is written again once this long
+  /// has passed since its last write (`null`: nothing waits).
+  Duration? _presenceWriteWithin;
+
+  /// Whether [frame] tells the app something [written], the friend's frame
+  /// the file holds, does not: another state, or another last opening
+  /// while not online (shown only then; a minute's difference, as `lo` is
+  /// told in seconds and goes by the clocks of two phones).
+  static bool _presenceChanged(
+    SignalTransportFrame written,
     SignalTransportFrame frame,
   ) {
-    if (written == null) {
-      return true;
-    }
     final PresenceReport now = PresenceReport.fromPayload(frame.payload);
     final PresenceReport was = PresenceReport.fromPayload(written.payload);
     if (now.presence != was.presence) {
       return true;
     }
-    final bool online = now.presence == PeerPresence.online;
     final int openedNow = now.lastOpenedAt(frame.receivedAtMillis);
     final int openedWas = was.lastOpenedAt(written.receivedAtMillis);
-    if (!online &&
+    return now.presence != PeerPresence.online &&
         (openedNow - openedWas).abs() >
-            const Duration(minutes: 1).inMilliseconds) {
-      return true;
+            const Duration(minutes: 1).inMilliseconds;
+  }
+
+  /// How soon after the last write [frame], saying what [written] says, is
+  /// to be written: once the written one is [kKeptPresenceRefreshEvery]
+  /// old, that long (an online friend's [kKeptPresenceOnlineRefreshEvery]);
+  /// `null` while it is younger; at once when the written one is
+  /// [kKeptPresenceStaleAfter] old (not online). A friend's frames come
+  /// every few minutes; each write seals the whole file anew and waits for
+  /// the disk.
+  static Duration? _presenceRefresh(
+    SignalTransportFrame written,
+    SignalTransportFrame frame,
+  ) {
+    final bool online =
+        PresenceReport.fromPayload(frame.payload).presence ==
+        PeerPresence.online;
+    final int age = frame.receivedAtMillis - written.receivedAtMillis;
+    if (!online && age >= kKeptPresenceStaleAfter.inMilliseconds) {
+      return Duration.zero;
     }
     final Duration refresh = online
         ? kKeptPresenceOnlineRefreshEvery
         : kKeptPresenceRefreshEvery;
-    return frame.receivedAtMillis - written.receivedAtMillis >=
-        refresh.inMilliseconds;
+    return age >= refresh.inMilliseconds ? refresh : null;
   }
 
   /// Writes the newest presence frame of each friend, heard within
   /// [kPresenceRememberedFor], to [_presenceSnapshot] (with the time they
   /// came, so a status is aged as it would have been): the app reads it
   /// when it opens and shows its friends' statuses at once instead of
-  /// "nieznany". A small file, written when a friend's status changed or
-  /// what it holds of them grew a few minutes old ([_presenceNews]), and
-  /// when the receiver stops, while the phone is awake anyway.
+  /// "nieznany". A small file, written when a friend's status changed, when
+  /// what it holds of them grew a few minutes old (at most every
+  /// [kKeptPresenceRefreshEvery] for that, [_notePresenceHeard]), and when
+  /// the receiver stops, while the phone is awake anyway.
   Future<void> _keepPresence() {
     final int at = _now();
+    _presenceWrittenAt = at;
+    _presenceWriteWithin = null;
     _presenceHeard.removeWhere(
       (String _, SignalTransportFrame f) =>
           at - f.receivedAtMillis > kPresenceRememberedFor.inMilliseconds,
@@ -1212,11 +1460,14 @@ final class LockedReceiver {
     return true;
   }
 
-  Future<void> _sendQuietly(String to, Map<String, dynamic> payload) async {
+  /// Sends [payload] to [to]; false when it could not go.
+  Future<bool> _sendQuietly(String to, Map<String, dynamic> payload) async {
     try {
       await _transport.send(remoteAddress: to, payload: payload);
+      return true;
     } on Object catch (error) {
       logZenWarning('The locked receiver could not answer: $error');
+      return false;
     }
   }
 
@@ -1242,18 +1493,22 @@ final class LockedReceiver {
     _alarm?.observe(frame);
     if (kind == BackgroundContactKind.friend &&
         (type == 'ping' || type == 'pong' || type == kPresenceAwayType)) {
+      _noteHeard(from, _now());
       // Written in the background: the answer below does not wait for it.
       unawaited(_notePresenceHeard(from, frame));
     }
     if (type == 'ping') {
       final int at = _now();
       if (contact && _answersPing(from, at, frame.payload)) {
-        await _sendQuietly(frame.from, <String, dynamic>{
+        final bool sent = await _sendQuietly(frame.from, <String, dynamic>{
           'type': 'pong',
           if (kind == BackgroundContactKind.friend)
             ..._presence.pongFields(from, at),
           if (kind == BackgroundContactKind.friend) ...versionHello(),
         });
+        if (sent && kind == BackgroundContactKind.friend) {
+          _noteTold(from, at);
+        }
       }
       return;
     }
@@ -1262,7 +1517,7 @@ final class LockedReceiver {
     }
     if (_isRealTime(type)) {
       if (contact) {
-        await _followRing(from, type);
+        await _followRing(from, type, frame.payload);
       }
       return;
     }
@@ -1573,6 +1828,16 @@ final class LockedReceiver {
     BackgroundContactKind kind, {
     String from = '',
   }) async {
+    if (type == kCallMissedType) {
+      await _announceMissedCall(from, payload);
+      return;
+    }
+    if (type == 'msg_delete' || type == 'msg_edit') {
+      if (kind != BackgroundContactKind.stranger) {
+        await _withdrawNoticeOf(from, payload);
+      }
+      return;
+    }
     if (type == 'alarm') {
       if (payload['end'] != null || kind != BackgroundContactKind.friend) {
         // Over (the app tells about it after unlock), or from someone whose
@@ -1594,32 +1859,36 @@ final class LockedReceiver {
       return;
     }
     if (_messageTypes.contains(type)) {
-      final bool inGroup = type == 'group_message';
-      if (kind == BackgroundContactKind.stranger ||
-          (!inGroup && kind != BackgroundContactKind.friend)) {
-        // Someone this person did not name: a removed friend, a group
-        // member outside the group's chat, a stranger. The app lets in
-        // none of it as a chat (a stranger's message is told about after
-        // unlock, as one from outside friends); a notice "Nowa wiadomość"
-        // with nobody behind it is all it could say here.
+      final ZenSignal? read = _signalOf(from, payload);
+      if (read == null) {
+        // Nothing the app would take in as a chat message.
         return;
       }
-      if (_noticeKit.quietChat(
-        from: from,
-        payload: payload,
-        nowMillis: _now(),
-      )) {
-        // Muted ("Wycisz…"), or a mentions-only group and no mention.
+      // Marked as a mention of this person only as the app marks it: from
+      // someone who speaks in that group, within the limit per sender.
+      final ZenSignal signal = withMentionOfSelf(
+        read,
+        _alertFacts,
+        _mentionAlerts,
+        _now(),
+      );
+      if (incomingAlertOf(signal, _alertFacts, nowMillis: _now()) !=
+          IncomingAlert.notice) {
+        // By the app's rules: someone this person did not name (a removed
+        // friend, a group member outside the group's chat, a stranger: a
+        // stranger's message is told about after unlock, as one from
+        // outside friends), a group not joined, a muted conversation
+        // ("Wycisz…"), a mentions-only group and no mention, or a switch
+        // that is off.
         return;
       }
+      final bool inGroup = signal.type == ZenSignalType.groupMessage;
       final NoticeText text = _noticeKit.messageNotice(
         from: from,
         payload: payload,
         genericBody: t('Odblokuj Zen, żeby przeczytać.'),
       );
-      final String key = inGroup
-          ? groupConversationKey('${payload['groupId']}')
-          : PeerShareCodec.normalizeAddress(from);
+      final String key = conversationKeyOfSignal(signal);
       await _postThrottled(
         RuntimeSystemNotification(
           id: '$kLockedMessageSlot-${_now()}',
@@ -1627,7 +1896,7 @@ final class LockedReceiver {
           body: text.body,
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.message,
-          kind: _noticeKit.messageKind(from: from, payload: payload),
+          kind: chatNoticeKind(signal),
           routeKey: buildInboxRouteKey(),
           slotKey: kLockedMessageSlot,
           contentRedacted: true,
@@ -1642,6 +1911,7 @@ final class LockedReceiver {
           version: _noticeKit.versionOf(from),
         ),
       );
+      _noteNoticedMessage(from, signal);
       return;
     }
     if (_socialTypes.contains(type)) {
@@ -1651,9 +1921,16 @@ final class LockedReceiver {
         // (the app drops it too).
         return;
       }
-      if (type == 'group_invite' && isManagedGroupId('${payload['groupId']}')) {
+      final ZenSignal? social = _signalOf(from, payload);
+      if (social == null) {
+        // Nothing the app would take in (an invitation to no group).
+        return;
+      }
+      if (type == 'group_invite' && isManagedGroupId(social.groupId ?? '')) {
         // A group another feature keeps (a pyramid cell's chat): nobody
-        // invites to it, and the app drops this after unlock.
+        // invites to it, and the app drops this after unlock. The id as
+        // the app reads it (trimmed), never the raw one: " pyrcell-…" is
+        // the same cell.
         return;
       }
       if (switch (type) {
@@ -1704,12 +1981,96 @@ final class LockedReceiver {
     }
   }
 
+  static String _noticedKey(String author, String messageId) =>
+      '${PeerShareCodec.normalizeAddress(author)}|$messageId';
+
+  /// The message notice now may show [signal]'s words: remembered, and
+  /// when the message disappears its notice is taken down then.
+  void _noteNoticedMessage(String from, ZenSignal signal) {
+    final String id = signal.messageId?.trim() ?? '';
+    if (id.isEmpty) {
+      return;
+    }
+    final String key = _noticedKey(from, id);
+    _noticedMessages
+      ..remove(key)
+      ..add(key);
+    while (_noticedMessages.length > _maxNoticedMessages) {
+      _noticedMessages.removeAt(0);
+    }
+    final int seconds = signal.disappearSeconds ?? 0;
+    if (seconds > 0 && _noticeExpiryTimers.length < _maxNoticedMessages) {
+      late final Timer timer;
+      timer = Timer(Duration(seconds: seconds), () {
+        _noticeExpiryTimers.remove(timer);
+        if (_noticedMessages.contains(key)) {
+          unawaitedLogged(
+            _takeDownMessageNotice(),
+            context: 'Locked notice of a disappeared message',
+          );
+        }
+      });
+      _noticeExpiryTimers.add(timer);
+    }
+  }
+
+  /// A deletion or an edit from [from] ([payload]): when the message notice
+  /// may show the message it means, the notice goes (the app tells of the
+  /// message as it is now after unlock).
+  Future<void> _withdrawNoticeOf(
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final Object? id = payload['msgId'];
+    if (id is! String || id.trim().isEmpty) {
+      return;
+    }
+    final Object? author = payload['author'];
+    final String key = _noticedKey(
+      author is String && author.trim().isNotEmpty ? author : from,
+      id.trim(),
+    );
+    if (_noticedMessages.contains(key) ||
+        _noticedMessages.contains(_noticedKey(from, id.trim()))) {
+      await _takeDownMessageNotice();
+    }
+  }
+
+  Future<void> _takeDownMessageNotice() async {
+    _noticedMessages.clear();
+    try {
+      await _notices.dismissSlot(kLockedMessageSlot);
+    } on Object catch (error, stackTrace) {
+      logZenError('Taking down a locked notice failed', error, stackTrace);
+    }
+  }
+
   /// A ring keeps the call notice up; it ends with the caller's own end or
-  /// once the invites stop, and leaves a "missed call" behind.
-  Future<void> _followRing(String from, String type) async {
+  /// once the invites stop, and leaves a "missed call" behind. Only a call
+  /// the app would ring for rings here ([callRings]): from a friend, a
+  /// group call from someone in that joined group, and not with
+  /// "Połączenia" switched off (then no ring, no card, no notice).
+  Future<void> _followRing(
+    String from,
+    String type,
+    Map<String, dynamic> payload,
+  ) async {
     if (_ringTypes.contains(type)) {
+      final ZenSignal? call = _signalOf(from, payload);
+      if (call == null ||
+          incomingAlertOf(call, _alertFacts, nowMillis: _now()) !=
+              IncomingAlert.ring) {
+        return;
+      }
       final bool fresh = _ringingFrom == null;
       _ringingFrom = from;
+      final String rang = _rangKey(from, call.callId);
+      if (!_rangHere.contains(rang)) {
+        _rangHere.add(rang);
+        while (_rangHere.length > _maxRangHere) {
+          _rangHere.removeAt(0);
+        }
+      }
       // Awake while it rings: the ring ends (and "missed call" shows) when
       // the invites stop, which only a running timer notices.
       unawaited(
@@ -1755,24 +2116,63 @@ final class LockedReceiver {
     await hideIncomingCallPopup();
     try {
       await _notices.dismissSlot(kLockedCallSlot);
-      await _post(
-        RuntimeSystemNotification(
-          id: '$kLockedMissedCallSlot-${_now()}',
-          title: t('Nieodebrane połączenie'),
-          body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
-          createdAtMillis: _now(),
-          category: RuntimeSystemNotificationCategory.message,
-          kind: NoticeKind.call,
-          routeKey: buildInboxRouteKey(),
-          slotKey: kLockedMissedCallSlot,
-          contentRedacted: true,
-        ),
-      );
+      await _postMissedCall();
     } finally {
       unawaited(
         ZenWake.release(tag: 'ring', after: const Duration(seconds: 1)),
       );
     }
+  }
+
+  static String _rangKey(String from, String? callId) =>
+      '${PeerShareCodec.normalizeAddress(from)}|${callId?.trim() ?? ''}';
+
+  /// The "missed call" a ring leaves when it ends, and a missed call told
+  /// afterwards leaves too.
+  Future<void> _postMissedCall() => _post(
+    RuntimeSystemNotification(
+      id: '$kLockedMissedCallSlot-${_now()}',
+      title: t('Nieodebrane połączenie'),
+      body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
+      createdAtMillis: _now(),
+      category: RuntimeSystemNotificationCategory.message,
+      kind: NoticeKind.call,
+      routeKey: buildInboxRouteKey(),
+      slotKey: kLockedMissedCallSlot,
+      contentRedacted: true,
+    ),
+  );
+
+  /// A caller's word, sent reliably after its ring, that the call went
+  /// unanswered ([kCallMissedType]); kept for the app, which notes it in the
+  /// chat after unlock. A call still ringing here (its hangup got lost)
+  /// stops ringing, which leaves the "missed call"; a call whose ring this
+  /// receiver followed left it already; a call that never rang here (the
+  /// phone was away or off) leaves it now. Only as the app tells of it
+  /// ([incomingAlertOf]: from a friend, "Połączenia" on).
+  Future<void> _announceMissedCall(
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final ZenSignal? missed = _signalOf(from, payload);
+    if (missed == null ||
+        incomingAlertOf(missed, _alertFacts, nowMillis: _now()) !=
+            IncomingAlert.notice) {
+      return;
+    }
+    final String rang = _rangKey(from, missed.callId);
+    if (_rangHere.contains(rang)) {
+      if (_ringingFrom == PeerShareCodec.normalizeAddress(from) &&
+          _rangHere.last == rang) {
+        await _ringEnded();
+      }
+      return;
+    }
+    _rangHere.add(rang);
+    while (_rangHere.length > _maxRangHere) {
+      _rangHere.removeAt(0);
+    }
+    await _postMissedCall();
   }
 
   /// The power-button shortcut while the app is locked or closed: the alarm

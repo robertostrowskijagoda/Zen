@@ -213,7 +213,7 @@ void main() {
           ]);
         final String stored = await AvatarSanitizer.validateAndStoreAvatar(
           sourcePath: source.path,
-          storageDir: dir,
+          folder: () async => dir,
         );
         final Uint8List kept = File(stored).readAsBytesSync();
         expect(stored.endsWith('.gif'), isTrue);
@@ -225,7 +225,7 @@ void main() {
         await expectLater(
           AvatarSanitizer.validateAndStoreAvatar(
             sourcePath: broken.path,
-            storageDir: dir,
+            folder: () async => dir,
           ),
           throwsA(isA<FormatException>()),
         );

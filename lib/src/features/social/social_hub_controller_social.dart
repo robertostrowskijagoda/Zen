@@ -835,6 +835,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       type: session.isIncoming ? 'call_decline' : 'hangup',
       session: session,
     );
+    if (!session.isIncoming) {
+      // Nobody answered: maybe nobody was there to hear it.
+      await _sendMissedCallNotice(session);
+    }
     await _closeCallMediaSession();
     if (_currentCallMatches(
       call: state.activeCall,
@@ -876,6 +880,41 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     await _persistState();
+  }
+
+  /// Tells the callee, reliably, that [session] (a call from here) rang
+  /// unanswered. The ring and its hangup are real-time only, so a callee
+  /// who was away (offline, the phone off) never learnt of the call; this
+  /// waits in the queue and in the callee's mailboxes like a message
+  /// (`call_missed`: the call id, its kind, when it was made). Only the
+  /// newest per caller waits (`relayReplaceKeyOf`). A callee whose phone
+  /// rang shows the call once: the call id is noted with the ring there. A
+  /// Zen before 1.16.5 ignores it; it never rings.
+  Future<void> _sendMissedCallNotice(CallSession session) async {
+    if (session.isIncoming ||
+        session.isGroup ||
+        !isRoutablePeerAddress(session.peerAddress)) {
+      return;
+    }
+    try {
+      await ref
+          .read(signalTransportProvider)
+          .send(
+            remoteAddress: session.peerAddress,
+            payload: <String, dynamic>{
+              'type': 'call_missed',
+              'callId': session.id,
+              'kind': session.kind.name,
+              'at': session.startedAtMillis,
+            },
+          );
+    } catch (error, stackTrace) {
+      logZenError(
+        'Telling the callee of a missed call failed',
+        error,
+        stackTrace,
+      );
+    }
   }
 
   void _armPendingOfferTimeout(CallSession session) {
@@ -1054,6 +1093,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         type: 'hangup',
         session: session,
       );
+      if (!session.isIncoming && session.status == CallSessionStatus.ringing) {
+        // Hung up before anyone answered.
+        await _sendMissedCallNotice(session);
+      }
     }
     await _closeCallMediaSession();
     state = state.copyWith(
@@ -1280,26 +1323,37 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       await _closeCallMediaSession();
       _pendingIncomingCallAccept = true;
     } else if (currentCall != null &&
-        currentCall.status == CallSessionStatus.active &&
-        !_currentCallMatchesSignal(currentCall, signal) &&
-        isRoutablePeerAddress(signal.sender)) {
-      await _sendCallSignal(
-        remoteAddress: signal.sender,
-        type: 'busy',
-        session: CallSession(
-          id: callId,
-          peerAddress: signal.sender,
-          displayName: _labelFor(signal, friends: state.friends),
-          kind: _callKind(signal.content),
-          status: CallSessionStatus.ringing,
-          startedAtMillis: timestamp,
-          isIncoming: true,
-        ),
-      );
-      return;
-    } else if (currentCall != null &&
-        currentCall.status != CallSessionStatus.active &&
         !_currentCallMatchesSignal(currentCall, signal)) {
+      final _SecondCall second = _secondCallAgainst(currentCall, signal);
+      if (second != _SecondCall.takesOver) {
+        // Another call's offer while this phone is on a call, rings out or
+        // is rung: "busy", as its invite gets, and the call here goes on
+        // with its media. Taken in, it replaced a call still ringing out.
+        // Nothing while the call here is being ended: the newcomer's next
+        // invite rings then.
+        if (second == _SecondCall.busy &&
+            !_isCallAlreadyTornDown(currentCall.id) &&
+            isRoutablePeerAddress(signal.sender)) {
+          await _sendCallSignal(
+            remoteAddress: signal.sender,
+            type: 'busy',
+            session: CallSession(
+              id: callId,
+              peerAddress: signal.sender,
+              displayName: _labelFor(signal, friends: state.friends),
+              kind: _callKind(signal.content),
+              status: CallSessionStatus.ringing,
+              startedAtMillis: timestamp,
+              isIncoming: true,
+            ),
+          );
+        }
+        // The signal reducer keeps the call here too
+        // (`_shouldKeepCurrentCallOnIncomingSignal`): the refused call never
+        // shows, not even for a moment.
+        return;
+      }
+      // Their new call takes the place of their call ringing here.
       await _closeCallMediaSession();
     }
     final CallSession? nextCurrentCall = state.activeCall;
@@ -1575,25 +1629,60 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       await _deleteManagedAttachmentIfPresent(message);
       await _transferStore.deleteIncoming(canonical, message.id);
       await _transferStore.deleteOutgoing(canonical, message.id);
+      await _closeRealtimeTransferSession(canonical, message.id);
     }
     _bumpTimelineRevision();
+    // Cleared for good: a chunk or a copy of one of them that comes late
+    // (a re-send, a mailbox, another device of the account) brings nothing
+    // back, and no notification keeps their words.
+    _rememberGone(canonical, messages);
+    await _forgetNoticesOf(canonical, messages, persist: false);
 
-    final FriendProfile? current = state.friendByAddress(canonical);
-    if (current == null) {
-      return;
-    }
-
-    state = state.copyWith(
-      book: state.book.edit(
-        canonical,
-        (FriendProfile f) => f.copyWith(
-          lastMessagePreview: '',
-          lastActivityLabel: '',
-          unreadCount: 0,
+    if (state.friendByAddress(canonical) != null) {
+      state = state.copyWith(
+        book: state.book.edit(
+          canonical,
+          (FriendProfile f) => f.copyWith(
+            lastMessagePreview: '',
+            lastActivityLabel: '',
+            unreadCount: 0,
+          ),
         ),
-      ),
-    );
+      );
+    }
     await _persistState();
+  }
+
+  /// Clears the chat of the group [groupId] on this phone ("Wyczyść
+  /// historię"): its messages, their files and what tells of them. The
+  /// group stays; the other members keep their copies.
+  Future<void> clearGroupHistory({required String groupId}) async {
+    await _clearGroupHistory(groupId);
+    final GroupProfile? group = state.groups[groupId];
+    if (group != null) {
+      state = state.copyWith(
+        groups: <String, GroupProfile>{
+          ...state.groups,
+          groupId: group.copyWith(lastMessagePreview: '', unreadCount: 0),
+        },
+      );
+    }
+    await _persistState();
+  }
+
+  @override
+  Future<void> _clearGroupHistory(String groupId) async {
+    final String key = 'group:$groupId';
+    final List<ChatMessage> messages = await _messageTimelineStore.load(key);
+    if (messages.isNotEmpty) {
+      await _messageTimelineStore.save(key, const <ChatMessage>[]);
+      for (final ChatMessage message in messages) {
+        await _deleteManagedAttachmentIfPresent(message);
+      }
+      _rememberGone(key, messages);
+      _bumpTimelineRevision();
+    }
+    await _forgetGroupNotices(groupId);
   }
 
   Future<void> markConversationRead(String peerAddress) async {
@@ -1618,12 +1707,16 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   /// A `ping`, `pong` or `away` from [peerAddress] ([report]: what it said
   /// about their presence). A ping or pong also says they can be reached
   /// directly now ([reachable]); an "away" from a device about to stop
-  /// receiving says the opposite.
+  /// receiving says the opposite. [onlyIfNewer]: a word heard earlier and
+  /// kept (the background service's `presence.zbox`), taken only when it is
+  /// newer than what is known of them already ([presenceKnownAt]), so an
+  /// older file never undoes a newer status.
   Future<void> updatePeerPresence({
     required String peerAddress,
     required PresenceReport report,
     bool reachable = true,
     int? observedAtMillis,
+    bool onlyIfNewer = false,
   }) {
     return _enqueueStateWork(
       () => _updatePeerPresence(
@@ -1631,8 +1724,25 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         report: report,
         reachable: reachable && report.reachable,
         observedAtMillis: observedAtMillis,
+        onlyIfNewer: onlyIfNewer,
       ),
     );
+  }
+
+  /// When [peerAddress]'s presence was last confirmed, as far as this app
+  /// knows (0: never); a time ahead of the clock (the clock was set back)
+  /// counts as 0, so nothing is held back by it.
+  int presenceKnownAt(String peerAddress) {
+    final FriendProfile? friend = state.friendByAddress(peerAddress);
+    if (friend == null) {
+      return 0;
+    }
+    final int known = max(
+      friend.presenceAtMillis,
+      _presenceConfirmedAt[PeerShareCodec.normalizeAddress(friend.address)] ??
+          0,
+    );
+    return known <= DateTime.now().millisecondsSinceEpoch ? known : 0;
   }
 
   Future<void> _updatePeerPresence({
@@ -1640,7 +1750,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     required PresenceReport report,
     required bool reachable,
     int? observedAtMillis,
+    bool onlyIfNewer = false,
   }) async {
+    if (onlyIfNewer &&
+        (observedAtMillis ?? 0) <= presenceKnownAt(peerAddress)) {
+      return;
+    }
     if (reachable) {
       // A pong is the most reliable "this peer is up right now" we get.
       unawaitedLogged(
@@ -1989,7 +2104,16 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
 
   Future<void> markGroupRead(String groupId) async {
     final GroupProfile? group = state.groups[groupId];
-    if (group == null || group.unreadCount == 0) {
+    if (group == null) {
+      return;
+    }
+    // Read here: read on the account's other devices too (what came while
+    // the chat was open here was counted there).
+    unawaitedLogged(
+      _mirrorGroupRead(groupId),
+      context: 'Telling another device a group was read failed',
+    );
+    if (group.unreadCount == 0) {
       return;
     }
     final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
@@ -2031,6 +2155,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         .toList(growable: false);
     if (name.trim().isEmpty) {
       throw FormatException(t('Nadaj grupie nazwę.'));
+    }
+    if (invitees.length + 1 > kMaxGroupMemberCount) {
+      // Every member's phone keeps no more than this many (the rest of a
+      // longer list is dropped there without a word): refused here, where
+      // the person choosing can be told.
+      throw FormatException(groupFullText());
     }
     final String groupId = 'group-$now-${invitees.length}';
     final GroupProfile group = GroupProfile(
@@ -2172,7 +2302,17 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         groupHasMember(current, member)) {
       return;
     }
+    if (isGroupFull(current)) {
+      // The others' phones would drop whoever comes past the cap, without
+      // a word: refused here, where the person adding can be told.
+      throw FormatException(groupFullText());
+    }
+    final int now = DateTime.now().millisecondsSinceEpoch;
     final GroupProfile updated = current.copyWith(
+      // Added by name now: a new invitation, whoever left before, and a
+      // late copy of an older leave takes nobody out.
+      departedAt: _withoutGroupStamp(current.departedAt, member),
+      addedAt: _withGroupStamp(current.addedAt, member, now),
       memberAddresses: normalizedGroupMembers(<String>[
         ...current.memberAddresses,
         member,
@@ -2194,12 +2334,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     state = state.copyWith(groups: groups);
     await _persistState();
 
-    final Map<String, dynamic> sync = _groupInvitePayload(updated);
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    // The update names the newcomer, stamped now, and lists nobody but the
+    // adder and the newcomer: this device's list may be a step behind (it
+    // was offline when someone left), and a member who left must not come
+    // back on anyone's phone with it - not on a Zen before 1.16.5 either,
+    // which merges whatever list comes.
+    final Map<String, dynamic> sync = <String, dynamic>{
+      ..._groupInvitePayload(updated),
+      'memberAddresses': <String>[if (localAddr.isNotEmpty) localAddr, member],
+      kGroupAddedKey: member,
+      'at': now,
+    };
     // The newcomer gets the invite; everyone already in the group gets the
-    // same payload as a member-list update (they merge it without any inbox
-    // entry). Without that, the others dropped the newcomer's messages as
-    // coming from a stranger.
+    // update (they merge it without any inbox entry). Without that, the
+    // others dropped the newcomer's messages as coming from a stranger.
     for (final String recipient in updated.memberAddresses) {
       if (localAddr.isNotEmpty &&
           PeerShareCodec.addressesEqual(recipient, localAddr)) {
@@ -2326,7 +2475,11 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       unawaitedLogged(
         _sendFriendLifecycleSignal(
           peerAddress: senderAddress,
-          payload: <String, dynamic>{'type': 'group_leave', 'groupId': groupId},
+          payload: <String, dynamic>{
+            'type': 'group_leave',
+            'groupId': groupId,
+            'at': DateTime.now().millisecondsSinceEpoch,
+          },
         ),
         context: 'send group leave to $senderAddress',
       );
@@ -2390,20 +2543,29 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       inviteIds: removed?.receivedInviteIds ?? const <String>[],
     ).copyWith(groups: groups);
     await _persistState();
+    // Nothing in the app reaches a group's chat once it is left (or its
+    // invitation declined): its messages, files and notifications go with
+    // it instead of staying on the phone out of reach.
+    await _clearGroupHistory(groupId);
     if (removed == null) {
       return;
     }
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    // Stamped with this phone's clock: the same time on every member's
+    // phone, so an invitation made after it (and only such) brings this
+    // person back (`_groupAfterLeave`).
+    final Map<String, dynamic> leave = <String, dynamic>{
+      'type': 'group_leave',
+      'groupId': groupId,
+      'at': DateTime.now().millisecondsSinceEpoch,
+    };
     for (final String member in removed.memberAddresses) {
       if (localAddr.isNotEmpty &&
           PeerShareCodec.addressesEqual(member, localAddr)) {
         continue;
       }
       unawaitedLogged(
-        _sendFriendLifecycleSignal(
-          peerAddress: member,
-          payload: <String, dynamic>{'type': 'group_leave', 'groupId': groupId},
-        ),
+        _sendFriendLifecycleSignal(peerAddress: member, payload: leave),
         context: 'broadcast group leave to $member',
       );
     }
@@ -2447,6 +2609,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final String trimmed =
         (members ? text : mentionsAsPlainText(text, mentions)).trim();
     final List<Mention> named = members ? mentions : const <Mention>[];
+    if (trimmed.length > kMaxGroupMessageChars) {
+      // The members keep no more of it than this (runtime_signal_parser):
+      // refused here rather than shown whole only to its sender.
+      throw StateError(
+        t('Za długie: najwyżej {n} znaków.', <String, Object?>{
+          'n': kMaxGroupMessageChars,
+        }),
+      );
+    }
     final String said = mentionsAsPlainText(trimmed, named);
 
     await _messageTimelineStore.append(

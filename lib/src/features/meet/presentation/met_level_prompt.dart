@@ -84,7 +84,8 @@ class _MetLevelDialogState extends State<MetLevelDialog> {
       'Widzi też Twoją listę znajomych i statusy, może zapraszać do grup.',
     ),
     FriendLevel.close => t(
-      'Widzi wszystko, dostaje alarm, może być w Twoim kręgu odzyskiwania.',
+      'Widzi wszystko, dostaje alarm i kawałek klucza do odzyskania Twojego '
+      'konta.',
     ),
   };
 

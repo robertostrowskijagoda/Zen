@@ -408,6 +408,12 @@ void main() {
     }
 
     await launch();
+    // A reminder card above the list may leave the conversation under the
+    // bottom bar on this small screen.
+    await tester.ensureVisible(
+      find.byKey(const Key('conversation-card-$_ada')),
+    );
+    await tester.pump();
     await tester.tap(find.byKey(const Key('conversation-card-$_ada')));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));

@@ -415,12 +415,16 @@ void main() {
       expect(board.text, '');
     });
 
-    test('in the background it waits for the app to come back', () async {
+    test('outside Android, in the background it waits for the app to come '
+        'back', () async {
+      // Android, which hides the clipboard from the background but lets an
+      // app write it, has it cleared at once (secure_clipboard_test.dart).
       final _FakeClipboard board = _FakeClipboard()..readable = false;
       bool foreground = false;
       final ExpiringClipboard clip = ExpiringClipboard(
         access: board,
         isInForeground: () => foreground,
+        backgroundHidesClipboard: () => false,
       );
       await clip.copy('secret', ttl: const Duration(milliseconds: 20));
       board.text = 'secret';
@@ -446,7 +450,8 @@ void main() {
         isInForeground: () => true,
         writeSensitive: (String text) async {
           if (!canMark) {
-            return false;
+            // This system has no such call.
+            return null;
           }
           marked.add(text);
           board.text = text;
@@ -497,12 +502,14 @@ void main() {
     });
 
     test('clearNow from the background waits for the app to come back, as '
-        'the timer does, instead of forgetting the secret', () async {
+        'the timer does, instead of forgetting the secret (outside '
+        'Android)', () async {
       final _FakeClipboard board = _FakeClipboard();
       bool foreground = true;
       final ExpiringClipboard clip = ExpiringClipboard(
         access: board,
         isInForeground: () => foreground,
+        backgroundHidesClipboard: () => false,
       );
       await clip.copy('klucz');
       board.readable = false;

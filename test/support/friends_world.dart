@@ -305,9 +305,20 @@ final class FriendsPhone implements RelayPeerSource {
   _LockedSide? _locked;
   int _generation = 1;
 
+  /// For scenarios: what the app does with each frame the relay engine
+  /// hands it: `true` (or no function) handles it as the app does, `false`
+  /// fails to keep it (a write that failed: the relay layer hears so), and
+  /// `null` never answers (an app stuck on it).
+  bool? Function(SignalTransportFrame frame)? appKeeps;
+
   /// The notification privacy level the locked service gets in its notice
   /// kit ("Nadawca i treść" unless a test sets another).
   NotificationPrivacy noticePrivacy = NotificationPrivacy.senderAndContent;
+
+  /// What a copy from another device of the account does here; null: what
+  /// the app does with it (`recordMirroredSend`). A test may stand in for
+  /// an older version of the app.
+  MirroredSend? mirrored;
 
   String get address => sim.address;
 
@@ -442,15 +453,19 @@ final class FriendsPhone implements RelayPeerSource {
     );
     await _runtime.start();
     final _PhoneLink link = _PhoneLink(this);
-    engine = RelayEngine(
-      store: relayStore,
-      blobStore: relayStore,
-      peers: this,
-      send: (String to, Map<String, dynamic> payload) =>
-          link.send(remoteAddress: to, payload: payload),
-      clock: () => world.net.now,
-      deviceClass: () => device.relayClass,
-    );
+    engine =
+        RelayEngine(
+            store: relayStore,
+            blobStore: relayStore,
+            peers: this,
+            send: (String to, Map<String, dynamic> payload) =>
+                link.send(remoteAddress: to, payload: payload),
+            clock: () => world.net.now,
+            deviceClass: () => device.relayClass,
+          )
+          // As the app runs it: a chat message is acknowledged once the hub has
+          // it (see [_toApp]).
+          ..appConfirmsKeeping = true;
     // Only used to send: the frames are taken to the engine by [_onFrame],
     // which waits for the app to be done with each one.
     transport = ReliableSignalTransport(
@@ -637,15 +652,44 @@ final class FriendsPhone implements RelayPeerSource {
         await _onPresence(from, next);
         continue;
       }
+      if (type == kMirrorType) {
+        // What another device of this account sent: only such a device may
+        // say "I sent this" (as AccountRoutingTransport has it).
+        final Object? to = next.payload['to'];
+        final Object? p = next.payload['p'];
+        if (accounts.ownAccount.isNotEmpty &&
+            accounts.accountOf(next.from) == accounts.ownAccount &&
+            to is String &&
+            p is Map<String, dynamic>) {
+          await (mirrored ?? hub.recordMirroredSend)(to, p);
+        }
+        continue;
+      }
+      final bool? keeps = appKeeps == null ? true : appKeeps!(next);
+      if (keeps == null) {
+        continue;
+      }
+      if (!keeps) {
+        await reportReliableKept(next.payload, kept: false);
+        continue;
+      }
       final ZenSignal? signal = zenSignalFromTransportPayload(
         sender: from,
         payload: next.payload,
       );
-      if (signal != null) {
-        await hub.receiveSignal(
-          signal,
-          receivedAtMillis: next.receivedAtMillis,
-        );
+      // The relay layer hears whether the hub kept it, as the app's signal
+      // module tells it (runtime_signal_module.dart).
+      bool kept = false;
+      try {
+        if (signal != null) {
+          await hub.receiveSignal(
+            signal,
+            receivedAtMillis: next.receivedAtMillis,
+          );
+        }
+        kept = true;
+      } finally {
+        await reportReliableKept(next.payload, kept: kept);
       }
     }
     return true;
