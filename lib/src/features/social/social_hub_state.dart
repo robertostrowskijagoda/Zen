@@ -586,6 +586,24 @@ final class SocialHubState {
   }
 }
 
+/// Whether [address] speaks in [group]: a member, or its creator as this
+/// phone recorded it (an older list may not name them) — unless the
+/// creator left: who left is on record ([GroupProfile.departedAt]), and a
+/// creator who left is no member any more, whose messages, calls, timers,
+/// edits and deletions no phone takes, nor tells of while locked. Only a
+/// later invitation of them makes them a member again (and takes them off
+/// that record).
+bool speaksInGroup(GroupProfile group, String address) {
+  bool same(String other) => PeerShareCodec.addressesEqual(other, address);
+  if (address.isEmpty) {
+    return false;
+  }
+  if (group.memberAddresses.any(same)) {
+    return true;
+  }
+  return same(group.createdById) && !group.departedAt.keys.any(same);
+}
+
 /// The moment of the last message in a conversation ([activityStamp]); 0
 /// for none (or an old text label, which says no day).
 int _activityOf(String? label) =>

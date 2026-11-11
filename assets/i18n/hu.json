@@ -856,6 +856,7 @@
     "one": "Csoport ({n} fő)",
     "other": "Csoport ({n} fő)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Egy csoportnak legfeljebb {n} tagja lehet.",
   "Grupa nr {n}": "{n}. csoport",
   "Grupa od znajomego": "Csoport egy ismerőstől",
   "Grupa od {name}": "Csoport tőle: {name}",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Már van függőben lévő meghívód ettől a személytől.",
   "Masz już tę albo nowszą wersję.": "Már megvan ez a verzió vagy egy újabb.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Már vannak ismerőseid — állítsd be a fiókjelszót, hogy a közeli ismerőseid segíthessenek a fiók helyreállításában",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Már {n} jegyzeted van. Törölj régebbieket, hogy újat menthess.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Már {n} ismerősöd van — állítsd be a fiókjelszót",
     "other": "Már {n} ismerősöd van — állítsd be a fiókjelszót"
@@ -3206,7 +3208,7 @@
   "Przerwij": "Megszakítás",
   "Przerwij odzyskiwanie": "Helyreállítás megszakítása",
   "Przerwy (ban czasowy)": "Szünetek (ideiglenes kitiltás)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Nem kapsz több üzenetet ebből a csoportból, a többiek pedig látni fogják, hogy kiléptél.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Nem kapsz több üzenetet ebből a csoportból, a többiek pedig látni fogják, hogy kiléptél. A csoport csevegése és fájljai eltűnnek erről a telefonról.",
   "Przestać przechowywać?": "Nem őrzöd tovább?",
   "Przestań": "Abbahagyás",
   "Przestań obserwować": "Követés megszüntetése",

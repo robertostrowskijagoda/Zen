@@ -856,6 +856,7 @@
     "one": "Grup ({n} kişi)",
     "other": "Grup ({n} kişi)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Bir grupta en fazla {n} kişi olabilir.",
   "Grupa nr {n}": "{n}. grup",
   "Grupa od znajomego": "Bir arkadaştan grup",
   "Grupa od {name}": "{name} kişisinden grup",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Bu peer'den bekleyen bir davetin zaten var.",
   "Masz już tę albo nowszą wersję.": "Bu sürüme ya da daha yenisine zaten sahipsin.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Artık arkadaşların var — hesap parolanı ayarla ki yakın arkadaşların hesabını kurtarmana yardım edebilsin",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Zaten {n} notun var. Yenisini kaydetmek için eskilerini sil.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Artık {n} arkadaşın var — hesap parolanı ayarla",
     "other": "Artık {n} arkadaşın var — hesap parolanı ayarla"
@@ -3206,7 +3208,7 @@
   "Przerwij": "İptal et",
   "Przerwij odzyskiwanie": "Kurtarmayı iptal et",
   "Przerwy (ban czasowy)": "Aralar (süreli yasak)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Bu gruptan mesaj almayacaksın, diğerleri de ayrıldığını görecek.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Bu gruptan mesaj almayacaksın, diğerleri de ayrıldığını görecek. Grubun sohbeti ve dosyaları bu telefondan silinecek.",
   "Przestać przechowywać?": "Saklamayı bırakmak istiyor musun?",
   "Przestań": "Bırak",
   "Przestań obserwować": "Takibi bırak",

@@ -846,6 +846,7 @@
   "Grupa ({n} osób)": {
     "other": "群组（{n} 人）"
   },
+  "Grupa może mieć najwyżej {n} osób.": "一个群组最多可以有 {n} 人。",
   "Grupa nr {n}": "第 {n} 组",
   "Grupa od znajomego": "好友发来的群组",
   "Grupa od {name}": "{name} 发来的群组",
@@ -1612,6 +1613,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "你已有一个来自该用户的待处理邀请。",
   "Masz już tę albo nowszą wersję.": "你已有此版本或更新的版本。",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "你已经有好友了——设置账号密码，密友才能帮你恢复账号",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "你已有 {n} 条笔记。删除一些较早的笔记才能保存新的。",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "other": "你已经有 {n} 位好友了——设置账号密码吧"
   },
@@ -3164,7 +3166,7 @@
   "Przerwij": "中止",
   "Przerwij odzyskiwanie": "中止恢复",
   "Przerwy (ban czasowy)": "暂停（限时封禁）",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "你将不再收到此群组的消息，其他人会看到你已退出。",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "你将不再收到此群组的消息，其他人会看到你已退出。群组的聊天记录和文件将从这部手机上删除。",
   "Przestać przechowywać?": "不再保管？",
   "Przestań": "停止",
   "Przestań obserwować": "取消关注",

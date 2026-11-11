@@ -1348,12 +1348,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
             ),
           );
         }
-        if (second == _SecondCall.busy &&
-            currentCall.isIncoming &&
-            currentCall.status == CallSessionStatus.ringing &&
-            !_isCallAlreadyTornDown(currentCall.id)) {
-          _keepRingingCallOverRefusedOffer(currentCall, signal.sender, callId);
-        }
+        // The signal reducer keeps the call here too
+        // (`_shouldKeepCurrentCallOnIncomingSignal`): the refused call never
+        // shows, not even for a moment.
         return;
       }
       // Their new call takes the place of their call ringing here.
@@ -1432,35 +1429,6 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       // The unqueued one: this already runs inside the queue.
       await _acceptIncomingCall(peerAddress: signal.sender);
     }
-  }
-
-  /// An offer refused as "busy" while [kept] rings in: the offer's own step
-  /// in the signal reducer still puts the newcomer's call in the place of
-  /// any call ringing in, whoever sends it. Right after that step the call
-  /// that rings here is put back, so its ring goes on (its offer is still
-  /// held) and the refused call, already told "busy", is not left on the
-  /// screen with the real caller turned away as "busy" at its next invite.
-  void _keepRingingCallOverRefusedOffer(
-    CallSession kept,
-    String refusedCaller,
-    String refusedCallId,
-  ) {
-    unawaitedLogged(
-      _enqueueStateWork(() async {
-        final CallSession? now = state.activeCall;
-        if (now == null ||
-            now.id != refusedCallId ||
-            !PeerShareCodec.addressesEqual(now.peerAddress, refusedCaller) ||
-            _isCallAlreadyTornDown(kept.id)) {
-          return;
-        }
-        state = state.copyWith(activeCall: kept);
-        _syncCallRingingTimeout();
-        await _persistState();
-        await _syncRingingCallWindow();
-      }),
-      context: 'Keeping the ringing call over a refused one failed',
-    );
   }
 
   @override
@@ -2136,7 +2104,16 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
 
   Future<void> markGroupRead(String groupId) async {
     final GroupProfile? group = state.groups[groupId];
-    if (group == null || group.unreadCount == 0) {
+    if (group == null) {
+      return;
+    }
+    // Read here: read on the account's other devices too (what came while
+    // the chat was open here was counted there).
+    unawaitedLogged(
+      _mirrorGroupRead(groupId),
+      context: 'Telling another device a group was read failed',
+    );
+    if (group.unreadCount == 0) {
       return;
     }
     final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
@@ -2178,6 +2155,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         .toList(growable: false);
     if (name.trim().isEmpty) {
       throw FormatException(t('Nadaj grupie nazwę.'));
+    }
+    if (invitees.length + 1 > kMaxGroupMemberCount) {
+      // Every member's phone keeps no more than this many (the rest of a
+      // longer list is dropped there without a word): refused here, where
+      // the person choosing can be told.
+      throw FormatException(groupFullText());
     }
     final String groupId = 'group-$now-${invitees.length}';
     final GroupProfile group = GroupProfile(
@@ -2318,6 +2301,11 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         member.isEmpty ||
         groupHasMember(current, member)) {
       return;
+    }
+    if (isGroupFull(current)) {
+      // The others' phones would drop whoever comes past the cap, without
+      // a word: refused here, where the person adding can be told.
+      throw FormatException(groupFullText());
     }
     final int now = DateTime.now().millisecondsSinceEpoch;
     final GroupProfile updated = current.copyWith(

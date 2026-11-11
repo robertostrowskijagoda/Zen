@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 
 /// Where the notes are kept (in the encrypted store), and the key the
 /// account's devices sync them under (account_state_sync_app.dart).
@@ -14,9 +17,25 @@ const String kSelfNotesKey = 'notes/self';
 /// The longest note.
 const int kMaxSelfNoteChars = 4000;
 
-/// The most notes kept; past it the oldest deleted ones go first, then
-/// the oldest notes.
+/// The most notes one writes here: at it, a new note is refused with
+/// [selfNotesFullText] (nothing is dropped to make room for it).
 const int kMaxSelfNotes = 2000;
+
+/// The most deletion markers kept besides the notes; past it the oldest go
+/// (deleted longest ago: every device has had the longest time to take
+/// them). Never dropped to make room for notes: a note whose marker went
+/// came back from a device that still had it.
+const int kMaxSelfNoteMarkers = 2000;
+
+/// The most notes kept however they came: notes written on several devices
+/// at once can, merged, pass [kMaxSelfNotes]; past this the oldest go.
+const int kMaxSelfNotesMerged = 2 * kMaxSelfNotes;
+
+/// What the person is told when [kMaxSelfNotes] are written.
+String selfNotesFullText() => t(
+  'Masz już {n} notatek. Usuń starsze, żeby zapisać nową.',
+  {'n': kMaxSelfNotes},
+);
 
 /// One note to oneself.
 @immutable
@@ -79,12 +98,46 @@ final class SelfNotesService extends ChangeNotifier {
       _notes.values.where((SelfNote n) => !n.deleted).toList()
         ..sort((SelfNote a, SelfNote b) => a.atMillis.compareTo(b.atMillis));
 
+  /// Whether the notes are known to be stored ([ensureStored]).
+  bool _stored = false;
+
+  /// Keeps an empty set of notes on a device that never had one. The
+  /// account's sync reads a state that is not there as one that cannot be
+  /// read yet (locked, still loading) and then takes nothing in: notes
+  /// written on the account's other devices waited for ever on a device
+  /// until it wrote a note of its own. The passwords' vault is read as an
+  /// empty one when there is none, for the same reason. Nothing happens
+  /// while the store is locked (it is tried again once it opens).
+  Future<void> ensureStored() async {
+    if (_stored) {
+      return;
+    }
+    try {
+      if (await disk.read(kSelfNotesKey) == null) {
+        await _writeEmpty();
+      }
+      _stored = true;
+    } on Object catch (error) {
+      logZenWarning('Keeping the notes failed: ${error.runtimeType}');
+    }
+  }
+
+  Future<void> _writeEmpty() async {
+    await disk.write(kSelfNotesKey, Uint8List.fromList(utf8.encode('{}')));
+    _stored = true;
+    // The account's sync looks again: what waited for this device comes.
+    notifyListeners();
+  }
+
   /// Reads the stored notes again (after a sync wrote them).
   Future<void> load() async {
     Map<String, SelfNote> read = <String, SelfNote>{};
     try {
       final Uint8List? raw = await disk.read(kSelfNotesKey);
-      if (raw != null) {
+      if (raw == null) {
+        await _writeEmpty();
+      } else {
+        _stored = true;
         final Object? json = jsonDecode(utf8.decode(raw));
         if (json is Map) {
           read = <String, SelfNote>{
@@ -112,6 +165,11 @@ final class SelfNotesService extends ChangeNotifier {
       return null;
     }
     await _ensureLoaded();
+    if (_notes.values.where((SelfNote n) => !n.deleted).length >=
+        kMaxSelfNotes) {
+      // Refused, said: no older note goes without a word to make room.
+      throw FormatException(selfNotesFullText());
+    }
     final SelfNote note = SelfNote(
       id: '${_now().toRadixString(36)}-${_random.nextInt(1 << 30).toRadixString(36)}',
       text: clean.length > kMaxSelfNoteChars
@@ -219,18 +277,21 @@ final class SelfNotesService extends ChangeNotifier {
   }
 
   Future<void> _save() async {
-    if (_notes.length > kMaxSelfNotes) {
-      final List<SelfNote> order = _notes.values.toList()
-        ..sort((SelfNote a, SelfNote b) {
-          if (a.deleted != b.deleted) {
-            return a.deleted ? -1 : 1;
-          }
-          return a.atMillis.compareTo(b.atMillis);
-        });
-      for (final SelfNote n in order.take(_notes.length - kMaxSelfNotes)) {
+    // Notes and deletion markers each within their own bound, the oldest
+    // going first: a marker never goes to make room for a note.
+    void bound(bool deleted, int most) {
+      final List<SelfNote> of =
+          _notes.values.where((SelfNote n) => n.deleted == deleted).toList()
+            ..sort(
+              (SelfNote a, SelfNote b) => a.atMillis.compareTo(b.atMillis),
+            );
+      for (final SelfNote n in of.take(max(0, of.length - most))) {
         _notes.remove(n.id);
       }
     }
+
+    bound(true, kMaxSelfNoteMarkers);
+    bound(false, kMaxSelfNotesMerged);
     await disk.write(
       kSelfNotesKey,
       Uint8List.fromList(
@@ -251,6 +312,20 @@ final Provider<SelfNotesService> selfNotesServiceProvider =
       final SelfNotesService service = SelfNotesService(
         disk: ref.read(ledgerDiskProvider),
       );
-      ref.onDispose(service.dispose);
+      // Stored from the start, also on a device that never had a note
+      // ([SelfNotesService.ensureStored]), once the store is open.
+      final AppSecurityService security = ref.read(appSecurityServiceProvider);
+      void onSecurity() {
+        if (!security.isLocked) {
+          unawaited(service.ensureStored());
+        }
+      }
+
+      security.addListener(onSecurity);
+      onSecurity();
+      ref.onDispose(() {
+        security.removeListener(onSecurity);
+        service.dispose();
+      });
       return service;
     });

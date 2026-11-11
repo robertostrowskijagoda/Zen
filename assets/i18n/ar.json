@@ -896,6 +896,7 @@
     "many": "مجموعة ({n} شخصًا)",
     "other": "مجموعة ({n} شخص)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "يمكن أن تضم المجموعة {n} شخصًا على الأكثر.",
   "Grupa nr {n}": "المجموعة رقم {n}",
   "Grupa od znajomego": "مجموعة من صديق",
   "Grupa od {name}": "مجموعة من {name}",
@@ -1717,6 +1718,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "لديك بالفعل دعوة معلّقة من هذا الطرف.",
   "Masz już tę albo nowszą wersję.": "لديك هذا الإصدار أو أحدث منه بالفعل.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "لديك أصدقاء بالفعل — عيّن كلمة مرور الحساب ليتمكن الأصدقاء المقرّبون من المساعدة في استعادة الحساب",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "لديك بالفعل {n} ملاحظة. احذف ملاحظات أقدم لتحفظ ملاحظة جديدة.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "zero": "لديك الآن {n} صديق — عيّن كلمة مرور الحساب",
     "one": "لديك الآن {n} صديق — عيّن كلمة مرور الحساب",
@@ -3374,7 +3376,7 @@
   "Przerwij": "أوقِف",
   "Przerwij odzyskiwanie": "أوقِف الاستعادة",
   "Przerwy (ban czasowy)": "الإيقاف (حظر مؤقت)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "لن تصلك رسائل من هذه المجموعة، وسيرى الباقون أنك غادرت.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "لن تصلك رسائل من هذه المجموعة، وسيرى الباقون أنك غادرت. ستُحذف محادثة المجموعة وملفاتها من هذا الهاتف.",
   "Przestać przechowywać?": "التوقف عن الحفظ؟",
   "Przestań": "توقّف",
   "Przestań obserwować": "إلغاء المتابعة",

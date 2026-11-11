@@ -656,7 +656,8 @@ void main() {
     });
 
     test('missed calls to a friend who is away wait in their mailboxes, the '
-        'newest per caller, and reach them when back', () async {
+        'newest per caller, worth a notice and counted as waiting, and '
+        'reach them when back', () async {
       final _World w = await _circle(<String, int>{
         'owner': 1,
         'ania': 1,
@@ -687,7 +688,13 @@ void main() {
         final Map<String, Map<String, dynamic>> held =
             (await w[m].devices.first.store.load()).mailbox[bartek.address]!;
         expect(held, hasLength(1), reason: '$m holds the newest only');
+        // Worth a notice: Bartek's phone, locked when a mailbox hands it
+        // over, says something came (it cannot open the box to say what).
+        expect(held.values.single['k'], 1, reason: m);
       }
+      // A call notice the caller made: "Czeka na doręczenie" counts it, once
+      // per callee however often they rang, until it arrives.
+      expect(me.engine.overview.value.outboxCount, 1);
       // Its own kind of mail: a device taken for gone still gets it.
       expect(
         relayIsPersonalPayload(<String, dynamic>{'type': 'call_missed'}),
@@ -703,6 +710,7 @@ void main() {
         <Object?>['call-3'],
       );
       expect((await me.store.load()).outbox, isEmpty);
+      expect(me.engine.overview.value.outboxCount, 0);
     });
 
     test('a fellow mailbox catching up cannot make a mailbox drop what the '

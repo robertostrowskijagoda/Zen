@@ -856,6 +856,7 @@
     "one": "Group ({n} person)",
     "other": "Group ({n} people)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "A group can have at most {n} people.",
   "Grupa nr {n}": "Group no. {n}",
   "Grupa od znajomego": "A group from a friend",
   "Grupa od {name}": "A group from {name}",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "You already have a pending invitation from this peer.",
   "Masz już tę albo nowszą wersję.": "You already have this version or a newer one.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "You already have friends — set an account password so close friends can help you recover the account",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "You already have {n} notes. Delete older ones to save a new one.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "You have {n} friend now — set an account password",
     "other": "You have {n} friends now — set an account password"
@@ -3206,7 +3208,7 @@
   "Przerwij": "Cancel",
   "Przerwij odzyskiwanie": "Cancel recovery",
   "Przerwy (ban czasowy)": "Breaks (temporary ban)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "You’ll stop getting messages from this group, and the others will see that you left.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "You’ll stop getting messages from this group, and the others will see that you left. The group’s chat and its files will be removed from this phone.",
   "Przestać przechowywać?": "Stop keeping it?",
   "Przestań": "Stop",
   "Przestań obserwować": "Unfollow",

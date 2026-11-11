@@ -17,6 +17,11 @@ const Set<String> kRelayNoticeTypes = <String>{
   'group_invite',
   'call_invite',
   'group_call_invite',
+  // A ring that ended unanswered, told afterwards (the newest per caller
+  // waits): the app shows it as a missed call, so a locked phone that gets
+  // it from a mailbox says something came, and the caller's "Czeka na
+  // doręczenie" counts it as the call notice it is until it arrives.
+  'call_missed',
 };
 
 /// One end-to-end sealed payload in transit through relays.

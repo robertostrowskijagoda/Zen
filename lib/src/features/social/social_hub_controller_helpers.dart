@@ -989,7 +989,12 @@ InboxEntry _buildInboxEntry({
         routeKey: buildGroupRouteKey(
           groupId: signal.groupId ?? 'grp-${signal.sender}',
           title: groupName,
-          messageId: signal.messageId,
+          // The key the message is kept under here: its id, or the
+          // sender's own key when another member's message holds the id.
+          messageId: switch (signal.chatExtras?[_kStoredKeyKey]) {
+            final String key when key.isNotEmpty => key,
+            _ => signal.messageId,
+          },
         ),
         peerAddress: signal.sender,
         messageId: _noticeGroupMessageId(signal),
@@ -1604,10 +1609,7 @@ GroupProfile? _noticeGroupOf(
   if (group == null || group.isInvitePending) {
     return null;
   }
-  return groupHasMember(group, signal.sender) ||
-          PeerShareCodec.addressesEqual(group.createdById, signal.sender)
-      ? group
-      : null;
+  return speaksInGroup(group, signal.sender) ? group : null;
 }
 
 /// Who wrote a group message, as its notices and inbox entries name them:
@@ -1900,11 +1902,7 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
       final GroupProfile? callGroup = hubState.groups[signal.groupId ?? ''];
       return callGroup != null &&
           !callGroup.isInvitePending &&
-          (groupHasMember(callGroup, signal.sender) ||
-              PeerShareCodec.addressesEqual(
-                callGroup.createdById,
-                signal.sender,
-              ));
+          speaksInGroup(callGroup, signal.sender);
     case ZenSignalType.profileUpdate:
       // Anyone the user has a relationship with (the photo of someone who
       // just accepted can arrive before the acceptance itself).
@@ -1928,9 +1926,9 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
       }
       // Membership, not friendship, decides: a friend outside the group (or
       // a late message from someone who already left) must not post into
-      // it - it used to silently re-add them as a member.
-      return groupHasMember(targetGroup, signal.sender) ||
-          PeerShareCodec.addressesEqual(targetGroup.createdById, signal.sender);
+      // it - it used to silently re-add them as a member. Nor does a
+      // creator who left.
+      return speaksInGroup(targetGroup, signal.sender);
     case ZenSignalType.groupUpdate:
     case ZenSignalType.groupLeave:
     case ZenSignalType.groupInviteAck:
@@ -1938,9 +1936,7 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
         return true;
       }
       final GroupProfile? grp = hubState.groups[signal.groupId ?? ''];
-      return grp != null &&
-          (groupHasMember(grp, signal.sender) ||
-              PeerShareCodec.addressesEqual(grp.createdById, signal.sender));
+      return grp != null && speaksInGroup(grp, signal.sender);
     case ZenSignalType.disappearTimer:
     case ZenSignalType.messageReaction:
     case ZenSignalType.messageEdit:
@@ -1953,11 +1949,7 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
       final GroupProfile? timerGroup = hubState.groups[timerGroupId];
       return timerGroup != null &&
           !timerGroup.isInvitePending &&
-          (groupHasMember(timerGroup, signal.sender) ||
-              PeerShareCodec.addressesEqual(
-                timerGroup.createdById,
-                signal.sender,
-              ));
+          speaksInGroup(timerGroup, signal.sender);
     case ZenSignalType.deepLink:
     case ZenSignalType.presence:
     case ZenSignalType.typing:
@@ -2003,7 +1995,12 @@ bool _shouldKeepCurrentCallOnIncomingSignal(
     return _shouldPreferLocalOutgoingCall(call, incomingCallId);
   }
   if (call.isIncoming && call.status == CallSessionStatus.ringing) {
-    return false;
+    // A call ringing in stays, whoever else calls (they hear "busy" from
+    // the signal's own handling); only its caller may replace it with a
+    // new call of theirs. Taken in, another caller's offer or invite put
+    // their call on the screen in its place, and their invite left an
+    // incoming-call entry in the inbox for a call refused as "busy".
+    return _secondCallAgainst(call, signal) != _SecondCall.takesOver;
   }
   return true;
 }
@@ -2209,8 +2206,7 @@ final class _HubAlertFacts implements AlertFacts {
     final GroupProfile? group = state.groups[groupId];
     return group != null &&
         !group.isInvitePending &&
-        (groupHasMember(group, address) ||
-            PeerShareCodec.addressesEqual(group.createdById, address));
+        speaksInGroup(group, address);
   }
 
   @override
@@ -2647,6 +2643,17 @@ List<String> cappedGroupMembers(List<String> members) {
       : members.sublist(0, kMaxGroupMemberCount);
 }
 
+/// What the person creating a group, or adding to one, is told when it
+/// would list more than [kMaxGroupMemberCount] people (themselves too).
+String groupFullText() =>
+    t('Grupa może mieć najwyżej {n} osób.', {'n': kMaxGroupMemberCount});
+
+/// Whether [group] lists [kMaxGroupMemberCount] people already: nobody more
+/// can be added ([groupFullText]).
+bool isGroupFull(GroupProfile group) =>
+    normalizedGroupMembers(group.memberAddresses).length >=
+    kMaxGroupMemberCount;
+
 /// Most friend requests / group invitations kept in the background queue.
 const int kMaxQueuedInvitations = 64;
 
@@ -2683,6 +2690,12 @@ const Duration _kMessageAsPresence = Duration(minutes: 2);
 /// Set by the hub on a message older than one of its sender's already in
 /// the chat ([ZenSignal.chatExtras], never sent): see `_applySignal`.
 const String _kLateCopyKey = 'zLateCopy';
+
+/// Set by the hub on a group message kept under a key other than its id
+/// ([groupMessageSlot]: another member's message holds the id), with that
+/// key ([ZenSignal.chatExtras], never sent): a mention's notification opens
+/// the chat at it, not at the other member's message.
+const String _kStoredKeyKey = 'zKey';
 
 /// Whether [signal] (a chat message that came at [receivedAtMillis]) was
 /// written so shortly before that its sender is there now. One without its

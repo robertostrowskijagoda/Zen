@@ -44,7 +44,17 @@ class _SelfNotesScreenState extends ConsumerState<SelfNotesScreen> {
       return;
     }
     _text.clear();
-    await ref.read(selfNotesServiceProvider).add(text);
+    try {
+      await ref.read(selfNotesServiceProvider).add(text);
+    } on FormatException catch (error) {
+      // Refused (as many notes as are kept): said, and the text stays.
+      if (mounted) {
+        _text.text = text;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
   }
 
   Future<void> _actions(SelfNote note) async {

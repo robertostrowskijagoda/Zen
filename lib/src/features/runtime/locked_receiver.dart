@@ -531,7 +531,8 @@ BackgroundCapabilityDraft backgroundCapabilityDraftOf(
     }
     for (final String member in <String>[
       ...group.memberAddresses,
-      group.createdById,
+      // Not a creator who left: no member any more ([speaksInGroup]).
+      if (speaksInGroup(group, group.createdById)) group.createdById,
     ]) {
       final String address = normal(member);
       // A friend's unlinked phone in a shared group is no member either.
@@ -563,7 +564,9 @@ String backgroundContactsSignature(SocialHubState state) {
       '${friend.status.name}:${friend.address}',
     for (final GroupProfile group in state.groups.values)
       if (!group.isInvitePending)
-        'g:${group.id}:${group.createdById}:${group.memberAddresses.join(',')}',
+        'g:${group.id}:${group.createdById}:'
+            '${speaksInGroup(group, group.createdById)}:'
+            '${group.memberAddresses.join(',')}',
   ]..sort();
   return parts.join('|');
 }

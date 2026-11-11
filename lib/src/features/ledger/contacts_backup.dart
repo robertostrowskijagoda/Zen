@@ -164,6 +164,42 @@ ContactsSplit splitContacts(Map<String, dynamic> snapshot) {
   );
 }
 
+/// Most bytes one friend or group of a backup may take for [splitContacts]
+/// to fit it in a part (with room for its place in the part).
+const int kContactsItemBytes = kContactsPartBytes - 64 - 16;
+
+/// [item] (one group of a backup) with [stamps] (address → millis) under
+/// [key]: the newest of them that keep the item within [budget] bytes, so
+/// a record that grows (who left a group: up to 256 entries) never makes
+/// the item too big for a part and the whole backup unsavable. [item] as
+/// it is when none fit or there are none.
+Map<String, dynamic> contactsItemWithStamps(
+  Map<String, dynamic> item,
+  String key,
+  Map<String, int> stamps, {
+  int budget = kContactsItemBytes,
+}) {
+  if (stamps.isEmpty) {
+    return item;
+  }
+  final List<MapEntry<String, int>> newest = stamps.entries.toList()
+    ..sort((MapEntry<String, int> a, MapEntry<String, int> b) {
+      final int byTime = b.value.compareTo(a.value);
+      return byTime != 0 ? byTime : a.key.compareTo(b.key);
+    });
+  // `,"key":{}` and, for each entry, `"address":millis,`.
+  int bytes = contactsJsonBytes(item) + contactsJsonBytes(key) + 4;
+  final Map<String, int> kept = <String, int>{};
+  for (final MapEntry<String, int> e in newest) {
+    bytes += contactsJsonBytes(e.key) + '${e.value}'.length + 2;
+    if (bytes > budget) {
+      break;
+    }
+    kept[e.key] = e.value;
+  }
+  return kept.isEmpty ? item : <String, dynamic>{...item, key: kept};
+}
+
 /// The set of [split] whose parts are entries [seqs] of the same log, in
 /// order.
 Map<String, dynamic> contactsSetOf(ContactsSplit split, List<int> seqs) =>

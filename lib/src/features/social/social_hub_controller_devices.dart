@@ -67,6 +67,12 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       await _applyReadFromOtherDevice(peerAddress, payload);
       return;
     }
+    if (type == _kGroupReadType) {
+      // A group read there (groups have no receipts: only own devices are
+      // told).
+      await _applyGroupReadFromOtherDevice(payload);
+      return;
+    }
     if (type != 'message') {
       return;
     }
@@ -133,13 +139,29 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     final Object? at = payload['timestamp'];
     final int sentAt = at is int ? at : DateTime.now().millisecondsSinceEpoch;
     await _enqueueStateWork(() async {
+      // Gone here already (it disappeared, was deleted or cleared): a late
+      // mirror of it does not bring it back.
+      if (_isRememberedGone(key, groupMessageLocalId(id, 'self'))) {
+        return;
+      }
+      // Under the key one's own message with this id has here, never under
+      // another member's message that holds the id: one's own message then
+      // never showed on this device.
+      final String? slot = _groupMessageKeyHere(
+        await _messageTimelineStore.load(key),
+        id,
+        'self',
+      );
+      if (slot == null) {
+        return;
+      }
       await _upsertTimelineMessage(
         peerAddress: key,
-        messageId: id,
+        messageId: slot,
         build: (ChatMessage? existing) =>
             existing ??
             ChatMessage(
-              id: id,
+              id: slot,
               sender: 'self',
               text: text.trim(),
               sentAtMillis: sentAt,
@@ -336,9 +358,12 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
   /// The key a group message from another device of the account (or from
   /// a copy of the account) goes under here: the key of the same author's
   /// message with the same id when this device has it (each device keys a
-  /// message by the order it came in, [groupMessageSlot]), else its own
-  /// key, or the author's other key when that one holds someone else's
-  /// message. Null when it cannot be kept (an id too long for a second key).
+  /// message by the order it came in, [groupMessageSlot]), else the slot
+  /// [groupMessageSlot] gives it as if it came now: the id as it is when
+  /// free, else the author's next free key. Never a key another author's
+  /// message holds: merged into that one, the copy put its file on another
+  /// member's message. Null when it cannot be kept (an id too long for a
+  /// second key).
   Future<String?> _syncedGroupMessageKey(
     String key,
     ChatMessage message,
@@ -347,22 +372,34 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       return message.id;
     }
     final String author = message.isOutgoing ? 'self' : message.sender;
-    final String wireId = groupMessageWireId(message.id);
-    final String alt = groupMessageLocalId(wireId, author);
-    final List<ChatMessage> thread = await _messageTimelineStore.load(key);
-    bool taken = false;
+    return _groupMessageKeyHere(
+      await _messageTimelineStore.load(key),
+      groupMessageWireId(message.id),
+      author,
+    );
+  }
+
+  /// The key [author]'s group message with the id [wireId] has in
+  /// [thread]: the key of theirs it is already under (under the id or any
+  /// of their keys), else the one [groupMessageSlot] gives. Null when no
+  /// key is left for it.
+  String? _groupMessageKeyHere(
+    List<ChatMessage> thread,
+    String wireId,
+    String author,
+  ) {
     for (final ChatMessage m in thread) {
-      if (m.id == alt || (m.id == wireId && _sameGroupAuthor(m, author))) {
+      if ((m.id == wireId || groupMessageWireId(m.id) == wireId) &&
+          _sameGroupAuthor(m, author)) {
         return m.id;
       }
-      if (m.id == message.id) {
-        taken = true;
-      }
     }
-    if (!taken) {
-      return message.id;
-    }
-    return alt.length <= kMaxSignalIdChars ? alt : null;
+    return groupMessageSlot(
+      thread,
+      wireId,
+      author,
+      (ChatMessage m) => _sameGroupAuthor(m, author),
+    );
   }
 
   /// Friends and groups, for the account's other devices (sealed by the
@@ -525,6 +562,17 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
                         e.key as String: e.value as String,
                   }
                 : const <String, String>{},
+            // Who left, as the copy tells it (a copy from before 1.16.5
+            // has none): only those its own list no longer names.
+            departedAt: <String, int>{
+              for (final MapEntry<String, int> e
+                  in groupMembershipStampsFromJson(item[kGroupLeftKey]).entries)
+                if (!members.any(
+                  (Object? m) =>
+                      m is String && PeerShareCodec.addressesEqual(m, e.key),
+                ))
+                  e.key: e.value,
+            },
           );
           added++;
         }
@@ -584,16 +632,24 @@ Map<String, dynamic> contactsBackupOf(SocialHubState state) =>
           <Map<String, dynamic>>[
             for (final GroupProfile g in state.groups.values)
               if (!g.isInvitePending)
-                <String, dynamic>{
-                  'id': g.id,
-                  'name': g.name,
-                  if (g.description.isNotEmpty) 'd': g.description,
-                  'avatar': g.avatarPreset,
-                  'by': g.createdById,
-                  'at': g.createdAtMillis,
-                  'm': g.memberAddresses,
-                  if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
-                },
+                // Who left, and when ([kGroupLeftKey]; the newest that fit
+                // a part of the ledger's copy): a device restored from this
+                // copy starts with it, so no member's list a step behind
+                // brings them back there. Zen 1.16.4 ignores it.
+                contactsItemWithStamps(
+                  <String, dynamic>{
+                    'id': g.id,
+                    'name': g.name,
+                    if (g.description.isNotEmpty) 'd': g.description,
+                    'avatar': g.avatarPreset,
+                    'by': g.createdById,
+                    'at': g.createdAtMillis,
+                    'm': g.memberAddresses,
+                    if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
+                  },
+                  kGroupLeftKey,
+                  g.departedAt,
+                ),
           ]..sort(
             (Map<String, dynamic> a, Map<String, dynamic> b) =>
                 (a['id'] as String).compareTo(b['id'] as String),

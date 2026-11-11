@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -11,9 +12,13 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/ledger/contacts_backup.dart';
+import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -489,6 +494,125 @@ void main() {
     });
   });
 
+  group('a creator who left', () {
+    Map<String, dynamic> post(String id, String text) => <String, dynamic>{
+      'type': 'group_message',
+      'groupId': _gid,
+      'msgId': id,
+      'text': text,
+      'timestamp': 20000,
+    };
+
+    Future<List<String>> texts(_Phone p) async => <String>[
+      for (final m
+          in await p.container
+              .read(messageTimelineStoreProvider)
+              .load('group:$_gid'))
+        if (!m.isSystem) m.text,
+    ];
+
+    test('is no member: their messages, timers and calls are not taken, '
+        'and a locked phone does not count them either', () async {
+      final _Phone p = _Phone(group: _joined());
+      await p.deliver(bob, post('m-bob', 'Kto jutro?'), at: 9000);
+      await p.deliver(ada, _leave(at: 10000), at: 10000);
+      expect(p.members, <String>{bob, cyd, dan});
+      expect(p.group.departedAt.keys, <String>[ada]);
+
+      await p.deliver(ada, post('m-ada', 'Wciąż tu jestem'), at: 20000);
+      await p.deliver(ada, <String, dynamic>{
+        'type': 'disappear_timer',
+        'groupId': _gid,
+        'seconds': 60,
+        'at': 20001,
+      }, at: 20001);
+      expect(await texts(p), <String>['Kto jutro?']);
+      expect(
+        p.container
+            .read(socialHubControllerProvider)
+            .inbox
+            .where((InboxEntry e) => e.body.contains('Wciąż tu jestem')),
+        isEmpty,
+      );
+
+      final SocialHubState state = p.container.read(
+        socialHubControllerProvider,
+      );
+      expect(speaksInGroup(p.group, ada), isFalse);
+      expect(speaksInGroup(p.group, bob), isTrue);
+      final LockedNoticeKit kit = lockedNoticeKitOf(
+        state,
+        privacy: NotificationPrivacy.generic,
+      );
+      expect(kit.speaksIn(_gid, ada), isFalse);
+      expect(kit.speaksIn(_gid, bob), isTrue);
+      final BackgroundCapabilityDraft capability = backgroundCapabilityDraftOf(
+        state.copyWith(
+          book: FriendshipBook.restore(profiles: <String, FriendProfile>{}),
+        ),
+        inboxPublicKey: Uint8List(32),
+      );
+      expect(capability.groupMembers, isNot(contains(ada)));
+      expect(capability.groupMembers, contains(bob));
+    });
+
+    test('invited again, speaks again', () async {
+      final _Phone p = _Phone(group: _joined());
+      await p.deliver(ada, _leave(at: 10000), at: 10000);
+      await p.deliver(bob, _members(<String>[bob, ada], added: ada, at: 11000));
+      expect(p.members, contains(ada));
+      await p.deliver(ada, post('m-ada-2', 'Wróciłam'), at: 12000);
+      expect(await texts(p), <String>['Wróciłam']);
+    });
+  });
+
+  group('the cap', () {
+    test('a group as full as members\' phones keep takes nobody more: the '
+        'adder is told, nothing is sent', () async {
+      final List<String> many = <String>[
+        ada,
+        for (int i = 1; i < kMaxGroupMemberCount; i++) '200::1:$i',
+      ];
+      final _Phone p = _Phone(group: _joined(members: many));
+      expect(isGroupFull(p.group), isTrue);
+      await expectLater(
+        p.hub.addMemberToGroup(groupId: _gid, memberAddress: fay),
+        throwsA(
+          isA<FormatException>().having(
+            (FormatException e) => e.message,
+            'message',
+            'Grupa może mieć najwyżej $kMaxGroupMemberCount osób.',
+          ),
+        ),
+      );
+      expect(p.members, isNot(contains(fay)));
+      expect(p.transport.sentSignals, isEmpty);
+    });
+
+    test('nor is a group made with more people than that', () async {
+      final _Phone p = _Phone();
+      await expectLater(
+        p.hub.createGroup(
+          name: 'Wszyscy',
+          description: '',
+          memberAddresses: <String>[
+            for (int i = 1; i <= kMaxGroupMemberCount; i++) '200::1:$i',
+          ],
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      expect(p.container.read(socialHubControllerProvider).groups, isEmpty);
+      final GroupProfile made = await p.hub.createGroup(
+        name: 'Prawie wszyscy',
+        description: '',
+        memberAddresses: <String>[
+          for (int i = 1; i < kMaxGroupMemberCount; i++) '200::1:$i',
+        ],
+      );
+      expect(made.memberAddresses.length, lessThanOrEqualTo(256));
+    });
+  });
+
   group('who left, told again', () {
     test('a member still writing into a group this phone left is told so, '
         'once in a while', () async {
@@ -514,6 +638,73 @@ void main() {
   });
 
   group('the record', () {
+    test('goes with the copy of friends and groups the account\'s devices '
+        'share: a device restored from it keeps who left out', () async {
+      final _Phone p = _Phone(group: _joined());
+      await p.deliver(dan, _leave(at: 2000));
+      final Map<String, dynamic> copy =
+          jsonDecode(
+                jsonEncode(
+                  contactsBackupOf(
+                    p.container.read(socialHubControllerProvider),
+                  ),
+                ),
+              )
+              as Map<String, dynamic>;
+
+      final _Phone restored = _Phone();
+      await restored.hub.importContactsBackup(copy);
+      expect(restored.members, <String>{ada, bob, cyd});
+      expect(restored.group.departedAt, <String, int>{dan: 2000});
+      // Bob's list, a leave behind, does not bring Dan back there.
+      await restored.deliver(bob, _members(<String>[ada, bob, cyd, dan]));
+      expect(restored.members, isNot(contains(dan)));
+    });
+
+    test('in the copy, a group at the cap with long names and as many '
+        'leaves still fits a part of the ledger\'s copy', () {
+      String address(int i) => PeerShareCodec.normalizeAddress(
+        '201:${i.toRadixString(16)}:5a3c:9e01:77f2:c0de:beef:${i + 1}',
+      );
+      final List<String> members = <String>[
+        for (int i = 0; i < kMaxGroupMemberCount; i++) address(i),
+      ];
+      final GroupProfile big = GroupProfile(
+        id: _gid,
+        name: 'Ekipa',
+        createdById: members.first,
+        createdAtMillis: 1,
+        memberAddresses: members,
+        memberNames: <String, String>{
+          for (final String m in members) m: 'Imię Nazwisko ${m.length}',
+        },
+        departedAt: <String, int>{
+          for (int i = 0; i < kMaxGroupMemberCount; i++)
+            address(1000 + i): 1790000000000 + i,
+        },
+      );
+      final Map<String, dynamic> copy = contactsBackupOf(
+        SocialHubState.empty().copyWith(
+          groups: <String, GroupProfile>{_gid: big},
+        ),
+      );
+      final Map<String, dynamic> item =
+          (copy['groups'] as List<Object?>).single as Map<String, dynamic>;
+      expect(
+        contactsJsonBytes(<Object?>[1, item]),
+        lessThanOrEqualTo(kContactsItemBytes),
+      );
+      final Map<String, dynamic> left =
+          item[kGroupLeftKey] as Map<String, dynamic>;
+      expect(left, isNotEmpty);
+      // The newest are the ones kept.
+      expect(
+        left.containsKey(address(1000 + kMaxGroupMemberCount - 1)),
+        isTrue,
+      );
+      expect(() => splitContacts(copy), returnsNormally);
+    });
+
     test('survives a restart and stays bounded', () async {
       final Directory dir = await Directory.systemTemp.createTemp(
         'zen-group-departures-',

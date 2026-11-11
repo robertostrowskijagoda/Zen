@@ -537,6 +537,109 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     return _mediaVault.read(path);
   }
 
+  /// How far behind this phone's clock each friend's clock is known to be
+  /// (or this phone's ahead of theirs), by normalised address: set when a
+  /// message of theirs had to go in by when it came ([_placedSentAt]), and
+  /// lowered by every later message of theirs (a message cannot come before
+  /// it was written, so its own lead says the clocks are at most that far
+  /// apart). Forgotten after [ClockSkewTracker.sampleLifetime]; in memory
+  /// only.
+  final Map<String, ({int lead, int at})> _clockLeadOf =
+      <String, ({int lead, int at})>{};
+
+  /// What [_clockLeadOf] holds for [sender] at [nowMillis] (0: nothing).
+  int _clockLeadFor(String sender, int nowMillis) {
+    final ({int lead, int at})? known = _clockLeadOf[sender];
+    if (known == null ||
+        nowMillis - known.at > ClockSkewTracker.sampleLifetime.inMilliseconds) {
+      _clockLeadOf.remove(sender);
+      return 0;
+    }
+    return known.lead;
+  }
+
+  void _noteClockLead(String sender, int lead, int atMillis) {
+    if (lead <= 0) {
+      _clockLeadOf.remove(sender);
+      return;
+    }
+    if (!_clockLeadOf.containsKey(sender) &&
+        _clockLeadOf.length >= _kMaxClockOffsets) {
+      _clockLeadOf.remove(_clockLeadOf.keys.first);
+    }
+    _clockLeadOf[sender] = (lead: lead, at: atMillis);
+  }
+
+  /// When a member's or friend's message goes in its conversation: by the
+  /// time its sender put on it ([_effectiveSentAt]) — never above a message
+  /// from here they confirmed they have (delivered, or read) when it came.
+  /// Their answer was put above the question when their clock ran behind
+  /// (or this phone's ahead). Such a message goes in by when it came, and
+  /// the difference is kept ([_clockLeadOf]): their next messages are read
+  /// through it, so they stay in their order after it.
+  ///
+  /// What really was written before keeps its time and its place: one older
+  /// than a message of theirs already here (a late copy from a mailbox, as
+  /// `_markedIfLateCopy` says), and one written before a message from here
+  /// they did not have yet (this phone was away). History from another
+  /// device of the account comes another way (`importSyncedMessage`). The
+  /// time shown is the one it is placed by: theirs, or when it came — never
+  /// made up.
+  ///
+  /// In a group "confirmed" is that some member has the message from here:
+  /// a member who was offline then and wrote before it comes back after it.
+  @override
+  Future<int> _placedSentAt(
+    ZenSignal signal,
+    int receivedAtMillis,
+    String conversationKey,
+  ) async {
+    final String sender = PeerShareCodec.normalizeAddress(signal.sender);
+    final int? claimed = signal.sentAtMillis;
+    final int base = _effectiveSentAt(signal, receivedAtMillis);
+    final int lead = _clockLeadFor(sender, receivedAtMillis);
+    // Their time as this phone's clock reads it, never after it came.
+    final int placed = claimed == null
+        ? base
+        : min(receivedAtMillis, max(base, claimed + lead));
+    if (claimed != null && lead > 0) {
+      _noteClockLead(
+        sender,
+        min(lead, receivedAtMillis - claimed),
+        receivedAtMillis,
+      );
+    }
+    final List<ChatMessage> thread;
+    try {
+      thread = await _messageTimelineStore.load(conversationKey);
+    } on Object catch (error) {
+      logZenWarning('Reading a chat to place a message failed: $error');
+      return placed;
+    }
+    int? confirmed;
+    int? theirs;
+    for (final ChatMessage m in thread) {
+      if (m.isOutgoing &&
+          (m.deliveryState == ChatMessageDeliveryState.delivered ||
+              m.readAtMillis != null)) {
+        confirmed = max(confirmed ?? m.sentAtMillis, m.sentAtMillis);
+      } else if (m.direction == ChatMessageDirection.incoming &&
+          PeerShareCodec.addressesEqual(m.sender, signal.sender)) {
+        theirs = max(theirs ?? m.sentAtMillis, m.sentAtMillis);
+      }
+    }
+    if (confirmed == null ||
+        placed >= confirmed ||
+        (theirs != null && placed < theirs)) {
+      return placed;
+    }
+    final int arrived = max(confirmed, receivedAtMillis);
+    if (claimed != null) {
+      _noteClockLead(sender, arrived - claimed, receivedAtMillis);
+    }
+    return arrived;
+  }
+
   @override
   Future<void> _persistSignalArtifacts(ZenSignal signal, int timestamp) async {
     switch (signal.type) {
@@ -611,7 +714,11 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
                 id: messageId,
                 sender: signal.sender,
                 text: resolvedText,
-                sentAtMillis: _effectiveSentAt(signal, timestamp),
+                sentAtMillis: await _placedSentAt(
+                  signal,
+                  timestamp,
+                  signal.sender,
+                ),
                 direction: ChatMessageDirection.incoming,
                 // A stored attachment is what it really is (media guard).
                 type: stored?.type ?? resolvedType,
@@ -1013,6 +1120,13 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           if (_openGroupId == signal.groupId && _isUiFocused()) {
             unawaited(
               ref.read(zenSoundEffectsProvider).play(ZenSound.messageReceived),
+            );
+          }
+          if (_openGroupId == signal.groupId && _isUiInteractive()) {
+            // Read here as it comes: so on the account's other devices.
+            unawaitedLogged(
+              _mirrorGroupRead(signal.groupId!),
+              context: 'Telling another device a group was read failed',
             );
           }
         }
@@ -1423,47 +1537,33 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       // background wait in the queue to be counted as unread once it is on
       // screen: the ones read on the other device are not counted. They
       // still name the last message in the chat list.
-      bool fromFriend(QueuedSignal q) =>
-          q.signal.type == ZenSignalType.message &&
-          PeerShareCodec.addressesEqual(q.signal.sender, peer);
       final List<QueuedSignal> queue = await _queueStore.load();
-      final List<QueuedSignal> readQueued = <QueuedSignal>[
-        for (final QueuedSignal q in queue)
-          if (fromFriend(q) && read.contains(_incomingMessageIdOf(q.signal))) q,
-      ];
-      final Set<String> unreadQueued = <String>{
-        for (final QueuedSignal q in queue)
-          if (fromFriend(q) && !read.contains(_incomingMessageIdOf(q.signal)))
-            _incomingMessageIdOf(q.signal),
-      };
-      List<QueuedSignal> rest = queue;
-      if (readQueued.isNotEmpty) {
-        final Set<String> gone = <String>{
-          for (final QueuedSignal q in readQueued) q.id,
-        };
-        rest = <QueuedSignal>[
-          for (final QueuedSignal q in queue)
-            if (!gone.contains(q.id)) q,
-        ];
+      final _QueueAfterRead after = _queueAfterRead(
+        queue: queue,
+        thread: await _messageTimelineStore.load(peer),
+        read: read,
+        idOf: (QueuedSignal q) =>
+            q.signal.type == ZenSignalType.message &&
+                PeerShareCodec.addressesEqual(q.signal.sender, peer)
+            ? _incomingMessageIdOf(q.signal)
+            : null,
+        unreadHere: (ChatMessage m) =>
+            m.direction == ChatMessageDirection.incoming &&
+            m.readAtMillis == null,
+      );
+      final List<QueuedSignal> rest = after.rest;
+      if (after.changed) {
         await _queueStore.save(rest);
       }
-      // Still unread and already counted: the friend's messages here that
-      // are neither read nor waiting in the queue.
-      final int unread = (await _messageTimelineStore.load(peer))
-          .where(
-            (ChatMessage m) =>
-                m.direction == ChatMessageDirection.incoming &&
-                m.readAtMillis == null &&
-                !unreadQueued.contains(m.id),
-          )
-          .length;
+      final List<QueuedSignal> readQueued = after.read;
+      final int unread = after.unread;
       final QueuedSignal? newest = readQueued.isEmpty
           ? null
           : readQueued.reduce(
               (QueuedSignal a, QueuedSignal b) =>
                   b.receivedAtMillis >= a.receivedAtMillis ? b : a,
             );
-      final bool nothingUnread = unread == 0 && unreadQueued.isEmpty;
+      final bool nothingUnread = unread == 0 && after.waiting == 0;
       final InboxEntry? alert = nothingUnread
           ? state.backgroundAlerts
                 .where(
@@ -1498,12 +1598,176 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             : state.backgroundAlerts
                   .where((InboxEntry e) => e.id != alert.id)
                   .toList(growable: false),
-        pendingSignalCount: readQueued.isEmpty ? null : rest.length,
+        pendingSignalCount: after.changed ? rest.length : null,
       );
       await _persistState();
       if (nothingUnread) {
         await _systemNotifications.dismissSlot('message:$peer');
         if (alert != null) {
+          await _systemNotifications.dismiss(alert.id);
+        }
+      }
+    });
+  }
+
+  /// What was read last of each group here and told to this account's
+  /// other devices ([_mirrorGroupRead]), by group id: the same is not told
+  /// again.
+  final Map<String, String> _groupReadMirrored = <String, String>{};
+
+  /// Tells this account's other devices — never the members — that the
+  /// group [groupId] was read here up to its newest message from a member
+  /// (`group_read`, as a copy of what this device did, [kMirrorType]): its
+  /// unread count drops there too and its notification goes. Groups have
+  /// no read receipts, so nothing else would say it. A Zen before 1.16.5
+  /// on another device ignores it.
+  @override
+  Future<void> _mirrorGroupRead(String groupId) async {
+    final AccountDeviceDirectory? dir = ref
+        .read(accountDirectoryHolderProvider)
+        .directory;
+    if (dir == null || dir.ownAccount.isEmpty) {
+      return;
+    }
+    final List<String> siblings = dir.addressesOf(dir.ownAccount);
+    if (siblings.isEmpty) {
+      return;
+    }
+    final ChatMessage? newest = (await _messageTimelineStore.load(
+      'group:$groupId',
+    )).where(_isMemberMessage).lastOrNull;
+    if (newest == null || _groupReadMirrored[groupId] == newest.id) {
+      return;
+    }
+    if (_groupReadMirrored.length >= 256) {
+      _groupReadMirrored.remove(_groupReadMirrored.keys.first);
+    }
+    _groupReadMirrored[groupId] = newest.id;
+    final SignalTransport mesh = meshOf(ref.read(signalTransportProvider));
+    final Map<String, dynamic> copy = <String, dynamic>{
+      'type': kMirrorType,
+      'to': 'group:$groupId',
+      'p': <String, dynamic>{
+        'type': _kGroupReadType,
+        'groupId': groupId,
+        'msgId': groupMessageWireId(newest.id),
+        'author': newest.sender,
+      },
+    };
+    for (final String sibling in siblings) {
+      try {
+        await mesh.send(remoteAddress: sibling, payload: copy);
+      } on Object catch (error) {
+        logZenWarning('Telling another device a group was read failed: $error');
+      }
+    }
+  }
+
+  /// Another device of this account read the group `groupId` up to the
+  /// message `msgId` of the member `author` ([_mirrorGroupRead]): here it
+  /// is read up to there too, as a one-to-one chat read there is
+  /// ([_applyReadFromOtherDevice]): its unread count drops to the members'
+  /// messages after it, and once none is left its notifications go.
+  @override
+  Future<void> _applyGroupReadFromOtherDevice(
+    Map<String, dynamic> payload,
+  ) async {
+    final Object? groupId = payload['groupId'];
+    final Object? id = payload['msgId'];
+    final Object? author = payload['author'];
+    if (groupId is! String ||
+        id is! String ||
+        author is! String ||
+        groupId.isEmpty ||
+        id.isEmpty ||
+        author.isEmpty ||
+        id.length > kMaxSignalIdChars) {
+      return;
+    }
+    await _enqueueStateWork(() async {
+      final GroupProfile? group = state.groups[groupId];
+      if (group == null || group.isInvitePending || !ref.mounted) {
+        return;
+      }
+      final String key = 'group:$groupId';
+      final List<ChatMessage> thread = await _messageTimelineStore.load(key);
+      final int index = thread.indexWhere(
+        (ChatMessage m) =>
+            _isMemberMessage(m) &&
+            groupMessageWireId(m.id) == id &&
+            _sameGroupAuthor(m, author),
+      );
+      if (index < 0) {
+        // Not here (yet): the next read there says more.
+        return;
+      }
+      // What came before it here, or was written before it (this device
+      // may have got the members' messages in another order).
+      final int upTo = thread[index].sentAtMillis;
+      final Set<String> read = <String>{
+        for (int i = 0; i < thread.length; i++)
+          if (_isMemberMessage(thread[i]) &&
+              (i <= index || thread[i].sentAtMillis <= upTo))
+            thread[i].id,
+      };
+      String? keyOf(QueuedSignal q) {
+        final String? wire = q.signal.messageId?.trim();
+        if (q.signal.type != ZenSignalType.groupMessage ||
+            q.signal.groupId != groupId ||
+            wire == null ||
+            wire.isEmpty) {
+          return null;
+        }
+        return thread
+            .where(
+              (ChatMessage m) =>
+                  _isMemberMessage(m) &&
+                  groupMessageWireId(m.id) == wire &&
+                  _sameGroupAuthor(m, q.signal.sender),
+            )
+            .firstOrNull
+            ?.id;
+      }
+
+      final _QueueAfterRead after = _queueAfterRead(
+        queue: await _queueStore.load(),
+        thread: thread,
+        read: read,
+        idOf: keyOf,
+        unreadHere: (ChatMessage m) =>
+            _isMemberMessage(m) && !read.contains(m.id),
+      );
+      if (after.changed) {
+        await _queueStore.save(after.rest);
+      }
+      final bool nothingUnread = after.unread == 0 && after.waiting == 0;
+      bool tellsOfGroup(InboxEntry e) =>
+          (e.id.startsWith('group-message-') ||
+              e.id.startsWith('group-mention-')) &&
+          _groupIdOfRouteKey(e.routeKey) == groupId;
+      final List<InboxEntry> alerts = nothingUnread
+          ? state.backgroundAlerts.where(tellsOfGroup).toList(growable: false)
+          : const <InboxEntry>[];
+      state = state.copyWith(
+        groups: <String, GroupProfile>{
+          ...state.groups,
+          groupId: group.copyWith(
+            unreadCount: min(group.unreadCount, after.unread),
+          ),
+        },
+        backgroundAlerts: alerts.isEmpty
+            ? null
+            : state.backgroundAlerts
+                  .where((InboxEntry e) => !tellsOfGroup(e))
+                  .toList(growable: false),
+        pendingSignalCount: after.changed ? after.rest.length : null,
+      );
+      await _persistState();
+      if (nothingUnread) {
+        for (final String slot in _chatNoticeSlots(key, '')) {
+          await _systemNotifications.dismissSlot(slot);
+        }
+        for (final InboxEntry alert in alerts) {
           await _systemNotifications.dismiss(alert.id);
         }
       }
@@ -1824,6 +2088,124 @@ String _incomingMessageIdOf(ZenSignal signal) {
   });
   return 'incoming-$hash';
 }
+
+/// A copy for this account's other devices only: a group read here up to
+/// a member's message ([_SocialHubMessagesMixin._mirrorGroupRead]).
+const String _kGroupReadType = 'group_read';
+
+/// A message from a member (or a friend), not one's own and not a note.
+bool _isMemberMessage(ChatMessage m) =>
+    m.direction == ChatMessageDirection.incoming;
+
+/// What a chat read on another device of the account leaves of the
+/// background queue ([_queueAfterRead]).
+final class _QueueAfterRead {
+  const _QueueAfterRead({
+    required this.rest,
+    required this.read,
+    required this.unread,
+    required this.waiting,
+    required this.changed,
+  });
+
+  /// The queue without the copies of messages read there, the others
+  /// standing for no more messages than are still unread.
+  final List<QueuedSignal> rest;
+
+  /// The copies taken out.
+  final List<QueuedSignal> read;
+
+  /// The chat's unread messages here that no copy still waiting stands
+  /// for: the ones already counted.
+  final int unread;
+
+  /// Copies of the chat still waiting (each counted once Zen is back on
+  /// the screen, with the messages folded into it).
+  final int waiting;
+
+  /// Whether [rest] differs from the queue.
+  final bool changed;
+}
+
+/// [queue] after a chat was read on another device of the account up to
+/// where [read] (ids of [thread]) says. [idOf] names the message of
+/// [thread] a copy is of (`null`: a copy of something else). A copy of a
+/// message read goes. A copy still waiting stands for its own message and,
+/// past the queue's cap, for older ones folded into it
+/// ([QueuedSignal.count]): those are taken from the unread messages before
+/// it that no other copy stands for, and a count with fewer such messages
+/// left (some were read there) is cut to them. Counted by id alone, the
+/// folded messages were taken for counted ones, and replayed they were
+/// counted as unread again.
+_QueueAfterRead _queueAfterRead({
+  required List<QueuedSignal> queue,
+  required List<ChatMessage> thread,
+  required Set<String> read,
+  required String? Function(QueuedSignal q) idOf,
+  required bool Function(ChatMessage m) unreadHere,
+}) {
+  final List<String> unreadIds = <String>[
+    for (final ChatMessage m in thread)
+      if (unreadHere(m)) m.id,
+  ];
+  final Map<String, int> place = <String, int>{
+    for (int i = 0; i < unreadIds.length; i++) unreadIds[i]: i,
+  };
+  final Set<String> claimed = <String>{};
+  final List<QueuedSignal> rest = <QueuedSignal>[];
+  final List<QueuedSignal> taken = <QueuedSignal>[];
+  int waiting = 0;
+  bool changed = false;
+  for (final QueuedSignal q in queue) {
+    final String? id = idOf(q);
+    if (id == null) {
+      rest.add(q);
+      continue;
+    }
+    if (read.contains(id)) {
+      taken.add(q);
+      changed = true;
+      continue;
+    }
+    waiting++;
+    claimed.add(id);
+    final int more = q.count - 1;
+    int took = 0;
+    for (
+      int i = (place[id] ?? unreadIds.length) - 1;
+      i >= 0 && took < more;
+      i--
+    ) {
+      if (claimed.add(unreadIds[i])) {
+        took++;
+      }
+    }
+    if (took < more) {
+      rest.add(
+        QueuedSignal(
+          id: q.id,
+          signal: q.signal,
+          receivedAtMillis: q.receivedAtMillis,
+          count: 1 + took,
+        ),
+      );
+      changed = true;
+    } else {
+      rest.add(q);
+    }
+  }
+  return _QueueAfterRead(
+    rest: rest,
+    read: taken,
+    unread: unreadIds.where((String id) => !claimed.contains(id)).length,
+    waiting: waiting,
+    changed: changed,
+  );
+}
+
+/// Friends whose clock this phone keeps in mind
+/// ([_SocialHubMessagesMixin._clockLeadOf]).
+const int _kMaxClockOffsets = 256;
 
 /// Display time of an incoming message: the sender's own timestamp, as long as
 /// it is plausible. It is never later than the moment it arrived (a sender

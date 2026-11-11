@@ -12,12 +12,14 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_handoff.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_wake.dart';
@@ -2217,6 +2219,27 @@ void main() {
         'items': <Object>[_envelope('q2', from: _ada, notice: 1)],
       });
       expect(notices.activeNotifications, hasLength(1));
+    });
+
+    test('a missed call its caller told of afterwards, handed over by a '
+        'mailbox, is told: its sender marks it worth a notice', () async {
+      await startReceiver();
+      await receive(_bob, <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Object>[
+          _envelope(
+            'cm1',
+            from: _ada,
+            notice: kRelayNoticeTypes.contains(kCallMissedType) ? 1 : 0,
+          ),
+        ],
+      });
+      expect(receiver.keptCount, 1);
+      expect(notices.activeNotifications, hasLength(1));
+      expect(
+        notices.activeNotifications.single.body,
+        'Odblokuj Zen, żeby zobaczyć szczegóły.',
+      );
     });
 
     test('a mailbox handing the same mail over at every poll: kept and told '

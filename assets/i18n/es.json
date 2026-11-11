@@ -856,6 +856,7 @@
     "one": "Grupo ({n} persona)",
     "other": "Grupo ({n} personas)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Un grupo puede tener como máximo {n} personas.",
   "Grupa nr {n}": "Grupo n.º {n}",
   "Grupa od znajomego": "Grupo de un amigo",
   "Grupa od {name}": "Grupo de {name}",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Ya tienes una invitación pendiente de esta persona.",
   "Masz już tę albo nowszą wersję.": "Ya tienes esta versión o una más nueva.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Ya tienes amigos: establece la contraseña de la cuenta para que tus amigos cercanos puedan ayudarte a recuperarla",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Ya tienes {n} notas. Borra algunas antiguas para guardar una nueva.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Ya tienes {n} amigo: establece la contraseña de la cuenta",
     "other": "Ya tienes {n} amigos: establece la contraseña de la cuenta"
@@ -3206,7 +3208,7 @@
   "Przerwij": "Interrumpir",
   "Przerwij odzyskiwanie": "Interrumpir la recuperación",
   "Przerwy (ban czasowy)": "Pausas (ban temporal)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Dejarás de recibir mensajes de este grupo y los demás verán que saliste.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Dejarás de recibir mensajes de este grupo y los demás verán que saliste. El chat del grupo y sus archivos desaparecerán de este teléfono.",
   "Przestać przechowywać?": "¿Dejar de guardarla?",
   "Przestań": "Dejar",
   "Przestań obserwować": "Dejar de seguir",

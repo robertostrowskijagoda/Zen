@@ -856,6 +856,7 @@
     "one": "Gruppe ({n} Person)",
     "other": "Gruppe ({n} Personen)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Eine Gruppe kann höchstens {n} Personen haben.",
   "Grupa nr {n}": "Gruppe Nr. {n}",
   "Grupa od znajomego": "Gruppe von einem Freund",
   "Grupa od {name}": "Gruppe von {name}",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Du hast von diesem Kontakt schon eine offene Einladung.",
   "Masz już tę albo nowszą wersję.": "Du hast diese oder eine neuere Version schon.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Du hast schon Freunde – lege ein Kontopasswort fest, damit enge Freunde dir bei der Wiederherstellung des Kontos helfen können",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Du hast schon {n} Notizen. Lösche ältere, um eine neue zu speichern.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Du hast jetzt {n} Freund – lege ein Kontopasswort fest",
     "other": "Du hast jetzt {n} Freunde – lege ein Kontopasswort fest"
@@ -3206,7 +3208,7 @@
   "Przerwij": "Abbrechen",
   "Przerwij odzyskiwanie": "Wiederherstellung abbrechen",
   "Przerwy (ban czasowy)": "Pausen (befristete Sperre)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Du bekommst keine Nachrichten mehr aus dieser Gruppe, und die anderen sehen, dass du gegangen bist.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Du bekommst keine Nachrichten mehr aus dieser Gruppe, und die anderen sehen, dass du gegangen bist. Der Chat der Gruppe und ihre Dateien verschwinden von diesem Telefon.",
   "Przestać przechowywać?": "Nicht mehr aufbewahren?",
   "Przestań": "Aufhören",
   "Przestań obserwować": "Nicht mehr folgen",

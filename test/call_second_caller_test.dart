@@ -299,6 +299,51 @@ void main() {
     expect(_count(await p.lines(_dan), 'Nieodebrane połączenie'), 1);
   });
 
+  test('rung by Cyd, Dan\'s offer and invite never put his call on the '
+      'screen, not for a moment, and leave no incoming-call entry for him; '
+      'Cyd\'s own new call still takes the place of her ringing one', () async {
+    for (final AppVisibilityState visibility in <AppVisibilityState>[
+      AppVisibilityState.foregroundFocused,
+      AppVisibilityState.background,
+    ]) {
+      final _Phone p = _Phone(visibility: visibility);
+      await p.invite(_cyd, 'call-cyd-7');
+      await p.offer(_cyd, 'call-cyd-7');
+      final List<String?> shown = <String?>[];
+      final ProviderSubscription<SocialHubState> watch = p.container.listen(
+        socialHubControllerProvider,
+        (SocialHubState? _, SocialHubState next) =>
+            shown.add(next.activeCall?.id),
+        fireImmediately: true,
+      );
+      addTearDown(watch.close);
+      await p.offer(_dan, 'call-dan-7', at: 2000);
+      await p.invite(_dan, 'call-dan-7', at: 2001);
+      await p.invite(_dan, 'call-dan-7', at: 3000);
+      await pumpEventQueue();
+      expect(shown, isNot(contains('call-dan-7')), reason: '$visibility');
+      expect(p.call?.id, 'call-cyd-7');
+      expect(
+        <InboxEntry>[
+          for (final InboxEntry e
+              in p.container.read(socialHubControllerProvider).inbox)
+            if (e.type == InboxEntryType.callInvite &&
+                PeerShareCodec.addressesEqual(e.peerAddress ?? '', _dan))
+              e,
+        ],
+        isEmpty,
+        reason: 'Dan was told "busy": no call of his is waiting ($visibility)',
+      );
+      expect(p.sentTo(_dan).toSet(), <String>{'busy'});
+
+      // Cyd's phone started over and calls anew: her new call rings.
+      await p.invite(_cyd, 'call-cyd-8', at: 4000);
+      expect(p.call?.id, 'call-cyd-8', reason: '$visibility');
+      expect(p.sentTo(_cyd), isNot(contains('busy')));
+      watch.close();
+    }
+  });
+
   test('rung by Cyd with Zen in the background, Dan\'s invite and offer '
       'come: "busy" for both, Cyd\'s call rings on, and the missed call '
       'from Dan is told', () async {

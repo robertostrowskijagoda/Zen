@@ -846,6 +846,7 @@
   "Grupa ({n} osób)": {
     "other": "그룹 ({n}명)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "그룹에는 최대 {n}명까지 있을 수 있어요.",
   "Grupa nr {n}": "{n}번 그룹",
   "Grupa od znajomego": "친구의 그룹",
   "Grupa od {name}": "{name}님의 그룹",
@@ -1612,6 +1613,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "이 피어의 대기 중인 초대가 이미 있어요.",
   "Masz już tę albo nowszą wersję.": "이미 이 버전이거나 더 최신 버전이에요.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "친구가 벌써 생겼어요 — 계정 비밀번호를 설정하면 친한 친구들이 계정 복구를 도와줄 수 있어요",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "메모가 이미 {n}개 있어요. 새 메모를 저장하려면 오래된 메모를 삭제하세요.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "other": "친구가 벌써 {n}명이에요 — 계정 비밀번호를 설정하세요"
   },
@@ -3164,7 +3166,7 @@
   "Przerwij": "중단",
   "Przerwij odzyskiwanie": "복구 중단",
   "Przerwy (ban czasowy)": "중단 (일시 정지)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "이 그룹의 메시지를 더 이상 받지 않게 되고, 다른 멤버들에게는 내가 나간 것으로 표시돼요.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "이 그룹의 메시지를 더 이상 받지 않게 되고, 다른 멤버들에게는 내가 나간 것으로 표시돼요. 그룹 채팅과 파일은 이 휴대폰에서 삭제돼요.",
   "Przestać przechowywać?": "보관을 그만둘까요?",
   "Przestań": "그만두기",
   "Przestań obserwować": "팔로우 취소",

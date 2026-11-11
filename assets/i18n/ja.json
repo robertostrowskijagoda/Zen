@@ -846,6 +846,7 @@
   "Grupa ({n} osób)": {
     "other": "グループ（{n}人）"
   },
+  "Grupa może mieć najwyżej {n} osób.": "グループの人数は最大{n}人です。",
   "Grupa nr {n}": "グループ{n}",
   "Grupa od znajomego": "友だちからのグループ",
   "Grupa od {name}": "{name}からのグループ",
@@ -1612,6 +1613,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "このピアからの招待が、すでに保留中です。",
   "Masz już tę albo nowszą wersję.": "すでにこのバージョン、またはより新しいバージョンを使っています。",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "もう友だちがいます — アカウントのパスワードを設定すると、親しい友だちがアカウントの復旧を手伝えます",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "メモはすでに{n}件あります。新しいメモを保存するには、古いメモを削除してください。",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "other": "友だちが{n}人になりました — アカウントのパスワードを設定しましょう"
   },
@@ -3164,7 +3166,7 @@
   "Przerwij": "中止",
   "Przerwij odzyskiwanie": "復旧を中止",
   "Przerwy (ban czasowy)": "休止（期間限定BAN）",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "このグループのメッセージは届かなくなり、ほかのメンバーには、あなたが退出したことが表示されます。",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "このグループのメッセージは届かなくなり、ほかのメンバーには、あなたが退出したことが表示されます。グループのチャットとファイルはこのスマートフォンから削除されます。",
   "Przestać przechowywać?": "預かるのをやめますか？",
   "Przestań": "やめる",
   "Przestań obserwować": "フォローをやめる",

@@ -121,11 +121,7 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
       final GroupProfile? group = state.groups[groupId];
       if (group == null ||
           group.isInvitePending ||
-          !(groupHasMember(group, signal.sender) ||
-              PeerShareCodec.addressesEqual(
-                group.createdById,
-                signal.sender,
-              ))) {
+          !speaksInGroup(group, signal.sender)) {
         return null;
       }
       return 'group:$groupId';

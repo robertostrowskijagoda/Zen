@@ -677,12 +677,13 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         }
       }
     }
+    final int sentAt = await _placedSentAt(signal, timestamp, key);
     final ChatMessage message = _withSignalExtras(
       ChatMessage(
         id: messageId,
         sender: signal.sender,
         text: signal.content ?? '',
-        sentAtMillis: _effectiveSentAt(signal, timestamp),
+        sentAtMillis: sentAt,
         direction: ChatMessageDirection.incoming,
         type: stored?.type ?? type ?? ChatMessageType.text,
         attachmentPath: stored?.path,

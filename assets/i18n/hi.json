@@ -856,6 +856,7 @@
     "one": "ग्रुप ({n} व्यक्ति)",
     "other": "ग्रुप ({n} लोग)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "एक ग्रुप में ज़्यादा से ज़्यादा {n} लोग हो सकते हैं।",
   "Grupa nr {n}": "समूह नं. {n}",
   "Grupa od znajomego": "दोस्त की ओर से ग्रुप",
   "Grupa od {name}": "{name} की ओर से ग्रुप",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "इस पीयर का आमंत्रण आपके पास पहले से इंतज़ार में है।",
   "Masz już tę albo nowszą wersję.": "आपके पास यह या इससे नया वर्ज़न पहले से है।",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "अब आपके दोस्त हैं — खाते का पासवर्ड सेट करें, ताकि करीबी दोस्त खाता वापस पाने में मदद कर सकें",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "आपके पास पहले से {n} नोट हैं। नया नोट सहेजने के लिए पुराने नोट हटाएँ।",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "अब आपका {n} दोस्त है — खाते का पासवर्ड सेट करें",
     "other": "अब आपके {n} दोस्त हैं — खाते का पासवर्ड सेट करें"
@@ -3206,7 +3208,7 @@
   "Przerwij": "रोकें",
   "Przerwij odzyskiwanie": "रिकवरी रोकें",
   "Przerwy (ban czasowy)": "ब्रेक (अस्थायी बैन)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "आपको इस ग्रुप के संदेश मिलना बंद हो जाएँगे, और बाकी लोग देखेंगे कि आप चले गए।",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "आपको इस ग्रुप के संदेश मिलना बंद हो जाएँगे, और बाकी लोग देखेंगे कि आप चले गए। ग्रुप की चैट और उसकी फ़ाइलें इस फ़ोन से हट जाएँगी।",
   "Przestać przechowywać?": "सँभालकर रखना बंद करें?",
   "Przestań": "बंद करें",
   "Przestań obserwować": "फ़ॉलो करना बंद करें",

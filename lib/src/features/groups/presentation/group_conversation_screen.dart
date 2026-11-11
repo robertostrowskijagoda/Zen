@@ -527,7 +527,8 @@ class _GroupConversationScreenState
         content: Text(
           t(
             'Przestaniesz dostawać wiadomości z tej grupy, a pozostali '
-            'zobaczą, że wyszedłeś.',
+            'zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego '
+            'telefonu.',
           ),
         ),
         actions: <Widget>[
@@ -825,6 +826,13 @@ class _GroupConversationScreenState
         .where((FriendProfile f) => !groupHasMember(group, f.address))
         .toList();
 
+    if (isGroupFull(group)) {
+      // The others' phones would not take anyone past the cap.
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(groupFullText())));
+      return;
+    }
     if (acceptedFriends.isEmpty) {
       // A group of one made before any friends: not "all are in already".
       ScaffoldMessenger.of(context).showSnackBar(
@@ -862,12 +870,22 @@ class _GroupConversationScreenState
                   trailing: const Icon(Icons.person_add_rounded),
                   onTap: () async {
                     Navigator.of(dialogContext).pop();
-                    await ref
-                        .read(socialHubControllerProvider.notifier)
-                        .addMemberToGroup(
-                          groupId: widget.groupId,
-                          memberAddress: friend.address,
+                    try {
+                      await ref
+                          .read(socialHubControllerProvider.notifier)
+                          .addMemberToGroup(
+                            groupId: widget.groupId,
+                            memberAddress: friend.address,
+                          );
+                    } on FormatException catch (error) {
+                      // Refused (the group is full): said, never "added".
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(error.message)),
                         );
+                      }
+                      return;
+                    }
                     if (mounted) {
                       messenger.showSnackBar(
                         SnackBar(

@@ -876,6 +876,7 @@
     "many": "Группа ({n} человек)",
     "other": "Группа ({n} человека)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "В группе может быть не больше {n} человек.",
   "Grupa nr {n}": "Группа № {n}",
   "Grupa od znajomego": "Группа от друга",
   "Grupa od {name}": "Группа от {name}",
@@ -1675,6 +1676,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "У тебя уже есть ожидающее приглашение от этого пира.",
   "Masz już tę albo nowszą wersję.": "У тебя уже эта версия или более новая.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "У тебя уже есть друзья — задай пароль аккаунта, чтобы близкие друзья могли помочь восстановить аккаунт",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "У тебя уже {n} заметок. Удали старые, чтобы сохранить новую.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "У тебя уже {n} друг — задай пароль аккаунта",
     "few": "У тебя уже {n} друга — задай пароль аккаунта",
@@ -3290,7 +3292,7 @@
   "Przerwij": "Прервать",
   "Przerwij odzyskiwanie": "Прервать восстановление",
   "Przerwy (ban czasowy)": "Паузы (временный бан)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Ты перестанешь получать сообщения из этой группы, а остальные увидят, что тебя больше нет в группе.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Ты перестанешь получать сообщения из этой группы, а остальные увидят, что тебя больше нет в группе. Чат группы и её файлы исчезнут с этого телефона.",
   "Przestać przechowywać?": "Перестать хранить?",
   "Przestań": "Перестать",
   "Przestań obserwować": "Отписаться",

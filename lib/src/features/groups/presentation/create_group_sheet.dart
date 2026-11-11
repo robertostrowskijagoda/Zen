@@ -71,6 +71,14 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
           ),
         );
       }
+    } on FormatException catch (error) {
+      // Refused with words for the person (too many chosen).
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = error.message;
+        });
+      }
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -247,7 +255,14 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                               value: selected,
                               onChanged: (bool? val) {
                                 setState(() {
-                                  if (val == true) {
+                                  if (val == true &&
+                                      _selectedMembers.length + 1 >=
+                                          kMaxGroupMemberCount) {
+                                    // With the person making it, one more
+                                    // would be past what every member's
+                                    // phone keeps.
+                                    _error = groupFullText();
+                                  } else if (val == true) {
                                     _selectedMembers.add(friend.address);
                                   } else {
                                     _selectedMembers.remove(friend.address);

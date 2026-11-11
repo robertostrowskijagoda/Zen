@@ -856,6 +856,7 @@
     "one": "Grupo ({n} pessoa)",
     "other": "Grupo ({n} pessoas)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Um grupo pode ter no máximo {n} pessoas.",
   "Grupa nr {n}": "Grupo nº {n}",
   "Grupa od znajomego": "Grupo de um amigo",
   "Grupa od {name}": "Grupo de {name}",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Você já tem um convite pendente desta pessoa.",
   "Masz już tę albo nowszą wersję.": "Você já tem esta versão ou uma mais nova.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Você já tem amigos — defina a senha da conta para que amigos próximos possam ajudar a recuperá-la",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Você já tem {n} notas. Apague as mais antigas para salvar uma nova.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Você já tem {n} amigo — defina a senha da conta",
     "other": "Você já tem {n} amigos — defina a senha da conta"
@@ -3206,7 +3208,7 @@
   "Przerwij": "Interromper",
   "Przerwij odzyskiwanie": "Interromper a recuperação",
   "Przerwy (ban czasowy)": "Pausas (banimento temporário)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Você deixará de receber mensagens deste grupo, e os demais verão que você saiu.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Você deixará de receber mensagens deste grupo, e os demais verão que você saiu. O chat do grupo e os arquivos dele sumirão deste telefone.",
   "Przestać przechowywać?": "Parar de guardar?",
   "Przestań": "Parar",
   "Przestań obserwować": "Deixar de seguir",

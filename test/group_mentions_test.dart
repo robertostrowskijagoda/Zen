@@ -142,6 +142,35 @@ List<InboxEntry> _entries(SocialHubState s) => <InboxEntry>[
 ];
 
 void main() {
+  test('a mention whose id another member\'s message holds here opens the '
+      'chat at the mention, not at the other message', () async {
+    final MemoryMessageTimelineStore timelines = MemoryMessageTimelineStore();
+    final (:container, :shade) = await _boot(timelines: timelines);
+    final SocialHubController hub = container.read(
+      socialHubControllerProvider.notifier,
+    );
+    // Bob's message came first with the id Ada's mention then uses.
+    await hub.receiveSignal(
+      _message('m-7', sender: _bob, text: 'Pierwsza', mentions: const []),
+      receivedAtMillis: 1000,
+    );
+    await hub.receiveSignal(_message('m-7'), receivedAtMillis: 1001);
+    final InboxEntry entry = _entries(
+      container.read(socialHubControllerProvider),
+    ).where((InboxEntry e) => e.type == InboxEntryType.mention).single;
+    final RuntimeRouteIntent? route = runtimeRouteIntentFromRouteKey(
+      id: entry.id,
+      routeKey: entry.routeKey,
+    );
+    final ChatMessage opened = (await timelines.load(
+      'group:$_groupId',
+    )).singleWhere((ChatMessage m) => m.id == route?.messageId);
+    expect(opened.sender, _ada);
+    expect(opened.plainText, 'Hej @Ja');
+    // The entry still names the message by the id the members know.
+    expect(entry.messageId, 'm-7');
+  });
+
   test('a mention of this person says so, and opens the chat at the '
       'message', () async {
     final MemoryMessageTimelineStore timelines = MemoryMessageTimelineStore();

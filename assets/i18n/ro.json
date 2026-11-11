@@ -866,6 +866,7 @@
     "few": "Grup ({n} persoane)",
     "other": "Grup ({n} de persoane)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Un grup poate avea cel mult {n} persoane.",
   "Grupa nr {n}": "Grupa nr. {n}",
   "Grupa od znajomego": "Grup de la un prieten",
   "Grupa od {name}": "Grup de la {name}",
@@ -1654,6 +1655,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Ai deja o invitație în așteptare de la acest contact.",
   "Masz już tę albo nowszą wersję.": "Ai deja această versiune sau una mai nouă.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Ai deja prieteni — setează parola contului, ca prietenii apropiați să te poată ajuta să-ți recuperezi contul",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Ai deja {n} notițe. Șterge-le pe cele mai vechi ca să salvezi una nouă.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Ai deja {n} prieten — setează parola contului",
     "few": "Ai deja {n} prieteni — setează parola contului",
@@ -3248,7 +3250,7 @@
   "Przerwij": "Întrerupe",
   "Przerwij odzyskiwanie": "Întrerupe recuperarea",
   "Przerwy (ban czasowy)": "Pauze (ban temporar)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Nu vei mai primi mesaje din acest grup, iar ceilalți vor vedea că ai plecat.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Nu vei mai primi mesaje din acest grup, iar ceilalți vor vedea că ai plecat. Chatul grupului și fișierele lui vor dispărea de pe acest telefon.",
   "Przestać przechowywać?": "Nu o mai păstrezi?",
   "Przestań": "Oprește",
   "Przestań obserwować": "Nu mai urmări",

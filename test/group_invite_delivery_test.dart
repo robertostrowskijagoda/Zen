@@ -1355,6 +1355,105 @@ void main() {
       );
     });
 
+    test(
+      'a copy from another device of the account never goes into another '
+      'author\'s message that holds its key: it gets a key of its own',
+      () async {
+        final _Harness h = inGroup();
+        // Cyd's message holds the id, Ada's (sent before 1.16.4) Bob's key.
+        await h.timelines.save('group:g', <ChatMessage>[
+          ChatMessage(
+            id: id,
+            sender: cyd,
+            text: 'od Cyd',
+            sentAtMillis: 900,
+            direction: ChatMessageDirection.incoming,
+          ),
+          ChatMessage(
+            id: groupMessageLocalId(id, bob),
+            sender: ada,
+            text: 'zajęte z góry',
+            sentAtMillis: 901,
+            direction: ChatMessageDirection.incoming,
+          ),
+        ]);
+        await h.controller.importSyncedMessage(
+          'group:g',
+          ChatMessage(
+            id: id,
+            sender: bob,
+            text: 'od Boba',
+            sentAtMillis: 950,
+            direction: ChatMessageDirection.incoming,
+          ),
+        );
+        List<ChatMessage> t = await chat(h);
+        expect(
+          t.map((ChatMessage m) => '${m.sender}: ${m.text}'),
+          unorderedEquals(<String>[
+            '$cyd: od Cyd',
+            '$ada: zajęte z góry',
+            '$bob: od Boba',
+          ]),
+        );
+        expect(t.map((ChatMessage m) => m.id).toSet(), hasLength(3));
+        // The same copy again is a copy.
+        await h.controller.importSyncedMessage(
+          'group:g',
+          ChatMessage(
+            id: id,
+            sender: bob,
+            text: 'od Boba',
+            sentAtMillis: 950,
+            direction: ChatMessageDirection.incoming,
+          ),
+        );
+        t = await chat(h);
+        expect(t, hasLength(3));
+      },
+    );
+
+    test('one\'s own group message sent on another device shows here though '
+        'another member\'s message holds its id, and one that disappeared '
+        'here does not come back with a late mirror', () async {
+      final _Harness h = inGroup();
+      await h.deliver(ada, said('od Ady'), at: 1000);
+      Map<String, dynamic> mine(String text, String msgId) => <String, dynamic>{
+        'type': 'group_message',
+        'groupId': 'g',
+        'msgId': msgId,
+        'text': text,
+        'timestamp': 1001,
+      };
+      await h.controller.recordMirroredSend('g', mine('moja', id));
+      List<ChatMessage> t = await chat(h);
+      expect(
+        t.map(
+          (ChatMessage m) => '${m.isOutgoing ? 'ja' : m.sender}: ${m.text}',
+        ),
+        unorderedEquals(<String>['$ada: od Ady', 'ja: moja']),
+      );
+      // Mirrored again: still one.
+      await h.controller.recordMirroredSend('g', mine('moja', id));
+      expect(await chat(h), hasLength(2));
+
+      // Another one of one's own, deleted here; its mirror comes late.
+      await h.controller.recordMirroredSend('g', mine('ulotna', 'own-2'));
+      final ChatMessage gone = (await chat(
+        h,
+      )).singleWhere((ChatMessage m) => m.text == 'ulotna');
+      expect(
+        await h.controller.deleteMessageLocally(
+          key: 'group:g',
+          messageId: gone.id,
+        ),
+        isTrue,
+      );
+      await h.controller.recordMirroredSend('g', mine('ulotna', 'own-2'));
+      t = await chat(h);
+      expect(t.map((ChatMessage m) => m.text), isNot(contains('ulotna')));
+    });
+
     test('the creator\'s deletion names the author of its message and reaches '
         'that one, whichever holds the bare id here', () async {
       for (final bool squatFirst in <bool>[false, true]) {

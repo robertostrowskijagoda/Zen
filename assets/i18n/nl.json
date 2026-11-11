@@ -856,6 +856,7 @@
     "one": "Groep ({n} persoon)",
     "other": "Groep ({n} personen)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Een groep kan hoogstens {n} mensen hebben.",
   "Grupa nr {n}": "Groep nr. {n}",
   "Grupa od znajomego": "Groep van een vriend",
   "Grupa od {name}": "Groep van {name}",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Je hebt al een openstaande uitnodiging van deze peer.",
   "Masz już tę albo nowszą wersję.": "Je hebt deze versie of een nieuwere al.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Je hebt al vrienden — stel een accountwachtwoord in, zodat goede vrienden je kunnen helpen het account te herstellen",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Je hebt al {n} notities. Verwijder oudere om een nieuwe op te slaan.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Je hebt al {n} vriend — stel een accountwachtwoord in",
     "other": "Je hebt al {n} vrienden — stel een accountwachtwoord in"
@@ -3206,7 +3208,7 @@
   "Przerwij": "Afbreken",
   "Przerwij odzyskiwanie": "Herstel afbreken",
   "Przerwy (ban czasowy)": "Pauzes (tijdelijke ban)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Je ontvangt geen berichten meer uit deze groep en de anderen zien dat je weg bent.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Je ontvangt geen berichten meer uit deze groep en de anderen zien dat je weg bent. De chat van de groep en de bestanden ervan verdwijnen van deze telefoon.",
   "Przestać przechowywać?": "Niet meer bewaren?",
   "Przestań": "Stoppen",
   "Przestań obserwować": "Niet meer volgen",

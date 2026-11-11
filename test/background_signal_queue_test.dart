@@ -164,4 +164,74 @@ void main() {
     expect(ada.unreadCount, sent);
     expect(ada.lastMessagePreview, 'Wiadomość ${sent - 1}');
   });
+
+  test('past its cap, a chat read on another device of the account up to a '
+      'message folded into a count leaves the count of what is still '
+      'unread', () async {
+    final MemorySignalQueueStore queue = MemorySignalQueueStore();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        ...buildAppSettingsProviderOverrides(
+          store: MemoryAppSettingsStore(),
+          hydrationEnabled: false,
+        ),
+        signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+        signalQueueStoreProvider.overrideWithValue(queue),
+        socialSnapshotStoreProvider.overrideWithValue(
+          MemorySocialSnapshotStore(),
+        ),
+        messageTimelineStoreProvider.overrideWithValue(
+          MemoryMessageTimelineStore(),
+        ),
+        runtimeSystemNotificationServiceProvider.overrideWithValue(
+          MemoryRuntimeSystemNotificationService(),
+        ),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty(lifecycle: _screen(1, on: false)).copyWith(
+            book: FriendshipBook.restore(
+              profiles: const <String, FriendProfile>{
+                _ada: FriendProfile(
+                  address: _ada,
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final SocialHubController hub = container.read(
+      socialHubControllerProvider.notifier,
+    );
+    await hub.whenHydrated;
+    const int sent = kMaxQueuedSignals + 25;
+    final int start = DateTime.now().millisecondsSinceEpoch;
+    for (int i = 0; i < sent; i++) {
+      await hub.receiveSignal(
+        ZenSignal(
+          type: ZenSignalType.message,
+          sender: _ada,
+          messageId: 'msg-$i',
+          content: 'Wiadomość $i',
+          sentAtMillis: start + i,
+        ),
+        receivedAtMillis: start + i,
+      );
+    }
+    // Read on the account's computer up to the 11th, which the queue here
+    // folded, with the ones after it up to the 26th, into one count.
+    await hub.recordMirroredSend(_ada, <String, dynamic>{
+      'type': 'message_read',
+      'msgId': 'msg-10',
+    });
+    final List<QueuedSignal> pending = await queue.load();
+    expect(
+      pending.fold<int>(0, (int sum, QueuedSignal q) => sum + q.count),
+      sent - 11,
+    );
+    await hub.setLifecycle(_screen(2));
+    expect(hub.state.friendByAddress(_ada)!.unreadCount, sent - 11);
+  });
 }

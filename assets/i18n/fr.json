@@ -856,6 +856,7 @@
     "one": "Groupe ({n} personne)",
     "other": "Groupe ({n} personnes)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Un groupe peut compter au plus {n} personnes.",
   "Grupa nr {n}": "Groupe n° {n}",
   "Grupa od znajomego": "Groupe d’un ami",
   "Grupa od {name}": "Groupe de {name}",
@@ -1633,6 +1634,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Vous avez déjà une invitation en attente de cette personne.",
   "Masz już tę albo nowszą wersję.": "Vous avez déjà cette version ou une plus récente.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Vous avez déjà des amis — définissez le mot de passe du compte pour que vos amis proches puissent vous aider à récupérer le compte",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Vous avez déjà {n} notes. Supprimez-en d’anciennes pour en enregistrer une nouvelle.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Vous avez déjà {n} ami — définissez le mot de passe du compte",
     "other": "Vous avez déjà {n} amis — définissez le mot de passe du compte"
@@ -3206,7 +3208,7 @@
   "Przerwij": "Interrompre",
   "Przerwij odzyskiwanie": "Interrompre la récupération",
   "Przerwy (ban czasowy)": "Pauses (ban temporaire)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Vous ne recevrez plus les messages de ce groupe, et les autres verront que vous l’avez quitté.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Vous ne recevrez plus les messages de ce groupe, et les autres verront que vous l’avez quitté. La discussion du groupe et ses fichiers disparaîtront de ce téléphone.",
   "Przestać przechowywać?": "Arrêter de le conserver ?",
   "Przestań": "Arrêter",
   "Przestań obserwować": "Ne plus suivre",

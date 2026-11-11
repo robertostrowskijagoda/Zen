@@ -1,11 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 import 'support/friends_world.dart';
 
@@ -294,5 +298,92 @@ void main() {
       _shown(w, _own(await a.thread(b), 'Twoja')),
       MessageDeliveryStage.read,
     );
+  });
+
+  test('a group read on one device of the account is read on the other: no '
+      'unread count, no notification; the members get nothing of it, and a '
+      'device on 1.16.4 ignores it', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);
+    await w.befriendAll();
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    final FriendsPhone c = w['C'];
+    final FriendsPhone b2 = await w.addDevice(b, 'B2');
+    final String group = await w.createGroup(a, 'Ekipa', <FriendsPhone>[b, c]);
+    final GroupProfile? invite = b2.state.groups[group];
+    if (invite != null && invite.isInvitePending) {
+      await b2.hub.acceptGroupInvite(
+        groupId: group,
+        groupName: 'Ekipa',
+        senderAddress: a.address,
+      );
+      await w.settle();
+    }
+    expect(b2.state.groups[group]?.isInvitePending, isFalse);
+    // Who the account's devices are, as the ledger tells the app.
+    for (final FriendsPhone p in <FriendsPhone>[b, b2]) {
+      p.container.read(accountDirectoryHolderProvider).directory = p.accounts;
+    }
+    await b.hub.setLifecycle(_screen(w, 20));
+    await b2.hub.setLifecycle(_screen(w, 21, v: AppVisibilityState.foreground));
+    // What the members get from B.
+    final List<String> atMembers = <String>[];
+    for (final FriendsPhone m in <FriendsPhone>[a, c]) {
+      final StreamSubscription<SignalTransportFrame> sub = m.appTransport.frames
+          .listen((SignalTransportFrame f) {
+            if (PeerShareCodec.addressesEqual(f.from, b.address) ||
+                PeerShareCodec.addressesEqual(f.from, b2.address)) {
+              atMembers.add('${f.payload['type']}');
+            }
+          });
+      addTearDown(sub.cancel);
+    }
+    await w.sendGroup(a, group, 'Na obu?');
+    await w.sendGroup(c, group, 'I u mnie');
+    await w.deliver();
+    expect(b2.state.groups[group]?.unreadCount, 2);
+
+    // Read on B (the phone): B2 (the computer) follows.
+    await b.hub.enterGroupConversation(group);
+    await w.deliver();
+    expect(b.state.groups[group]?.unreadCount, 0);
+    expect(b2.state.groups[group]?.unreadCount, 0);
+    expect(
+      b2.notices.shade.activeNotifications.where(
+        (RuntimeSystemNotification n) => n.slotKey == 'group-message:$group',
+      ),
+      isEmpty,
+    );
+    expect(atMembers, isNot(contains('group_read')));
+    expect(atMembers, isNot(contains('acct_mirror')));
+
+    // Something new after the reading is unread on B2 again.
+    b.hub.leaveGroupConversation(group);
+    await w.sendGroup(c, group, 'Jeszcze jedno');
+    await w.deliver();
+    expect(b2.state.groups[group]?.unreadCount, 1);
+
+    // A device of the account on 1.16.4 drops a copy of a kind it does not
+    // know: nothing changes there.
+    const Set<String> known1164 = <String>{
+      'message',
+      'disappear_timer',
+      'group_message',
+      'msg_react',
+      'msg_edit',
+      'msg_delete',
+    };
+    final List<Object?> dropped = <Object?>[];
+    b2.mirrored = (String peer, Map<String, dynamic> p) async {
+      if (known1164.contains(p['type'])) {
+        await b2.hub.recordMirroredSend(peer, p);
+      } else {
+        dropped.add(p['type']);
+      }
+    };
+    await b.hub.enterGroupConversation(group);
+    await w.deliver();
+    expect(dropped, <Object?>['group_read']);
+    expect(b2.state.groups[group]?.unreadCount, 1);
   });
 }

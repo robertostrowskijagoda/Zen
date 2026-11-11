@@ -1,13 +1,18 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/account/account_state_sync_app.dart';
 import 'package:zen/src/features/chat/self_notes.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 
 // "Notatki dla siebie": notes kept as a map note by note, so the account's
 // sync (which merges a stored state key by key) takes notes written on two
-// devices at once from both, and a deletion does not come back.
+// devices at once from both, and a deletion does not come back: not at the
+// limit either, where a new note is refused instead of an older one going.
 void main() {
   test('notes are added, read back in order and deleted', () async {
     int now = 1000;
@@ -70,8 +75,8 @@ void main() {
     expect(read.notes, hasLength(2));
   });
 
-  test('past the limit the deletion markers go first, then the oldest '
-      'notes', () async {
+  test('at the limit a new note is refused and said so; nothing older goes '
+      'for it, and a deletion marker is never dropped to make room', () async {
     final MemoryLedgerDisk disk = MemoryLedgerDisk();
     await disk.write(
       kSelfNotesKey,
@@ -79,7 +84,7 @@ void main() {
         jsonEncode(<String, Object?>{
           for (int i = 0; i < kMaxSelfNotes - 1; i++)
             'n$i': <String, Object?>{'t': 'n$i', 'a': 10 + i},
-          // Newer than every note, yet the first to go.
+          // A note deleted here: another device may still have it.
           'gone': <String, Object?>{'t': '', 'a': 99999, 'd': true},
         }),
       ),
@@ -89,18 +94,99 @@ void main() {
       now: () => 100000,
     );
     await notes.add('jeszcze jedna');
-    final Map<String, Object?> kept = Map<String, Object?>.from(
-      jsonDecode(utf8.decode((await disk.read(kSelfNotesKey))!)) as Map,
+    Map<String, Object?> stored() => Map<String, Object?>.from(
+      jsonDecode(utf8.decode(disk.files[kSelfNotesKey]!)) as Map,
     );
-    expect(kept, hasLength(kMaxSelfNotes));
-    expect(kept.containsKey('gone'), isFalse);
-    expect(kept.containsKey('n0'), isTrue);
-    expect(notes.notes.last.text, 'jeszcze jedna');
-
-    // One more: now the oldest note goes.
-    await notes.add('i jeszcze');
-    expect(notes.notes.first.text, 'n1');
+    expect(stored(), hasLength(kMaxSelfNotes + 1));
+    expect(stored().containsKey('gone'), isTrue);
     expect(notes.notes, hasLength(kMaxSelfNotes));
+
+    // One more is refused, with words for the person; nothing went.
+    await expectLater(
+      notes.add('i jeszcze'),
+      throwsA(
+        isA<FormatException>().having(
+          (FormatException e) => e.message,
+          'message',
+          selfNotesFullText(),
+        ),
+      ),
+    );
+    expect(notes.notes.first.text, 'n0');
+    expect(notes.notes, hasLength(kMaxSelfNotes));
+
+    // A note deleted makes room.
+    await notes.delete('n0');
+    expect(await notes.add('i jeszcze'), isNotNull);
+    expect(stored().containsKey('gone'), isTrue);
+
+    // The deleted one does not come back from a device that still has it.
+    await notes.mergeCopy(<String, Object?>{
+      'gone': <String, Object?>{'t': 'stara', 'a': 50},
+      'n0': <String, Object?>{'t': 'n0', 'a': 10},
+    });
+    expect(notes.notes.map((SelfNote n) => n.text), isNot(contains('stara')));
+    expect(notes.notes.map((SelfNote n) => n.text), isNot(contains('n0')));
+  });
+
+  test('deletion markers past their own bound go oldest first', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    await disk.write(
+      kSelfNotesKey,
+      utf8.encode(
+        jsonEncode(<String, Object?>{
+          for (int i = 0; i < kMaxSelfNoteMarkers; i++)
+            'd$i': <String, Object?>{'t': '', 'a': 10 + i, 'd': true},
+          'keep': <String, Object?>{'t': 'zostaje', 'a': 5},
+        }),
+      ),
+    );
+    int now = 100000;
+    final SelfNotesService notes = SelfNotesService(
+      disk: disk,
+      now: () => now++,
+    );
+    await notes.delete('keep');
+    final Map<String, Object?> kept = Map<String, Object?>.from(
+      jsonDecode(utf8.decode(disk.files[kSelfNotesKey]!)) as Map,
+    );
+    expect(kept, hasLength(kMaxSelfNoteMarkers));
+    expect(kept.containsKey('d0'), isFalse, reason: 'deleted longest ago');
+    expect(kept.containsKey('keep'), isTrue);
+  });
+
+  test('a device that never had a note keeps an empty set of them once its '
+      'store is open, so the account\'s sync can take the others\' notes '
+      'in', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final MemoryAppSecurityService security = MemoryAppSecurityService();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        ledgerDiskProvider.overrideWithValue(disk),
+        appSecurityServiceProvider.overrideWithValue(security),
+      ],
+    );
+    addTearDown(container.dispose);
+    final StoredStateSyncDomain domain = StoredStateSyncDomain(
+      kSelfNotesKey,
+      disk,
+      container.read(selfNotesServiceProvider).load,
+    );
+    await pumpEventQueue();
+    expect(await domain.read(), isNotNull, reason: 'readable: none yet');
+    expect(await domain.read(), isEmpty);
+
+    // What the sync then writes in comes into the notes.
+    await domain.write(<String, Object?>{
+      'z-laptopa': <String, Object?>{'t': 'z laptopa', 'a': 7},
+    });
+    expect(
+      container
+          .read(selfNotesServiceProvider)
+          .notes
+          .map((SelfNote n) => n.text),
+      <String>['z laptopa'],
+    );
   });
 
   test('the stored notes are read once, not again for every note', () async {

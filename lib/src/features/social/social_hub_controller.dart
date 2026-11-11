@@ -45,6 +45,8 @@ import 'package:zen/src/features/chat/realtime_attachment_transfer.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
+import 'package:zen/src/features/ledger/contacts_backup.dart'
+    show contactsItemWithStamps;
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_vault.dart';
@@ -1708,6 +1710,14 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     int timestamp,
   );
 
+  /// When a friend's message [signal] that came at [receivedAtMillis] goes
+  /// in the conversation [conversationKey] (`social_hub_controller_messages.dart`).
+  Future<int> _placedSentAt(
+    ZenSignal signal,
+    int receivedAtMillis,
+    String conversationKey,
+  );
+
   Future<void> _handleChatChange(ZenSignal signal, int timestamp);
 
   Future<void> _applyMirroredChatChange(
@@ -1759,6 +1769,14 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     String peerAddress,
     Map<String, dynamic> payload,
   );
+
+  /// A group read on another device of this account
+  /// (`social_hub_controller_messages.dart`).
+  Future<void> _applyGroupReadFromOtherDevice(Map<String, dynamic> payload);
+
+  /// Tells this account's other devices that the group [groupId] was read
+  /// here (`social_hub_controller_messages.dart`).
+  Future<void> _mirrorGroupRead(String groupId);
 
   Future<void> _sendCallSignal({
     required String remoteAddress,

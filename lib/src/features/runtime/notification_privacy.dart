@@ -993,10 +993,11 @@ LockedNoticeKit lockedNoticeKitOf(
     }
     final String key = groupConversationKey(group.id);
     // Who speaks in it, whatever its level: whether a group message or a
-    // group call counts at all is decided by that (as the app decides).
+    // group call counts at all is decided by that (as the app decides:
+    // [speaksInGroup], so not a creator who left).
     for (final String speaker in <String>[
       ...group.memberAddresses,
-      group.createdById,
+      if (speaksInGroup(group, group.createdById)) group.createdById,
     ]) {
       for (final String device in devicesOf(speaker)) {
         if (device.isNotEmpty &&

@@ -846,6 +846,7 @@
   "Grupa ({n} osób)": {
     "other": "Grup ({n} orang)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Sebuah grup bisa berisi paling banyak {n} orang.",
   "Grupa nr {n}": "Kelompok no. {n}",
   "Grupa od znajomego": "Grup dari teman",
   "Grupa od {name}": "Grup dari {name}",
@@ -1612,6 +1613,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Anda sudah punya undangan tertunda dari peer ini.",
   "Masz już tę albo nowszą wersję.": "Anda sudah punya versi ini atau yang lebih baru.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Anda sudah punya teman — atur kata sandi akun agar teman dekat bisa membantu memulihkan akun",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Anda sudah memiliki {n} catatan. Hapus catatan lama untuk menyimpan yang baru.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "other": "Anda sudah punya {n} teman — atur kata sandi akun"
   },
@@ -3164,7 +3166,7 @@
   "Przerwij": "Hentikan",
   "Przerwij odzyskiwanie": "Hentikan pemulihan",
   "Przerwy (ban czasowy)": "Jeda (blokir sementara)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Anda tidak akan menerima pesan dari grup ini lagi, dan anggota lain akan melihat bahwa Anda keluar.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Anda tidak akan menerima pesan dari grup ini lagi, dan anggota lain akan melihat bahwa Anda keluar. Obrolan grup dan file-filenya akan hilang dari ponsel ini.",
   "Przestać przechowywać?": "Berhenti menyimpan?",
   "Przestań": "Berhenti",
   "Przestań obserwować": "Berhenti mengikuti",

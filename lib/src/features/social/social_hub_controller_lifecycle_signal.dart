@@ -1013,11 +1013,22 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       return;
     }
     if (signal.type == ZenSignalType.groupMessage &&
-        (signal.messageId?.trim().isNotEmpty ?? false) &&
-        await _incomingGroupMessageKey(signal) == null) {
-      // This sender's message with this id is here already. Another
-      // member's message with the same id is no copy of it.
-      return;
+        (signal.messageId?.trim().isNotEmpty ?? false)) {
+      final String? key = await _incomingGroupMessageKey(signal);
+      if (key == null) {
+        // This sender's message with this id is here already. Another
+        // member's message with the same id is no copy of it.
+        return;
+      }
+      if (key != signal.messageId!.trim()) {
+        // Kept under the sender's own key (another member's message holds
+        // the id): what opens the chat at it (a mention's notification)
+        // opens it at this one ([_kStoredKeyKey]).
+        signal = signal.withChatExtras(<String, dynamic>{
+          ...?signal.chatExtras,
+          _kStoredKeyKey: key,
+        });
+      }
     }
     // A group message that mentions this person says so (within limits).
     signal = _withMentionOfSelf(signal, timestamp);

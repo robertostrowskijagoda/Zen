@@ -866,6 +866,7 @@
     "few": "Skupina ({n} osoby)",
     "other": "Skupina ({n} osob)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Skupina může mít nejvýše {n} lidí.",
   "Grupa nr {n}": "Skupina č. {n}",
   "Grupa od znajomego": "Skupina od známého",
   "Grupa od {name}": "Skupina od {name}",
@@ -1654,6 +1655,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Od tohoto peera už máš čekající pozvánku.",
   "Masz już tę albo nowszą wersję.": "Tuto nebo novější verzi už máš.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Už máš známé — nastav si heslo účtu, aby ti blízcí známí mohli pomoct s obnovou účtu",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Už máš {n} poznámek. Smaž starší, abys mohl(a) uložit novou.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "one": "Už máš {n} známého — nastav si heslo účtu",
     "few": "Už máš {n} známé — nastav si heslo účtu",
@@ -3248,7 +3250,7 @@
   "Przerwij": "Přerušit",
   "Przerwij odzyskiwanie": "Přerušit obnovu",
   "Przerwy (ban czasowy)": "Pauzy (dočasný ban)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Přestaneš dostávat zprávy z této skupiny a ostatní uvidí, že jsi skupinu opustil(a).",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Přestaneš dostávat zprávy z této skupiny a ostatní uvidí, že jsi skupinu opustil(a). Chat skupiny a její soubory z tohoto telefonu zmizí.",
   "Przestać przechowywać?": "Přestat uchovávat?",
   "Przestań": "Přestat",
   "Przestań obserwować": "Přestat sledovat",

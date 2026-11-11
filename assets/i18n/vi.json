@@ -846,6 +846,7 @@
   "Grupa ({n} osób)": {
     "other": "Nhóm ({n} người)"
   },
+  "Grupa może mieć najwyżej {n} osób.": "Một nhóm có thể có tối đa {n} người.",
   "Grupa nr {n}": "Nhóm số {n}",
   "Grupa od znajomego": "Nhóm từ một người bạn",
   "Grupa od {name}": "Nhóm từ {name}",
@@ -1612,6 +1613,7 @@
   "Masz już oczekujące zaproszenie od tego peera.": "Bạn đã có lời mời đang chờ từ peer này.",
   "Masz już tę albo nowszą wersję.": "Bạn đã có phiên bản này hoặc mới hơn.",
   "Masz już znajomych — ustaw hasło konta, żeby bliscy znajomi mogli pomóc odzyskać konto": "Bạn đã có bạn bè — hãy đặt mật khẩu tài khoản để các bạn thân có thể giúp bạn khôi phục tài khoản",
+  "Masz już {n} notatek. Usuń starsze, żeby zapisać nową.": "Bạn đã có {n} ghi chú. Hãy xóa bớt ghi chú cũ để lưu ghi chú mới.",
   "Masz już {n} znajomych — ustaw hasło konta": {
     "other": "Bạn đã có {n} người bạn — hãy đặt mật khẩu tài khoản"
   },
@@ -3164,7 +3166,7 @@
   "Przerwij": "Dừng",
   "Przerwij odzyskiwanie": "Dừng khôi phục",
   "Przerwy (ban czasowy)": "Tạm nghỉ (cấm có thời hạn)",
-  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś.": "Bạn sẽ không nhận tin nhắn từ nhóm này nữa, và những người còn lại sẽ thấy bạn đã rời đi.",
+  "Przestaniesz dostawać wiadomości z tej grupy, a pozostali zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego telefonu.": "Bạn sẽ không nhận tin nhắn từ nhóm này nữa, và những người còn lại sẽ thấy bạn đã rời đi. Cuộc trò chuyện của nhóm và các tệp của nhóm sẽ bị xóa khỏi điện thoại này.",
   "Przestać przechowywać?": "Ngừng giữ?",
   "Przestań": "Ngừng",
   "Przestań obserwować": "Bỏ theo dõi",
