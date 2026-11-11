@@ -417,16 +417,14 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.code == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: zbar
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends zbar-tools
+        run: sh tool/ci/apt_install.sh zbar-tools
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
@@ -772,11 +770,10 @@ jobs:
       - name: Build tools and libraries (without the image)
         if: ${{ !needs.plan.outputs.image }}
         run: |
-          sudo apt-get update
           # Ubuntu 22.04 runners carry libunwind-14-dev, which conflicts
           # with the libunwind-dev that libgstreamer1.0-dev needs.
           sudo apt-get remove -y libunwind-14-dev || true
-          sudo apt-get install -y --no-install-recommends \
+          sh tool/ci/apt_install.sh \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             make g++ \
             libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
@@ -876,16 +873,14 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.code == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Validators
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends desktop-file-utils appstream
+        run: sh tool/ci/apt_install.sh desktop-file-utils appstream
 
       - name: .desktop and AppStream
         run: |
@@ -918,8 +913,16 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           IMAGE: ${{ matrix.image }}
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ./deb/zen.deb
+          # As tool/ci/apt_install.sh (these containers have no checkout):
+          # when the archive cannot be named, public resolvers are tried.
+          install_deb() {
+            apt-get update &&
+              apt-get install -y --no-install-recommends ./deb/zen.deb
+          }
+          if ! install_deb; then
+            printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+            install_deb || { sleep 30; install_deb; }
+          fi
           # The bundle's own libraries find each other through /opt/zen/lib.
           # libjvm.so is skipped: package:jni's library (pulled in by a
           # plugin) names it, but it is only loaded on Android.

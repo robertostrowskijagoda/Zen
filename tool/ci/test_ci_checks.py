@@ -30,6 +30,10 @@
 - The printable QR stickers: their job writes them with the test that
   makes them and reads them with zbar; decode_qr_stickers.py fails on a
   missing picture or a wrong reading.
+- apt_install.sh (where sh exists): an install that works changes
+  nothing; one that fails is tried again with public resolvers put before
+  the runner's own, and a third time; every job of ci.yml that installs
+  packages goes through it.
 
 Standard library only.
 """
@@ -575,7 +579,7 @@ class LinuxBuildImageTest(unittest.TestCase):
     def test_it_has_what_the_job_installs_without_it(self):
         with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
             linux = WorkflowTest.jobs(f.read())["linux"]
-        step = linux[linux.index("--no-install-recommends") + len("--no-install-recommends"):]
+        step = linux[linux.index("tool/ci/apt_install.sh") + len("tool/ci/apt_install.sh"):]
         step = step[:step.index("\n\n")]
         wanted = set(step.split()) - {"\\"}
         self.assertIn("g++", wanted)
@@ -739,6 +743,95 @@ class QrStickersTest(unittest.TestCase):
         with open(os.path.join(folder, "expected.json"), "w", encoding="utf-8") as f:
             json.dump({}, f)
         self.assertEqual(decode_qr_stickers.main(["x", folder]), 1)
+
+
+@unittest.skipUnless(shutil.which("sh"), "needs sh")
+class AptInstallTest(unittest.TestCase):
+    """apt_install.sh, with a made-up apt-get and sudo first on the PATH."""
+
+    def install(self, failures):
+        """Runs the script while `apt-get install` fails [failures] times.
+
+        Returns (exit code, the apt-get calls, the resolver file's lines).
+        """
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder)
+        tools = os.path.join(folder, "bin")
+        os.mkdir(tools)
+        log = os.path.join(folder, "calls.txt")
+        left = os.path.join(folder, "failures.txt")
+        resolv = os.path.join(folder, "resolv.conf")
+        scripts = {
+            "apt-get": '#!/bin/sh\n'
+                       'echo "$*" >> "$FAKE_LOG"\n'
+                       '[ "$1" = install ] || exit 0\n'
+                       'left=$(cat "$FAKE_LEFT")\n'
+                       '[ "$left" -gt 0 ] || exit 0\n'
+                       'echo $((left - 1)) > "$FAKE_LEFT"\n'
+                       'exit 100\n',
+            "sudo": '#!/bin/sh\nexec "$@"\n',
+        }
+        for name, text in scripts.items():
+            path = os.path.join(tools, name)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+            os.chmod(path, 0o755)
+        for path, text in ((left, "%d\n" % failures), (log, ""),
+                           (resolv, "# the runner's own\nnameserver 127.0.0.53\n")):
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+        env = dict(os.environ, FAKE_LOG=log, FAKE_LEFT=left,
+                   APT_INSTALL_RESOLV_CONF=resolv, APT_INSTALL_PAUSE="0",
+                   PATH=tools + os.pathsep + os.environ["PATH"])
+        done = subprocess.run(
+            ["sh", os.path.join(ROOT, "tool", "ci", "apt_install.sh"), "one", "two"],
+            capture_output=True, text=True, env=env)
+        with open(log, encoding="utf-8") as f:
+            calls = f.read().splitlines()
+        with open(resolv, encoding="utf-8") as f:
+            return done.returncode, calls, f.read().splitlines()
+
+    ATTEMPT = ["update", "install -y --no-install-recommends one two"]
+
+    def test_an_install_that_works_changes_nothing(self):
+        code, calls, resolv = self.install(failures=0)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, self.ATTEMPT)
+        self.assertEqual(resolv, ["# the runner's own", "nameserver 127.0.0.53"])
+
+    def test_a_failed_install_is_tried_with_public_resolvers_first(self):
+        code, calls, resolv = self.install(failures=1)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, self.ATTEMPT * 2)
+        self.assertEqual(resolv, ["nameserver 1.1.1.1", "nameserver 8.8.8.8",
+                                  "nameserver 127.0.0.53"])
+
+    def test_three_tries_and_no_more(self):
+        code, calls, _ = self.install(failures=2)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, self.ATTEMPT * 3)
+        code, calls, _ = self.install(failures=3)
+        self.assertEqual(code, 100)
+        self.assertEqual(calls, self.ATTEMPT * 3)
+
+    def test_nothing_to_install_is_an_error(self):
+        done = subprocess.run(["sh", os.path.join(ROOT, "tool", "ci", "apt_install.sh")],
+                              capture_output=True)
+        self.assertEqual(done.returncode, 2)
+
+    def test_every_job_that_installs_packages_uses_it(self):
+        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
+            jobs = WorkflowTest.jobs(f.read())
+        for name, job in jobs.items():
+            if name == "deb-install":
+                # Bare containers without a checkout: the same steps, written out.
+                self.assertIn("install_deb || { sleep 30; install_deb; }", job)
+                self.assertIn("nameserver 1.1.1.1", job)
+                continue
+            self.assertNotIn("apt-get install", job, name)
+            self.assertNotIn("apt-get update", job, name)
+        for name in ("qr-stickers", "linux", "packaging"):
+            self.assertIn("sh tool/ci/apt_install.sh", jobs[name], name)
 
 
 class GoBridgeExportsTest(unittest.TestCase):
