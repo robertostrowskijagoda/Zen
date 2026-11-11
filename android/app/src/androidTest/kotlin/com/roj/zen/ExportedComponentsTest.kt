@@ -52,6 +52,20 @@ class ExportedComponentsTest {
     }
 
     @Test
+    fun theAutofillIsBoundOnlyByTheSystemAndItsActivityIsClosed() {
+        val info = info()
+        val service = info.services?.firstOrNull { it.name == "com.roj.zen.ZenAutofillService" }
+        assertTrue("ZenAutofillService is in the manifest", service != null)
+        assertTrue(
+            "Only the system may bind the autofill service",
+            service!!.permission == "android.permission.BIND_AUTOFILL_SERVICE",
+        )
+        val activity = info.activities?.firstOrNull { it.name == "com.roj.zen.ZenAutofillActivity" }
+        assertTrue("ZenAutofillActivity is in the manifest", activity != null)
+        assertTrue("ZenAutofillActivity must not be exported", activity!!.exported.not())
+    }
+
+    @Test
     fun theFileProviderIsClosed() {
         val provider = info().providers?.firstOrNull { it.name == "com.roj.zen.ZenFileProvider" }
         assertTrue("ZenFileProvider is in the manifest", provider != null)

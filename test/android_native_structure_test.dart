@@ -74,6 +74,7 @@ void main() {
         'ZenAlarmShortcut',
         'ZenVideoBridge',
         'ZenPower',
+        'ZenAutofillBridge',
       ]) {
         expect(
           _source('$name.kt'),
@@ -173,5 +174,143 @@ void main() {
     expect(clear, contains('setPrimaryClip(ClipData.newPlainText("", ""))'));
     expect(clear, isNot(contains('getPrimaryClip')));
     expect(clear, isNot(contains('primaryClip ')));
+  });
+  group('the autofill gives nothing away and fails closed', () {
+    final String manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    String element(String name) {
+      final int at = manifest.indexOf('android:name="$name"');
+      expect(at, greaterThanOrEqualTo(0), reason: name);
+      final int start = manifest.lastIndexOf('<', at);
+      final String rest = manifest.substring(start);
+      final int end = rest.startsWith('<service')
+          ? rest.indexOf('</service>')
+          : rest.indexOf('/>');
+      return rest.substring(0, end);
+    }
+
+    test('the service is bound only by the system, through Android\'s '
+        'autofill action and its own minimal configuration', () {
+      final String service = element('.ZenAutofillService');
+      expect(
+        service,
+        contains(
+          'android:permission="android.permission.BIND_AUTOFILL_SERVICE"',
+        ),
+      );
+      expect(service, contains('android.service.autofill.AutofillService'));
+      expect(service, contains('android:resource="@xml/zen_autofill_service"'));
+      final String config = File(
+        'android/app/src/main/res/xml/zen_autofill_service.xml',
+      ).readAsStringSync();
+      expect(config, contains('<autofill-service'));
+      // No accessibility-based compatibility mode for browsers.
+      expect(config, isNot(contains('compatibility-package')));
+    });
+
+    test('the picker\'s activity is not open to other apps and has no '
+        'history of its own', () {
+      final String activity = element('.ZenAutofillActivity');
+      expect(activity, contains('android:exported="false"'));
+      expect(activity, isNot(contains('intent-filter')));
+      expect(activity, isNot(contains('noHistory="true"')));
+      expect(activity, contains('Theme.Translucent'));
+    });
+
+    test('a suggestion carries no value, only the authentication, in an '
+        'immutable intent the requesting app cannot change', () {
+      final String service = _source('ZenAutofillService.kt');
+      expect(service, contains('setValue(passwordId, null)'));
+      expect(service, contains('setValue(it, null)'));
+      expect(service, isNot(contains('AutofillValue')));
+      expect(service, contains('setAuthentication(sender)'));
+      expect(
+        service,
+        contains(
+          'PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE',
+        ),
+      );
+      expect(service, isNot(contains('FLAG_MUTABLE')));
+      // Saving is not offered: no SaveInfo declared.
+      expect(service, isNot(contains('setSaveInfo')));
+      expect(service, isNot(contains('SaveInfo.Builder')));
+      // Nothing is read from disk on this side.
+      for (final String read in <String>[
+        'SharedPreferences',
+        'openFileInput',
+        'File(',
+        'FlutterEngine',
+      ]) {
+        expect(service, isNot(contains(read)), reason: read);
+      }
+      // The page's address only from a known browser; Zen's own forms never.
+      expect(service, contains('trustedWebOrigin(client,'));
+      expect(service, contains('if (client == packageName)'));
+      expect(
+        service,
+        contains('Build.VERSION.SDK_INT < Build.VERSION_CODES.P'),
+      );
+    });
+
+    test('every way out of the request but a picked entry is '
+        'RESULT_CANCELED', () {
+      final String activity = _source('ZenAutofillActivity.kt');
+      final String create = _function(activity, 'override fun onCreate');
+      expect(create, contains('setResult(Activity.RESULT_CANCELED)'));
+      expect(
+        create.indexOf('setResult(Activity.RESULT_CANCELED)'),
+        lessThan(create.indexOf('ZenAutofillBridge.open(')),
+        reason: 'the answer is "nothing" until an entry comes',
+      );
+      expect(create, contains('savedInstanceState != null'));
+      expect(create, contains('ZenAutofillBridge.cancel(this)'));
+      expect(
+        _function(activity, 'override fun onRestart'),
+        contains('ZenAutofillBridge.cancel(this)'),
+      );
+      final String complete = _function(activity, 'fun complete');
+      expect(complete, contains('if (dataset != null)'));
+      expect(complete, contains('setResult(Activity.RESULT_CANCELED)'));
+      expect('RESULT_OK'.allMatches(activity), hasLength(1));
+
+      final String bridge = _source('ZenAutofillBridge.kt');
+      expect(bridge, contains('TIMEOUT_MS = 60_000L'));
+      expect(bridge, contains('Runnable { end(null) }'));
+      // A fill for a request no longer open fills nothing.
+      expect(bridge, contains('open.id != id'));
+      expect(bridge, contains('end(null)'));
+      expect(bridge, contains('filterTouchesWhenObscured = on'));
+    });
+
+    test('the log says nothing of the app, the page or the entry', () {
+      int logged = 0;
+      for (final String name in <String>[
+        'ZenAutofillService.kt',
+        'ZenAutofillActivity.kt',
+        'ZenAutofillBridge.kt',
+      ]) {
+        for (final RegExpMatch m in RegExp(
+          r'Log\.\w\((.*)\)',
+        ).allMatches(_source(name))) {
+          logged++;
+          final String line = m.group(1)!;
+          for (final String word in <String>[
+            'package',
+            'webDomain',
+            'domain',
+            'login',
+            'password',
+            'label',
+            'request',
+            'id)',
+            'error)',
+          ]) {
+            expect(line, isNot(contains(word)), reason: '$name: $line');
+          }
+        }
+      }
+      expect(logged, greaterThanOrEqualTo(3));
+    });
   });
 }

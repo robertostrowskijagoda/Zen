@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Zen's autofill service (ZenAutofillService.kt). No settings page and no
+     compatibility packages: browsers are served only through their own
+     support for Android's autofill, never through the accessibility-based
+     compatibility mode. -->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android" />

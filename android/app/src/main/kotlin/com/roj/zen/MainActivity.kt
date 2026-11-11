@@ -98,6 +98,8 @@ class MainActivity : FlutterFragmentActivity() {
         ZenAlarmShortcut.register(flutterEngine, this, background = false)
         ZenVideoBridge.register(flutterEngine, this)
         ZenPower.register(flutterEngine, this, background = false)
+        // The autofill picker runs here, where the vault is unlocked.
+        ZenAutofillBridge.register(flutterEngine, this)
     }
 
     // Every bridge of configureFlutterEngine lets go of this engine: the
@@ -120,6 +122,7 @@ class MainActivity : FlutterFragmentActivity() {
         ZenAlarmShortcut.unregister(flutterEngine)
         ZenVideoBridge.unregister(flutterEngine)
         ZenPower.unregister(flutterEngine)
+        ZenAutofillBridge.unregister(flutterEngine)
         // The background service takes the node over now, not after its
         // watchdog misses the heartbeats.
         ZenPower.appEngineGone(this)

@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/passwords/password_autofill_bridge.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/passwords/password_vault_service.dart';
+import 'package:zen/src/features/passwords/presentation/password_autofill_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_entry_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_form_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_import.dart';
@@ -420,6 +422,8 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
                   onSelected: (String choice) {
                     if (choice == 'import') {
                       unawaited(importPasswordFile(context, ref));
+                    } else if (choice == 'autofill') {
+                      unawaited(showPasswordAutofillInfo(context));
                     } else {
                       _howItWorks();
                     }
@@ -432,6 +436,13 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
                           enabled: writable,
                           child: Text(t('Importuj z pliku CSV')),
                         ),
+                        // Android only: Zen as the system's autofill.
+                        if (ref.read(passwordAutofillBridgeProvider).supported)
+                          PopupMenuItem<String>(
+                            key: const Key('passwords-menu-autofill'),
+                            value: 'autofill',
+                            child: Text(t('Wypełnianie w innych aplikacjach')),
+                          ),
                         PopupMenuItem<String>(
                           key: const Key('passwords-menu-help'),
                           value: 'help',

@@ -19,6 +19,7 @@ import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/incoming_call_layer.dart';
 import 'package:zen/src/features/meet/presentation/alarm_screen.dart';
+import 'package:zen/src/features/passwords/presentation/password_autofill_host.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/locked_notice_kit_bridge.dart';
@@ -185,10 +186,14 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
                             // A backup, key backup or update file opened
                             // in Zen from outside: its screen.
                             child: OpenedFileBridge(
-                              // After a restore: its progress and what
-                              // came back.
-                              child: AccountImportLayer(
-                                child: AppShellScreen(),
+                              // Android: another app's login form asked
+                              // for a login; the picker, once unlocked.
+                              child: PasswordAutofillHost(
+                                // After a restore: its progress and what
+                                // came back.
+                                child: AccountImportLayer(
+                                  child: AppShellScreen(),
+                                ),
                               ),
                             ),
                           ),
