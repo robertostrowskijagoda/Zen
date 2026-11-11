@@ -678,10 +678,10 @@ final class PyramidService extends ChangeNotifier {
   final Map<String, int> myVotes = <String, int>{};
   final Map<String, String> _tallySent = <String, String>{};
 
-  /// Slots this person signed as a treasurer (the latest operation each:
-  /// another only once the one before could no longer count; shared with
-  /// the person's other devices), and own orders and settlements
-  /// waiting for the treasurers.
+  /// Spans of slots this person signed as a treasurer (one operation each,
+  /// another only once the era of the one before was sealed without it;
+  /// one release vote per span; shared with the person's other devices),
+  /// and own orders and settlements waiting for the treasurers.
   final Map<String, String> _signedOrders = <String, String>{};
   final Map<String, PyramidRecord> _payments = <String, PyramidRecord>{};
 
@@ -1788,9 +1788,11 @@ final class PyramidService extends ChangeNotifier {
     }
     // Only the pinned pyramid, and only while this phone keeps it; its
     // genesis is in the app, never taken from anybody.
-    // Payments are private: never kept with the public records.
+    // Payments are private: never kept with the public records, nor the
+    // releases of their numbers.
     if (r.type == PyrT.genesis ||
         PyrT.treasured.contains(r.type) ||
+        r.type == PyrT.release ||
         current == null ||
         r.pyramid != current ||
         _followSince == null) {
@@ -3980,6 +3982,7 @@ final class PyramidService extends ChangeNotifier {
             if (share > 0) 'hops': hops,
             'h': ?hash,
           };
+    final int seq = _treasury.nextSeq(payer);
     final PyramidRecord order = await PyramidRecord(
       body: <String, dynamic>{
         't': PyrT.transfer,
@@ -3989,7 +3992,10 @@ final class PyramidService extends ChangeNotifier {
         'from': payer,
         'to': to,
         'amount': amount,
-        'seq': _treasury.nextSeq(payer),
+        'seq': seq,
+        // The release of the number this order follows, when it was split
+        // before ([PyrLedger.isSplit]).
+        'rel': ?_treasury.relFor('$payer|$seq'),
         // Within what a treasurer keeps ([kPyrMaxOpBytes]).
         'memo': _cut(memo, 500),
         'cond': ?cond,
@@ -4020,9 +4026,9 @@ final class PyramidService extends ChangeNotifier {
 
   /// Stops sending order [id]. The treasurers who signed it keep their
   /// signature, and it may still count if most of them did; the next order
-  /// takes the same number, and those who signed this one sign the next
-  /// too once this one can no longer count — enough of the others signed
-  /// later orders for the number instead ([PyrLedger.passed]).
+  /// takes the same number. When neither can reach a majority any more,
+  /// most treasurers release the number ([PyrLedger.isSplit]) and the
+  /// order waiting goes out again after the release.
   void cancelPending(String id) {
     _payments.remove(id);
     _resentAt.remove(id);
@@ -4061,6 +4067,7 @@ final class PyramidService extends ChangeNotifier {
         'x': transferId,
         'ok': ok,
         if (ok && next != null) 'next': next,
+        'rel': ?_treasury.relFor('x|$transferId'),
         'nc': _newId(24),
       },
     ).signedBy(me);

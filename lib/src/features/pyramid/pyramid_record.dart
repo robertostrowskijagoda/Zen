@@ -155,6 +155,13 @@ abstract final class PyrT {
   /// Private kinds most treasurers sign before they count; never public.
   static const Set<String> treasured = <String>{transfer, settle};
 
+  /// The release of an account's number (or of a payment's settlement)
+  /// left split between operations none of which can reach a majority:
+  /// signed by most treasurers of the era, it leaves every operation of
+  /// that span behind, and the next span of the number starts
+  /// (`pyramid_ledger.dart`, `PyrLedger.isSplit`). Private, never public.
+  static const String release = 'xrel';
+
   /// Kinds whose time starts a wait or counts against a limit (new rules
   /// a day later, an emission's veto time and its 30-day limit, a raise of
   /// the limit 30 days later, the time a complaint or an appeal gives to

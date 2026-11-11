@@ -6,14 +6,25 @@
 /// the payer like a record, sealed to each treasurer and never enters the
 /// public log. A treasurer signs it only against its own copy of the
 /// private ledger (the next number of the account, the money there, the
-/// daily limit, fresh) and never two operations for one slot (the
-/// account's number, or one settlement per payment) — but for a later one
-/// once the one it signed can no longer count ([PyrLedger.passed]), so a
-/// number split between orders that none of them can reach a majority
-/// with is not lost. An operation counts once most of the treasurers of
-/// its time signed it ([PyrLedger.isFinal]): two majorities share a
-/// treasurer, so nothing is spent twice unless a treasurer signs two
-/// operations for one slot, which is proof against it.
+/// daily limit, fresh) and never two operations for one span of a slot
+/// (the account's number, or one settlement per payment). An operation
+/// counts once most of the treasurers of its time signed it
+/// ([PyrLedger.isFinal]): two majorities of n share 2m − n treasurers (m
+/// the majority: two of an even number, one of an odd one), so nothing is
+/// spent twice unless that many sign two operations for one span, which
+/// is proof against them ([PyrLedgerView.cheaters]).
+///
+/// A number split between operations none of which can reach a majority
+/// any more ([PyrLedger.isSplit]: cancelled orders, two devices at once,
+/// an acceptance and a refund around a payment's time) is freed by a
+/// release ([PyrT.release]) most treasurers of the era sign — never by a
+/// treasurer signing a second operation on what it alone sees. The release
+/// leaves every operation of the span behind (one final only through a
+/// signature its treasurer kept from the others too: its holder had to
+/// show it to the treasurers before), and the next span of the number
+/// starts: an operation names the release it follows (`rel`). A treasurer
+/// signs one release per span, so two releases of one span need 2m − n
+/// treasurers signing both, like two operations.
 ///
 /// A time is never a source of power by itself: once an era of the
 /// treasurers ended, most of the next era's treasurers seal it
@@ -201,13 +212,18 @@ final class PyrLedgerView {
   /// took it.
   final Map<String, String> slots = <String, String>{};
 
+  /// Slot → the last release of it that counts: only operations that name
+  /// it (`rel`) can count, those of the spans before it nowhere.
+  final Map<String, String> releases = <String, String>{};
+
   /// Times of the counted orders of each payer (the daily limit).
   final Map<String, List<int>> orderTimes = <String, List<int>>{};
 
   /// The operations that counted (and the emissions credited, 'e:' + id).
   final Set<String> counted = <String>{};
 
-  /// Treasurers caught signing two operations for one slot.
+  /// Treasurers caught signing two operations for one span of a slot, or
+  /// two releases of one span.
   final Map<String, List<String>> cheaters = <String, List<String>>{};
 
   /// Operations most treasurers signed although no honest treasurer would
@@ -217,6 +233,13 @@ final class PyrLedgerView {
 
   int balanceOf(String key) => balances[key] ?? 0;
   int seqOf(String key) => seqs[key] ?? 0;
+
+  /// Whether [op] is of a span its slot's release left behind (or names a
+  /// release not known here): it counts nowhere and no honest treasurer
+  /// signs it. An operation dated in a sealed era goes by its seal.
+  bool leftBehind(PyramidRecord op, PyramidState s) =>
+      s.sealAt(op.at) == null &&
+      PyrLedger.relOf(op) != (releases[PyrLedger.slotOf(op)] ?? '');
 
   /// Orders [key] placed in the day up to [at].
   int ordersInDay(String key, int at) => (orderTimes[key] ?? const <int>[])
@@ -244,11 +267,139 @@ final class PyrLedger {
   final Map<String, PyramidRecord> ops = <String, PyramidRecord>{};
   final Map<String, PyrEmitNote> notes = <String, PyrEmitNote>{};
 
+  /// Releases of split spans ([PyrT.release]) with the treasurers' votes
+  /// that checked (merged, never replaced).
+  final Map<String, PyramidRecord> releases = <String, PyramidRecord>{};
+
   /// The slot an operation takes: one per account number, one settlement
   /// per payment.
   static String slotOf(PyramidRecord op) => op.type == PyrT.settle
       ? 'x|${op.str('x')}'
       : '${op.str('from')}|${op.integer('seq')}';
+
+  /// The release [op] follows ('' for the first span of its slot).
+  static String relOf(PyramidRecord op) => op.str('rel');
+
+  /// The span of a slot [op] belongs to: what an honest treasurer signs
+  /// one operation of.
+  static String spanOf(PyramidRecord op) {
+    final String rel = relOf(op);
+    return rel.isEmpty ? slotOf(op) : '${slotOf(op)}|$rel';
+  }
+
+  /// The release of span [prev] ('' for the first) of [slot]: the same
+  /// record on every treasurer's phone of the era starting at [at], so
+  /// their votes meet in it.
+  static PyramidRecord releaseOf({
+    required String pyramid,
+    required String slot,
+    required String prev,
+    required int at,
+  }) => PyramidRecord(
+    body: <String, dynamic>{
+      't': PyrT.release,
+      'py': pyramid,
+      'at': at,
+      'slot': slot,
+      if (prev.isNotEmpty) 'prev': prev,
+    },
+  );
+
+  /// Whether [r] is shaped like a release.
+  static bool isRelease(PyramidRecord r) =>
+      r.type == PyrT.release &&
+      r.str('slot').isNotEmpty &&
+      (r.body['prev'] == null || r.body['prev'] is String) &&
+      fits(r);
+
+  /// Whether release [r] counts: most treasurers of its era voted for it.
+  static bool releaseFinal(PyramidRecord r, PyramidState s) {
+    final List<String> t = s.treasurersAt(r.at);
+    return isRelease(r) &&
+        t.isNotEmpty &&
+        r.tsigs.keys.where(t.contains).length >= t.length ~/ 2 + 1;
+  }
+
+  /// The releases of [slot] that count, one after the other from its
+  /// first span (of two for one span, which only a dishonest majority
+  /// signs, the lower id).
+  List<PyramidRecord> chainOf(String slot, PyramidState s) {
+    final List<PyramidRecord> all = <PyramidRecord>[
+      for (final PyramidRecord r in releases.values)
+        if (r.str('slot') == slot && releaseFinal(r, s)) r,
+    ];
+    final List<PyramidRecord> out = <PyramidRecord>[];
+    String prev = '';
+    while (out.length < all.length) {
+      PyramidRecord? next;
+      for (final PyramidRecord r in all) {
+        if (r.str('prev') == prev &&
+            (next == null || r.id.compareTo(next.id) < 0)) {
+          next = r;
+        }
+      }
+      if (next == null) {
+        break;
+      }
+      out.add(next);
+      prev = next.id;
+    }
+    return out;
+  }
+
+  /// The release that starts the span of [slot] where its operations count
+  /// now ('' for the first).
+  String currentOf(String slot, PyramidState s) =>
+      chainOf(slot, s).lastOrNull?.id ?? '';
+
+  /// Takes release [r] (its votes already checked): new, or more votes
+  /// for one here. Whether anything changed.
+  bool mergeRelease(PyramidRecord r) {
+    if (!isRelease(r)) {
+      return false;
+    }
+    final PyramidRecord? had = releases[r.id];
+    if (had == null) {
+      releases[r.id] = r;
+      return true;
+    }
+    final Map<String, String> more = <String, String>{
+      for (final MapEntry<String, String> e in r.tsigs.entries)
+        if (!had.tsigs.containsKey(e.key)) e.key: e.value,
+    };
+    if (more.isEmpty) {
+      return false;
+    }
+    releases[r.id] = PyramidRecord(
+      body: had.body,
+      tsigs: <String, String>{...had.tsigs, ...more},
+    );
+    return true;
+  }
+
+  /// Whether no operation of [span] (the operations of one span of a slot
+  /// known here) can reach a majority of [treasurers] any more: each has
+  /// fewer signatures of theirs than a majority less those who signed none
+  /// of them. An honest treasurer signs one operation per span, so then
+  /// none of them is final by honest signatures; one can be final only
+  /// through a signature its treasurer kept from the others, which the
+  /// span's release leaves behind with the rest. One operation alone is
+  /// never split (it can still reach every treasurer).
+  static bool isSplit(Iterable<PyramidRecord> span, List<String> treasurers) {
+    if (span.isEmpty || treasurers.isEmpty) {
+      return false;
+    }
+    final int m = treasurers.length ~/ 2 + 1;
+    final Set<String> signed = <String>{
+      for (final PyramidRecord o in span)
+        ...o.tsigs.keys.where(treasurers.contains),
+    };
+    final int free = treasurers.length - signed.length;
+    return span.every(
+      (PyramidRecord o) =>
+          o.tsigs.keys.where(treasurers.contains).length + free < m,
+    );
+  }
 
   /// Whose money [op] moves: the payer of an order, the one who signed a
   /// settlement.
@@ -272,42 +423,20 @@ final class PyrLedger {
     return c != 0 ? c > 0 : b.id.compareTo(a.id) > 0;
   }
 
-  /// Whether [x] can no longer count, judged from [slot] (the operations
-  /// for its slot known here): its era was sealed without it, or more of
-  /// its era's treasurers than it can do without — at least n − m + 1 of
-  /// n, m the majority — signed later operations for the slot and not
-  /// [x]. An honest treasurer signs one operation per slot, and another
-  /// only when it is later and the one it signed can no longer count; so
-  /// those treasurers never sign [x], and [x] never reaches a majority
-  /// while no treasurer signs two operations for one slot (which is
-  /// proof against it, [PyrLedgerView.cheaters]). With [strict] (judging
-  /// who signed two), an era's seal leaves [x] behind only when it had
-  /// fewer than most of its era's signatures: a treasurer of back then
-  /// who signs an operation dated into a sealed era is still caught.
-  static bool passed(
-    PyramidRecord x,
-    Iterable<PyramidRecord> slot,
-    PyramidState s, {
-    bool strict = false,
-  }) {
+  /// Whether [x] can no longer count because its era was sealed without
+  /// it: then a later operation of its span may be signed by those who
+  /// signed [x] (the next era's, the number taken again). Within an era
+  /// only a release frees a span ([isSplit]). With [strict] (judging who
+  /// signed two), the seal leaves [x] behind only when it had fewer than
+  /// most of its era's signatures: a treasurer of back then who signs an
+  /// operation dated into a sealed era is still caught.
+  static bool passed(PyramidRecord x, PyramidState s, {bool strict = false}) {
     final PyrSeal? seal = s.sealAt(x.at);
-    if (seal != null &&
+    return seal != null &&
         !seal.ops.contains(x.id) &&
         (!strict ||
             x.tsigs.keys.where(seal.set.contains).length <
-                seal.set.length ~/ 2 + 1)) {
-      return true;
-    }
-    final List<String> t = s.treasurersAt(x.at);
-    if (t.isEmpty) {
-      return false;
-    }
-    final Set<String> moved = <String>{
-      for (final PyramidRecord y in slot)
-        if (y.id != x.id && slotOf(y) == slotOf(x) && isLater(y, x))
-          ...y.tsigs.keys.where(t.contains),
-    }..removeAll(x.tsigs.keys);
-    return moved.length >= t.length - (t.length ~/ 2 + 1) + 1;
+                seal.set.length ~/ 2 + 1);
   }
 
   /// The operations here for [slot].
@@ -347,6 +476,10 @@ final class PyrLedger {
     }
     if (s.treasurerEras.isEmpty || op.at < s.treasurerEras.first.$1) {
       return 'zlecenie sprzed skarbników';
+    }
+    // The release it follows names one by its id, or none.
+    if (op.body['rel'] != null && op.body['rel'] is! String) {
+      return 'zły przelew';
     }
     if (op.type != PyrT.transfer) {
       if (op.type != PyrT.settle) {
@@ -526,16 +659,26 @@ final class PyrLedger {
     bool whole = false,
   }) {
     final PyrLedgerView v = PyrLedgerView();
-    // Two operations for one slot, both signed by one treasurer: evidence,
-    // whether they counted or not — unless the earlier one could no longer
-    // count by what is here ([passed]): then signing the later one was
-    // what an honest treasurer does to free the number.
-    final Map<String, List<PyramidRecord>> bySlot =
+    for (final String slot in <String>{
+      for (final PyramidRecord r in releases.values) r.str('slot'),
+    }) {
+      final String current = currentOf(slot, s);
+      if (current.isNotEmpty) {
+        v.releases[slot] = current;
+      }
+    }
+    // Two operations for one span of a slot, both signed by one treasurer:
+    // evidence, whether they counted or not — unless the earlier one's era
+    // was sealed without it ([passed]): then signing the later one was
+    // what an honest treasurer does to take the number again. Operations of
+    // different spans are not two for one: the release between them freed
+    // the number.
+    final Map<String, List<PyramidRecord>> bySpan =
         <String, List<PyramidRecord>>{};
     for (final PyramidRecord op in ops.values) {
-      (bySlot[slotOf(op)] ??= <PyramidRecord>[]).add(op);
+      (bySpan[spanOf(op)] ??= <PyramidRecord>[]).add(op);
     }
-    for (final List<PyramidRecord> same in bySlot.values) {
+    for (final List<PyramidRecord> same in bySpan.values) {
       if (same.length < 2) {
         continue;
       }
@@ -544,7 +687,7 @@ final class PyrLedger {
             isLater(a, b) ? 1 : (isLater(b, a) ? -1 : 0),
       );
       for (int i = 0; i < same.length; i++) {
-        final bool left = passed(same[i], same, s, strict: true);
+        final bool left = passed(same[i], s, strict: true);
         for (int j = i + 1; j < same.length; j++) {
           for (final String t in same[i].tsigs.keys) {
             if (same[j].tsigs.containsKey(t) && !left) {
@@ -557,10 +700,32 @@ final class PyrLedger {
         }
       }
     }
+    // Two releases of one span, both voted for by one treasurer.
+    final Map<String, List<PyramidRecord>> byPrev =
+        <String, List<PyramidRecord>>{};
+    for (final PyramidRecord r in releases.values) {
+      (byPrev['${r.str('slot')}|${r.str('prev')}'] ??= <PyramidRecord>[]).add(
+        r,
+      );
+    }
+    for (final List<PyramidRecord> same in byPrev.values) {
+      for (int i = 0; i < same.length; i++) {
+        for (int j = i + 1; j < same.length; j++) {
+          for (final String t in same[i].tsigs.keys) {
+            if (same[j].tsigs.containsKey(t)) {
+              (v.cheaters[t] ??= <String>[]).addAll(<String>[
+                same[i].id,
+                same[j].id,
+              ]);
+            }
+          }
+        }
+      }
+    }
     final List<PyramidRecord> finals =
         <PyramidRecord>[
           for (final PyramidRecord op in ops.values)
-            if (isFinal(op, s)) op,
+            if (isFinal(op, s) && !v.leftBehind(op, s)) op,
         ]..sort((PyramidRecord a, PyramidRecord b) {
           final int c = a.at.compareTo(b.at);
           if (c != 0) {
@@ -976,6 +1141,10 @@ final class PyrLedger {
     'notes': <Map<String, dynamic>>[
       for (final PyrEmitNote n in notes.values) n.toJson(),
     ],
+    if (releases.isNotEmpty)
+      'rel': <Map<String, dynamic>>[
+        for (final PyramidRecord r in releases.values) r.toJson(),
+      ],
   };
 
   /// What was stored (checked when it came: taken as it is).
@@ -999,6 +1168,15 @@ final class PyrLedger {
         final PyrEmitNote? x = PyrEmitNote.fromJson(n);
         if (x != null) {
           l.notes[x.rc] = x;
+        }
+      }
+    }
+    final Object? rel = json['rel'];
+    if (rel is List) {
+      for (final Object? o in rel) {
+        final PyramidRecord? r = PyramidRecord.fromJson(o);
+        if (r != null && isRelease(r)) {
+          l.releases[r.id] = r;
         }
       }
     }

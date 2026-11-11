@@ -99,6 +99,43 @@ void main() {
       }();
     });
 
+    test('a number split three and three is free again within two hours of '
+        'the treasurers meeting, and not before they waited for the order '
+        'held back to come out', () async {
+      final PyramidWorld w = await PyramidWorld.six();
+      await w.fund('A1', 10000);
+      final String b1 = w['B1'].myKey!;
+      w.net.holdForOffline = false;
+      online(w, <String>['S', 'A', 'B'], false);
+      final PyramidRecord? o1 = await w['A1'].pay(b1, 100);
+      await w.net.run();
+      w['A1'].cancelPending(o1!.id);
+      online(w, <String>['S', 'A', 'B'], true);
+      online(w, <String>['A2', 'B1'], false);
+      await w['A1'].pay(b1, 100);
+      await w.net.run();
+      online(w, <String>['A2', 'B1'], true);
+      w.net.holdForOffline = true;
+      final int met = w.net.now;
+      int? freed;
+      for (int i = 0; i < 16 && freed == null; i++) {
+        await w.net.advance(const Duration(minutes: 15));
+        await w.duties(rounds: 1);
+        if (w['S'].ledgerBalanceOf(b1) == 100) {
+          freed = w.net.now - met;
+        }
+      }
+      expect(freed, isNotNull);
+      expect(freed, greaterThanOrEqualTo(kPyrReleaseWaitMs));
+      expect(freed, lessThanOrEqualTo(kPyrReleaseWaitMs + 3600 * 1000));
+      await settle(w, days: 1);
+      for (final String t in treasurers) {
+        expect(w[t].ledgerBalanceOf(b1), 100, reason: t);
+        expect(w[t].ledgerCheaters, isEmpty, reason: t);
+      }
+      expect(w['A1'].balance, 9900);
+    });
+
     test(
       'an order that counts is never replaced: a second order with its '
       'number gets only the signatures of those who signed nothing',
@@ -182,11 +219,13 @@ void main() {
         online(w, <String>['A2', 'B1'], true);
         w.net.holdForOffline = true;
         await settle(w);
-        // The later one counts on every treasurer's ledger; the earlier one
-        // waits no more.
+        // Neither could reach four: most treasurers released the number,
+        // and the order still waiting on this device went out again after
+        // the release and counts on every treasurer's ledger; the other
+        // device's counts nowhere.
         for (final String t in treasurers) {
-          expect(w[t].ledgerBalanceOf(a2), 100, reason: t);
-          expect(w[t].ledgerBalanceOf(b1), 0, reason: t);
+          expect(w[t].ledgerBalanceOf(b1), 100, reason: t);
+          expect(w[t].ledgerBalanceOf(a2), 0, reason: t);
           expect(w[t].ledgerCheaters, isEmpty, reason: t);
         }
         await w.net.advance(const Duration(hours: 13));
@@ -196,7 +235,7 @@ void main() {
         final PyramidRecord? next = await w['A1'].pay(b1, 50);
         expect(next!.integer('seq'), here.integer('seq') + 1);
         await w.net.run();
-        expect(w['S'].ledgerBalanceOf(b1), 50);
+        expect(w['S'].ledgerBalanceOf(b1), 150);
       },
     );
 
@@ -238,6 +277,111 @@ void main() {
         expect(w[t].ledgerBalanceOf(b1), payee, reason: t);
         expect(w[t].ledgerCheaters, isEmpty, reason: t);
       }
+    });
+  });
+
+  group('a dishonest treasurer among six', () {
+    /// [op] with treasurer [who]'s signature made with its key outside its
+    /// app: no other treasurer sees it until somebody shows the operation.
+    Future<PyramidRecord> hiddenSig(
+      PyramidWorld w,
+      String who,
+      PyramidRecord op,
+    ) async {
+      final LedgerKeyPair k = await LedgerKeyPair.fromSeed(
+        (await w.seedOf(w[who].disk)())!,
+      );
+      expect(k.id, w[who].myKey);
+      return op.withTreasurerSig(
+        k.id,
+        b64(await k.sign(PyramidRecord.treasurerBytes(op.id))),
+      );
+    }
+
+    /// A1 pays B1 while S, A and B are away (A1, A2, B1 sign: three of the
+    /// four needed); A signs it too out of sight — a majority, which A and
+    /// the payer keep to themselves; the payer gives the order up and pays
+    /// the same number to A2 while A2 and B1 are away (S, A, B sign).
+    Future<PyramidRecord> splitWithHidden(PyramidWorld w) async {
+      await w.fund('A1', 10000);
+      w.net.holdForOffline = false;
+      online(w, <String>['S', 'A', 'B'], false);
+      final PyramidRecord? x = await w['A1'].pay(w['B1'].myKey!, 100);
+      await w.net.run();
+      final PyramidRecord signed = w['A1'].pendingPayments.single;
+      expect(signed.tsigs, hasLength(3));
+      final PyramidRecord held = await hiddenSig(w, 'A', signed);
+      expect(PyrLedger.isFinal(held, w['S'].state!), isTrue);
+      w['A1'].cancelPending(x!.id);
+      online(w, <String>['S', 'A', 'B'], true);
+      online(w, <String>['A2', 'B1'], false);
+      final PyramidRecord? y = await w['A1'].pay(w['A2'].myKey!, 100);
+      expect(y!.integer('seq'), x.integer('seq'));
+      await w.net.run();
+      online(w, <String>['A2', 'B1'], true);
+      w.net.holdForOffline = true;
+      return held;
+    }
+
+    Future<void> show(PyramidWorld w, PyramidRecord op) async {
+      for (final String t in treasurers) {
+        await w['A1'].sendSealed(w[t].myKey!, <String, dynamic>{
+          'k': 'fin',
+          'ops': <Map<String, dynamic>>[op.toJson()],
+        });
+      }
+      await w.net.run();
+    }
+
+    test('one of six signs an order out of sight and the next order for '
+        'its number too: the order shown later takes nothing from the one '
+        'that counted, and only that treasurer is named', () async {
+      final PyramidWorld w = await PyramidWorld.six();
+      final String b1 = w['B1'].myKey!;
+      final String a2 = w['A2'].myKey!;
+      final String payer = w['A1'].myKey!;
+      final PyramidRecord held = await splitWithHidden(w);
+      await settle(w);
+      final Map<String, (int, int)> before = <String, (int, int)>{
+        for (final String t in treasurers)
+          t: (w[t].ledgerBalanceOf(b1), w[t].ledgerBalanceOf(a2)),
+      };
+      // The order with four signatures comes out after the number moved
+      // on.
+      await show(w, held);
+      await settle(w, days: 1);
+      for (final String t in treasurers) {
+        expect(
+          (w[t].ledgerBalanceOf(b1), w[t].ledgerBalanceOf(a2)),
+          before[t],
+          reason: t,
+        );
+        expect(
+          w[t].ledgerBalanceOf(b1) + w[t].ledgerBalanceOf(a2),
+          100,
+          reason: t,
+        );
+        expect(w[t].ledgerBalanceOf(payer), 9900, reason: t);
+        expect(w[t].ledgerCheaters.keys, <String>[w['A'].myKey!], reason: t);
+      }
+    });
+
+    test('the order signed out of sight, shown before the number moved on, '
+        'counts; the other never does, and the one who signed both is '
+        'named', () async {
+      final PyramidWorld w = await PyramidWorld.six();
+      final String b1 = w['B1'].myKey!;
+      final String a2 = w['A2'].myKey!;
+      final PyramidRecord held = await splitWithHidden(w);
+      await show(w, held);
+      await settle(w);
+      for (final String t in treasurers) {
+        expect(w[t].ledgerBalanceOf(b1), 100, reason: t);
+        expect(w[t].ledgerBalanceOf(a2), 0, reason: t);
+        expect(w[t].ledgerCheaters.keys, <String>[w['A'].myKey!], reason: t);
+      }
+      expect(w['A1'].pendingPayments, isEmpty);
+      expect(w['A1'].balance, 9900);
     });
   });
 
@@ -470,12 +614,28 @@ void main() {
       return r;
     }
 
-    test('an order with a majority of its era is never left behind, '
-        'whoever signs later ones; one without it is, once enough of the '
-        'others signed later ones', () async {
+    /// The release of the first span of A1's number 1, voted for by [who].
+    Future<PyramidRecord> release(
+      PyramidState st,
+      List<String> who, {
+      int? at,
+    }) async {
+      final PyramidRecord r = PyrLedger.releaseOf(
+        pyramid: w.py,
+        slot: '${w.id('A1')}|1',
+        prev: '',
+        at: at ?? st.treasurerEraStart,
+      );
+      return signed(r, who);
+    }
+
+    test('a span of a number is split only when no order of it can reach a '
+        'majority whoever signs; nothing frees it but a release most '
+        'treasurers vote for', () async {
       final PyramidState st = w.fold(<PyramidRecord>[], now: start);
       expect(st.treasurersAt(start), hasLength(8));
-      // Eight treasurers, five needed: three may move on.
+      final List<String> t = st.treasurersAt(start);
+      // Eight treasurers, five needed.
       final PyramidRecord counted = await signed(
         await order(start, 'A1', 'B1', 1, 1),
         <String>['S', 'A', 'B', 'A1', 'A2'],
@@ -484,14 +644,14 @@ void main() {
         await order(start + 1, 'A1', 'X', 1, 1),
         <String>['B1', 'X', 'Y'],
       );
-      expect(PyrLedger.passed(counted, <PyramidRecord>[later], st), isFalse);
+      expect(PyrLedger.isSplit(<PyramidRecord>[counted, later], t), isFalse);
+      // Four and three, A2 has signed nothing: the four may still count.
       final PyramidRecord four = await signed(
         await order(start, 'A1', 'B1', 1, 1, nc: 'four'),
         <String>['S', 'A', 'B', 'A1'],
       );
-      // Three moved on: four plus the three can never be five... unless
-      // one of the three signed both, which is proof against it.
-      expect(PyrLedger.passed(four, <PyramidRecord>[later], st), isFalse);
+      expect(PyrLedger.isSplit(<PyramidRecord>[four, later], t), isFalse);
+      // Three and four, Y has signed nothing: the four may still count.
       final PyramidRecord three = await signed(
         await order(start, 'A1', 'B1', 1, 1, nc: 'three'),
         <String>['S', 'A', 'B'],
@@ -500,20 +660,100 @@ void main() {
         await order(start + 1, 'A1', 'X', 1, 1, nc: 'moved'),
         <String>['A1', 'A2', 'B1', 'X'],
       );
-      expect(PyrLedger.passed(three, <PyramidRecord>[moved], st), isTrue);
-      // Only later ones count: an earlier order never frees a later one.
-      expect(PyrLedger.passed(moved, <PyramidRecord>[three], st), isFalse);
-      // Those who moved on are not caught; who signed both while the first
-      // could still count is.
-      final PyrLedger l = PyrLedger()
-        ..merge(three)
-        ..merge(moved)
-        ..merge(await signed(moved, <String>['S']));
-      expect(l.compute(st).cheaters, isEmpty);
+      expect(PyrLedger.isSplit(<PyramidRecord>[three, moved], t), isFalse);
+      // Y signs a third order: none of them can reach five any more.
+      final PyramidRecord third = await signed(
+        await order(start + 2, 'A1', 'A2', 1, 1, nc: 'third'),
+        <String>['Y'],
+      );
+      final List<PyramidRecord> split = <PyramidRecord>[three, moved, third];
+      expect(PyrLedger.isSplit(split, t), isTrue);
+      final PyrLedger l = PyrLedger();
+      split.forEach(l.merge);
+      // Four votes are not enough: the span stays, nothing counts.
+      l.mergeRelease(await release(st, <String>['S', 'A', 'B', 'A1']));
+      expect(l.compute(st).releases, isEmpty);
+      // The fifth: the span is left behind; the order after the release
+      // counts, signed by those who signed the orders before it.
+      l.mergeRelease(await release(st, <String>['A2']));
+      final PyrLedgerView v = l.compute(st);
+      final String rel = v.releases['${w.id('A1')}|1']!;
+      expect(v.counted, isEmpty);
+      final PyramidRecord after = await signed(
+        await w.rec(
+          PyrT.transfer,
+          start + 3,
+          <String>['A1'],
+          <String, dynamic>{
+            'from': w.id('A1'),
+            'to': w.id('B1'),
+            'amount': 1,
+            'seq': 1,
+            'memo': '',
+            'rel': rel,
+          },
+        ),
+        <String>['S', 'A', 'A1', 'A2', 'Y'],
+      );
+      l.merge(after);
+      final PyrLedgerView again = l.compute(st);
+      expect(again.counted, <String>{after.id});
+      expect(again.leftBehind(three, st), isTrue);
+      expect(again.leftBehind(after, st), isFalse);
+      // Nobody signed two operations of one span.
+      expect(again.cheaters, isEmpty);
+      // Who signs two of one span is caught, whether they counted or not.
       final PyrLedger m = PyrLedger()
         ..merge(four)
         ..merge(await signed(later, <String>['S']));
       expect(m.compute(st).cheaters.keys, <String>[w.id('S')]);
+      // So is who votes for two releases of one span.
+      m
+        ..mergeRelease(await release(st, <String>['S', 'B']))
+        ..mergeRelease(await release(st, <String>['B'], at: start));
+      expect(
+        m.compute(st).cheaters.keys,
+        unorderedEquals(<String>[w.id('S'), w.id('B')]),
+      );
+    });
+
+    test('two dishonest treasurers of eight get two orders of one number '
+        'counted, as they could before; they are named, and they cannot '
+        'release a number one order took', () async {
+      final PyramidState st = w.fold(<PyramidRecord>[], now: start);
+      final List<String> t = st.treasurersAt(start);
+      // A and B sign both; three honest ones sign each.
+      final PyramidRecord x = await signed(
+        await order(start, 'A1', 'B1', 1, 1, nc: 'x'),
+        <String>['S', 'A1', 'A2', 'A', 'B'],
+      );
+      final PyramidRecord y = await signed(
+        await order(start + 1, 'A1', 'X', 1, 1, nc: 'y'),
+        <String>['B1', 'X', 'Y', 'A', 'B'],
+      );
+      expect(PyrLedger.isFinal(x, st), isTrue);
+      expect(PyrLedger.isFinal(y, st), isTrue);
+      // A phone that holds only one counts it; one that holds both counts
+      // the earlier, and names the two.
+      expect((PyrLedger()..merge(y)).compute(st).counted, <String>{y.id});
+      final PyrLedger both = PyrLedger()
+        ..merge(x)
+        ..merge(y);
+      final PyrLedgerView v = both.compute(st);
+      expect(v.counted, <String>{x.id});
+      expect(v.cheaters.keys, unorderedEquals(<String>[w.id('A'), w.id('B')]));
+      // One dishonest treasurer alone gets no second order to a majority.
+      final PyramidRecord z = await signed(
+        await order(start + 2, 'A1', 'Y', 1, 1, nc: 'z'),
+        <String>['B1', 'X', 'Y', 'A'],
+      );
+      expect(PyrLedger.isFinal(z, st), isFalse);
+      // No honest treasurer votes to release a span with an order that
+      // counts, and the two alone release nothing.
+      expect(PyrLedger.isSplit(<PyramidRecord>[x, y], t), isFalse);
+      both.mergeRelease(await release(st, <String>['A', 'B']));
+      expect(both.compute(st).counted, <String>{x.id});
+      expect(both.compute(st).releases, isEmpty);
     });
 
     test('no balance passes the limit, however many treasurers sign: the '
