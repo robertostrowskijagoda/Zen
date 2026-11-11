@@ -53,8 +53,12 @@ others who look for it, so popular pebbles get easier to find. You can turn
 this off: Settings → Network and service → **Serve collected pebbles**.
 
 **Found it!** When you collect a pebble whose author is your friend, Zen
-quietly tells them someone found it; the pebble's screen shows the author
-how many people did.
+quietly tells them someone found it, in a note signed with your account
+and sent from your own device; the pebble's screen shows the author how
+many people did. A finder counts once per pebble, only from a device of
+the account that signed the note, and within a daily limit; a note
+passed on by someone else, or from an account the author's phone does not
+know, does not count.
 
 **Taking one back.** The author can **retire** a pebble: keepers stop
 handing it out; people who collected it keep their copy.

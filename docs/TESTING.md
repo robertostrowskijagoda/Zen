@@ -152,10 +152,12 @@ expect(w['B'].messageNotices, hasLength(1));      // one notification
 | `assertDelivered(to, text, from:, within:)`, `assertNotDelivered`, `until(condition, within:)` | wait on the virtual clock; a failure prints what is still waiting where (`describe()`) |
 | `phone.textsFrom(x)`, `thread(x)`, `deliveryOf(x, text)`, `groupTexts` | what is in a phone's chats and the sender's delivery mark |
 | `phone.messageNotices`, `phone.shownMessageNotices` | every notification a phone posted for a message (the app's and the locked service's), and those still in the shade |
-| `phone.appTransport` | the phone's transport for other services (the recovery circle, the ledger): sends through its outbox and mailboxes, receives what its engine hands to the app |
+| `phone.appTransport` | the phone's transport for other services (the recovery service, the ledger): sends through its outbox and mailboxes, receives what its engine hands to the app |
+| `phone.appKeeps`, `phone.mirrored` | what the app does with each frame its engine hands over: keeps it (the default), fails to keep it (a write that failed; the relay layer hears so and the frame comes again) or never answers (an app stuck on it); and what a copy from another device of the account does here (the default is the app's own, a test can stand in for an older version) |
 
 Not simulated: Yggdrasil itself (sessions, routing, real delays), presence
-pings, the platform (wake locks, alarms, radios) and the screens. With the app
+pings (the rounds of locked phones have a simulation of their own, below),
+the platform (wake locks, alarms, radios) and the screens. With the app
 on the screen the social controller leaves messages for the chat screen, which
 this world has none of, so phones stay in the background. The frames a phone
 receives reach its engine and controller one at a time and are awaited
@@ -203,10 +205,44 @@ header, and that nothing else brings it in.
 | `test/relay_engine_test.dart` (group "phones as mailboxes while locked"), `test/locked_background_inbox_test.dart` (group "one notice per message"), `test/runtime_route_bridge_test.dart` | locked phones as friends' mailboxes (mail for an offline friend held and handed over with the sender gone, taken over by the app after unlock), one notice per message on a locked phone, where a tapped notification leads |
 | `test/encounters_test.dart`, `test/open_to_meet_test.dart`, `test/food_share_test.dart`, `test/graph_model_test.dart`, `test/dating_test.dart` | "Passed by", "open to meet", food sharing, graph modes and routes, dating intentions and filters |
 | `test/github_update_test.dart`, `test/sound_assets_test.dart` | GitHub release check and verified self-update, sound files |
+| `test/message_keeping_test.dart`, `test/message_presence_test.dart`, `test/message_clock_order_test.dart`, `test/background_signal_queue_test.dart`, `test/typing_indicator_test.dart` | on the simulated friends: a message is confirmed to its sender only once it is in the chat (an app killed after the relay layer took it, a write that failed once, an app that never answers), writing to a friend or mail from a mailbox does not make anyone "just seen", a late copy does not move the chat list, a friend's clock an hour behind does not put the answer above the question (also in a group), the background queue's cap and what it keeps, "pisze…" ending by itself |
+| `test/read_receipts_test.dart` | "Przeczytano" only for what the friend opened: one receipt per reading, all messages up to the one read, a receipt naming another chat's message changes nothing; a chat or a group read on one device of the account is read on its others, a device on 1.16.4 left as it was |
+| `test/chat_message_removal_test.dart`, `test/chat_history_removal_test.dart` | a message deleted for everyone, disappeared or edited leaves no words in notifications, the notification list or the queue; changes that come before their message; chunks after a deletion or a cleared chat bring nothing back, also from another device of the account; leaving, declining or "Wyczyść historię" in a group removes its chat, files and notifications |
+| `test/group_membership_test.dart` | who left a group stays out on every phone, in any order of leaves, lists and invitations; a later invitation brings them back; only the leaver can say they left; a leave from a Zen before 1.16.5 (no time) |
+| `test/call_second_caller_test.dart`, `test/call_missed_test.dart`, `test/call_video_codecs_test.dart`, `test/call_video_trace_test.dart` | a second caller hears "busy" and the call already there goes on (ringing out, ringing in, in the background, talking, two calling each other at once, group calls); a ring nobody answered is told to the callee once, through mailboxes, from friends only, never ringing; VP8 first in every offer and answer, also where the platform refuses the preferences; the `Call video` lines of the technical log, with no address, credential or fingerprint |
+| `test/relay_backlog_test.dart`, `test/locked_mailbox_kit_writes_test.dart` | two weeks and more of a small circle that barely uses Zen on the real relay engines: what "Czeka na doręczenie" and "Przechowujesz dla znajomych" hold at the end, the kinds where only the newest matters, a friend's device taken for gone, a receipt reaching a sender who was away, mail for a former friend going; a locked phone's mailbox kit written once per burst |
+| `test/locked_presence_sim_test.dart`, `test/locked_presence_open_sim_test.dart` | the real `LockedReceiver` of several locked friends on a virtual clock (frames 80 ms on the way, a phone awake 5 s from its own round and 3 s from a frame, phones on 1.16.4 modelled as that version pinged and answered): how often they wake each other (each number with its "before"), lost pings, silent friends, a clock set back, `presence.zbox` writes; and what the first screen shows of friends the moment Zen opens after a lock |
+| `test/locked_alert_conformity_test.dart` | each frame ends the same on a locked phone as in the app: rings, call cards and message notices from one shared decision, a flood of mentions from one member |
+| `test/account_recovery_friends_test.dart`, `test/password_vault_recovery_test.dart`, `test/account_sync_pruning_test.dart`, `test/ledger_contacts_backup_test.dart` | key pieces at close friends (the account password's rules, the thresholds 2/3/4, recovery end to end with three close friends, pieces sent again until confirmed, former holders, a removed friend, a helper on a new phone, a stop from a device cut off, a helper on 1.16.4); passwords and notes back with every way an account comes back, the newest copy taken, a revoked device given none, a key copy with no friend at all; the state log started over so a deleted password or note leaves it; friends and groups saved in parts above some 240 friends and the private log started over within its bound |
+| `test/password_vault_test.dart`, `test/password_generator_test.dart`, `test/password_csv_import_test.dart`, `test/password_match_test.dart`, `test/password_screens_test.dart`, `test/password_autofill_test.dart` | "Hasła": the store's limits, earlier versions, edits on two devices, a newer or damaged vault left as it is, no secret in a debug string; the generator (classes, no modulo bias, strength); CSV files of Chrome, Edge, Firefox, Bitwarden, KeePass and KeePassXC, broken files and random bytes; matching by exact host, registrable domain, port and package, look-alike pages getting nothing; the screens behind the app password; the autofill picker (nothing leaves Zen without an unlock and a pick, a lock closes it) with the Android side faked |
+| `test/secure_clipboard_test.dart` | a copied secret leaves the clipboard at a lock and at the end of its time in the background, without the clipboard being read; a failed marked copy copies nothing and says so; the plain clipboard where the system has no marked one |
+| `test/pyramid_era_seal_test.dart`, `test/pyramid_treasury_test.dart`, `test/pyramid_court_anonymity_test.dart` | on the pyramid's simulated world: operations dated into a sealed era count nowhere, late changes of the treasurers undo no payment, two seals of one era; a number split between orders freed by a release, a dishonest treasurer among six, what treasurers keep; the court's one-time cards (two distinct cards decide, one judge counts once, a card of one matter counts in no other, nobody outside the court holds one) |
+| `test/profile_photo_gif_test.dart`, `test/diagnostics_go_crash_accounts_test.dart`, `test/ledger_device_record_key_test.dart` | a GIF profile photo keeps moving, HEIC read by the phone's own decoder (faked), animated WebP and PNG made GIFs; the Go crash file given to the bridge only for a listed account; a key named in a friend's device record is a hint from that friend's account, never a pin |
 
 A new scenario: build a world, perform actions, `await w.net.run()`, check the
 state at a **different** person than the one who acted, and finally
 `expect(w.views().values.toSet(), hasLength(1))`.
+
+The shared wake of a locked phone (`test/zen_wake_test.dart`, group "a
+locked phone, its alarms as Android delivers them") runs the real receiver,
+the look around, the update check's work and the link check for hours on a
+virtual clock, with its alarms in one of two models: every alarm on time,
+or as Android 12 and later delivers them. In the second an inexact alarm
+gets a window of three quarters of its delay (from 10 s on) and goes off
+at the window's end unless the phone wakes earlier for anything else,
+which takes along every alarm whose window has begun; an exact alarm goes
+off on time. Other apps' wakes (0, 12 or 60 an hour) and the token change
+of a phone shown nearby (an exact alarm just past every 10-minute
+boundary) are part of the model. The tests count Zen's own wakes an hour
+and the longest gap between rounds, with the numbers before this version
+beside them (shown nearby: about 8 wakes an hour and rounds up to 17.5
+minutes apart before, 6 now; not shown nearby: rounds up to 17 minutes
+apart before, every 10 minutes now). Before 1.16.5 a locked phone's hours
+were counted on alarms that all came on time, which hid both gaps. The
+model is a model:
+how a real phone spaces its alarms in Doze (Android 8 to 11) and whether
+one alarm just before the token change really shares its wake are checked
+on a phone ([RELEASES.md](RELEASES.md), section 3).
 
 ## 2. Several apps on one computer
 
@@ -504,7 +540,7 @@ cover that and the slow-start screen.
 | Job | Where | What it does |
 |---|---|---|
 | What to run | Ubuntu | decides whether a pull request changes code or only documentation, and whether the Linux build runs in the prebuilt image (`tool/ci/ci_plan.py`, below) |
-| Docs and site | Ubuntu | every run: no broken link in the Markdown files (`tool/ci/check_links.py`), the release contract (`tool/release.dart check`), the Python tests of `tool/ci` and that every screenshot of the website is there (`tool/screenshots.dart --check`); when only documentation changed, also the app's tests that read it (`legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`) |
+| Docs and site | Ubuntu | every run: no broken link in the Markdown files (`tool/ci/check_links.py`), the release contract (`tool/release.dart check`), the Python tests of `tool/ci` and that every screenshot of the website is there (`tool/screenshots.dart --check`); when only documentation changed, also the app's tests that read it (`flat_door_link_test.dart`, `legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`, `security_hardening_test.dart`) |
 | Format and analyze | Windows | `dart format` (no changes) and `flutter analyze` |
 | Tests (1 of 6) … (6 of 6) | Windows | the app's tests (including translations), a sixth of the files each, at the same time (`dart run tool/test.dart --shard N/6`, see "Running the tests") |
 | Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
@@ -711,7 +747,8 @@ on the real Android): `./gradlew :app:connectedDebugAndroidTest
 They check what `ZenFileProvider` hands out (only the shared installer and
 the QR sticker, readable through their content address) and which of Zen's
 components other apps may start (the launcher entries and "Otwórz w Zen";
-the file provider never). Gradle installs the app and its test app and
+the file provider never; the autofill service only by the system, and its
+picker by nobody else). Gradle installs the app and its test app and
 takes both off again.
 
 The start test is built into the app (`flutter build apk -t
@@ -814,8 +851,12 @@ something be read again); those are named in the pull request.
 ### 11.5 Kotlin unit tests (`android/app/src/test`)
 
 JVM tests (JUnit) of the Kotlin code with no Android in it: the
-power-button alarm's counting (`PowerPressCounter`) and where a link Zen
-claims goes instead of back to Zen (`linkTargetWithoutZen`). The CI job
+power-button alarm's counting (`PowerPressCounter`), where a link Zen
+claims goes instead of back to Zen (`linkTargetWithoutZen`) and which
+fields of a login form autofill takes for the login and the password
+(`ZenAutofillFieldsTest`: hints first, a new password or a one-time code
+is no password to fill, two password fields offer nothing, a page's
+address counts only in a known browser). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
 
@@ -861,6 +902,18 @@ tests leave behind; a new class in its report is worth a look.
   linking and starting; playback is checked by hand.
 - The app has no "corrupted data sends no frame" test (damaged files:
   section 8); random frames from the network are section 11.2.
+- Of 1.16.5, only a phone shows: video between two Android phones (the
+  VP8 preference is tested on descriptions, not on hardware codecs); the
+  autofill service with real apps and browsers (of the Kotlin side only
+  the reading of a form's fields has unit tests and the manifest an
+  emulator test, section 9; the picker is tested with the Android side
+  faked); the phone's own
+  decoder for HEIC photos (faked); the clipboard emptied from the
+  background; the alarm windows of a real phone (section 1, the model);
+  the Android service taking over from a hung app; key pieces and the copy
+  with friends end to end between real phones (simulated between
+  services only). [RELEASES.md](RELEASES.md), section 3, lists what to
+  try before a release.
 - The harness works only in debug builds.
 - Apps on one computer share one link: network splits are tested in the
   simulator.

@@ -1,6 +1,6 @@
 # Protocol specification
 
-*A draft, from the code of Zen 1.11.0 and later. Written 20.10.2026 by reading the code, revised 21.10.2026 and 22.10.2026. Not a standard; the code is the
+*A draft, from the code of Zen 1.11.0 and later. Written 20.10.2026 by reading the code, revised 21.10.2026, 22.10.2026 and 11.11.2026 (1.16.5). Not a standard; the code is the
 reference. Markers: **[V]** read directly in code and consistent; **[P]**
 partly verified (shape known, details not all read); **[?]** uncertain or not
 read - check the file named. Field names are the JSON keys on the wire.
@@ -211,15 +211,21 @@ is not sealed (no compatibility with older builds).
   the sender's record) and the sender starts a new session. Sessions
   rotate after 1 hour or 2^24 frames of either kind; a receiver keeps 4 per
   peer and opens at most 16 new ones (sessions and challenges) a minute per
-  peer. KEM work other nodes can cause has two budgets: peers this node
-  writes to (it holds frames for them or made a session to them) and peers
-  whose key the app vouched for share 200/s (burst 400; a phone 40/s, burst
-  200); every other address shares 20/s (burst 40; a phone 4/s, burst 20),
-  so strangers asking for keys never hold up a friend's session. A challenge
-  given from the strangers' budget pays for the first session opened with
-  it as well. A frame of a session from an address the node has neither a
-  peer nor a pin for is answered with `N` "want" (at most 20/s in all), and
-  no peer is made for it. A receive session opens nothing after 2 hours; a
+  peer. **Who is known:** the app names the addresses it knows to the bridge
+  (`setKnown`, at most 4096, again after every node start): its accepted
+  friends and the devices of this account and of friends' accounts that
+  proved themselves (`ledger_providers.dart`). Nothing else makes an
+  address known: not being answered (the app answers anyone's `rly_ack`),
+  not being written to, not a vouched key. KEM work other nodes can cause
+  has two budgets: known addresses share 200/s (burst 400; a phone 40/s,
+  burst 200); every other address shares 20/s (burst 40; a phone 4/s,
+  burst 20), so strangers asking for keys never hold up a friend's session.
+  A challenge given from the strangers' budget pays for the first session
+  opened with it as well. Peer entries of addresses that are not known have
+  room of their own (4096, the one used longest ago making room); a known
+  address's entry is never pushed out. A frame of a session from an address
+  the node has neither a peer nor a pin for is answered with `N` "want" (at
+  most 20/s in all), and no peer is made for it. A receive session opens nothing after 2 hours; a
   challenge starts at most 32 sessions (then the sender is given a new one)
   and remembers their ids for as long as it is kept, so the recorded first
   frame of a session that is gone starts nothing again. A forced pin (or a
@@ -227,22 +233,46 @@ is not sealed (no compatibility with older builds).
   frame carries the fingerprint of the key its session was made with
   (`senderKey`).
 - **Pins:** the device key is pinned per address on first sight; a record
-  with another key for a pinned address is refused. New pins from records
-  come at most 120 a minute. A pin becomes firm once a session with the
-  device opened (either way) or when the app gave it; a device whose record
-  found no new pins left is pinned when its session opens (at most 120 a
-  minute too). At 16384 the pin seen longest ago among those that are not
-  firm makes room; a stranger's record never pushes out a firm one. The app
-  keeps the pins (sealed, `runtime/yggdrasil.pins`) and hands them back
-  after a restart (`YggPqPinsJson` / `YggPqSetPinsJson`). It also pins keys
-  a hybrid-signed hello or device record names before any contact (3.3);
-  with `keep` a different pin stays and is reported as a conflict, and such
-  a vouch never pushes out another pin (with the pins full it is kept as a
-  hint). Keys a friend's friend list names are only hints (`hint`, at most
-  8192): a hint never moves a pin or ends a session; the first record of the
-  device at that address decides (a hint it confirms is pinned at once, one
-  it contradicts is dropped), and a hint that names another key than the
-  pin is reported as a conflict. Every received signal carries the fingerprint
+  with another key for a pinned address is refused. A pin is of one of
+  three kinds:
+  - *loose*: only a record backs it. New loose pins come at most 120 a
+    minute and have a quarter of the table (4096 of 16384) of their own,
+    the one seen longest ago making room; a loose pin unseen for 14 days
+    expires (`pqLoosePinTTL`).
+  - *firm*: a session with the device opened here (either way), which only
+    the holder of the device key can make. A session pins its device even
+    with no new pins left, pushing out a loose pin or the firm one seen
+    longest ago.
+  - *vouched*: the app vouched for it (a hello signed by the device's hybrid
+    key came over a session made with that key, 3.3). A vouch pushes out a
+    loose pin or the vouched one seen longest ago, never a pin a session
+    proved; with no room it is kept as a vouched hint (at most 1024), which
+    refuses a record naming another key. With `keep` (the usual vouch) a
+    different pin stays and is reported as a conflict; without it (a hello
+    the device signed contradicts the session it came over) the key
+    replaces the pin and everything made with the old one.
+
+  A record never pushes out a firm or vouched pin, and a known address's
+  pin goes only when it is loose and expired. The app keeps the pins with
+  their kind, when each was last seen (to the hour) and the known addresses
+  (sealed, `runtime/yggdrasil.pins`, version 2), and hands them back after
+  a restart (`YggPqPinsJson` / `YggPqSetPinsJson`); a pin is firm or
+  vouched after a restart only when it was so before. Pins kept by 1.16.4
+  and earlier (all saved as firm, with no time) come back loose and expire
+  three days later (`pqLegacyPinGrace`) unless the device confirms them
+  with a record or a session of the same key.
+- **Hints:** what someone else says about an address is only a hint
+  (`importHints`, at most 8192, the one given longest ago making room): the
+  keys a friend's friend list names (`friend_list` `k`, at most 2000
+  addresses per friend in all, kept across restarts in `meet/vouched`) and
+  the keys a friend's device records name (`device` in `acts`, at most 16
+  per account). A hint never moves a pin, never ends a session and never
+  keeps the device itself out; the first record of the device at that
+  address decides (a hint it confirms is pinned at once, one it
+  contradicts is dropped). A hint that names another key than the pin is
+  only logged, never shown as a warning. Hints are kept per source and go
+  when their source does: a friend removed takes back what only that
+  friend named (`keepSessionKeyHintsOf`, `dropHints`). Every received signal carries the fingerprint
   (SHA-256 of the device public key, hex) of the sender's key
   (`SignalTransportFrame.senderKey`); `YggGetNodeInfo` gives the own one as
   `pqKey`.
@@ -293,7 +323,11 @@ device keys, label `zen.local.v1`); a stranger has none.
   Wi-Fi Direct and Bluetooth are on unless turned off, Multipeer is off
   until the person turns it on; a native transport runs only while there
   is a device to link with. Phones use Wi-Fi interfaces only, never
-  mobile data.
+  mobile data. Where Bluetooth streams are polled (Linux), they are polled
+  quickly only while a stream is expected (a friend's device seen nearby
+  that is not linked yet and is not being dialled); a stranger's Zen
+  device, or a friend's already linked, seen again and again, is no such
+  sign.
 - **Adverts** carry a Bloom filter with one tag per device the sender links
   with (`HMAC(tagKey, "adv" | 5-minute slot | salt)`, a fresh random salt
   every time, filter size in steps of 16 bytes), so to anyone without the
@@ -323,6 +357,49 @@ device keys, label `zen.local.v1`); a stranger has none.
 - Limits: 2048 devices, 16 streams, 8 handshakes at once, 2 per source,
   beacon rate limits per sender and in all.
 
+### 1.7 Local interfaces and the update check [V]
+
+None of these is a frame between Zen devices.
+
+- **Single-instance port** (`single_instance_guard.dart`, computers only):
+  the first Zen process binds TCP `127.0.0.1:47821`; a later launch asks
+  it to come to the front (and to open the file the launch was given) and
+  exits. Both sides prove a session secret: 32 random bytes, new at every
+  claim of the port, in `single_instance.key` in the app's data folder
+  (private to the user from its first byte, deleted when the port is
+  released). The secret never crosses the socket. Lines (UTF-8, `\n`, at
+  most 16 KiB, 2 s per step), all starting `ZEN-SINGLE-INSTANCE/3`:
+  launch `HELLO <nonce>`; owner `PROOF <nonce> <mac>` with `mac` =
+  HMAC-SHA256(secret, `"zen.single-instance.owner <launch nonce> <owner
+  nonce>"`); only when that checks out, launch `ACTIVATE <mac> [<file>]`
+  with `mac` = HMAC-SHA256(secret, `"zen.single-instance.launcher <launch
+  nonce> <owner nonce> <file>"`), `file` the base64url of the path; owner
+  `ACK`. Nonces are 16 random bytes in hex. A port held by something that
+  cannot prove the secret is not taken for Zen: the launch starts as it
+  would beside an unrelated program and hands nothing over. A running Zen
+  still answers the request of 1.16.4 and earlier (`ZEN-SINGLE-INSTANCE/2
+  ACTIVATE <secret> [<file>]`, the secret in the clear) when it carries
+  the right secret, but never sends it; so a new launch beside a running
+  1.16.4 starts without the single-instance service.
+- **Update check** (`update_notice.dart`, `background_update_check.dart`):
+  the app asks GitHub for the latest release once the last answer, whoever
+  got it, is older than 15 minutes (`kGithubCheckEvery`: at start, back on
+  the screen and while it stays open), the Android background service the
+  same way on wakes that come anyway (`kBackgroundGithubCheckEvery`). After a
+  failed ask (not reached, no answer, an error answer) the service waits 15
+  minutes, then twice as long after each further failure in a row (30, 60,
+  120, at most 240 minutes, `kBackgroundUpdateRetryAtMost`), and also any
+  wait GitHub asked for (a rate limit). The count of failures in a row
+  (`failures`, at most 32) and the time of the last one (`failedAt`) are
+  kept in `update_check.json`, so a restarted service keeps the wait; the
+  first answer clears both. A last failure dated in the future, or a wait
+  longer than the period, is taken for a clock set back and holds nothing
+  back; a check the person starts never waits.
+- **Android autofill** (`ZenAutofillService.kt`, `password_autofill_bridge.dart`):
+  the system's autofill service talks only to the app on the same phone
+  over the method channel `zen/autofill`; nothing of it goes on the
+  network.
+
 ## 2. Frame types
 
 Direction is sender -> recipient unless stated. "Reliable" means the type is in
@@ -332,12 +409,15 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 
 | type | Fields | Notes |
 |---|---|---|
-| `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen (once more when the node first reaches the mesh, if that round went out before it did), at once to a target just added, then in rounds every 2 min (`kPresencePingInterval`): the first two rounds after the app comes to the screen go to every target; after them a friend online, one not heard from yet in this run, one whose state changed since their last ping and anyone who is no friend get every round, a friend "in the background" every second round (4 min: a locked phone answers one contact at most every 3 min 30 s anyway) and a friend not heard from for longer than 25 min (`kPresenceBackgroundFor`) every third (6 min; `presencePingEvery`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
+| `ping` | presence: `state`, `lo`; optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen (once more when the node first reaches the mesh, if that round went out before it did), at once to a target just added, then in rounds every 2 min (`kPresencePingInterval`): the first two rounds after the app comes to the screen go to every target; after them a friend online, one not heard from yet in this run, one whose state changed since their last ping and anyone who is no friend get every round, a friend "in the background" and one whose frames carry no `state` (they hide it from this person) every second round (4 min: a locked phone answers one contact at most every 3 min 30 s anyway), and a friend whose last word was `"asleep"` or who was not heard from for longer than 25 min (`kPresenceBackgroundFor`, counted from the start of the run when nothing came from them) every third (6 min; `presencePingEvery`). A friend's own pings are always answered. Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. Not answered unless the sender is a friend or group member. |
 | `pong` | presence: `state`, `lo`; hello fields, version fields | Reply. Hello fields (friends who see presence): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 3 min 30 s (`kLockedPongEvery`: the first ping after a quiet while at once, then every other one), with no presence or hello fields; an open Zen answers a weak acquaintance exactly so, and as rarely. |
 | `away` | presence: `state`, `lo` | A one-way presence announcement, despite its name for any change of the sender's state: leaving the screen (`"background"`, or `"asleep"` on an iPhone iOS suspends), coming back before the next round (`"foreground"`), quitting Zen on a computer (`"asleep"`), and what was held back while the node had no network, once it has. Sent only to friends who see presence and have Zen open now (their last `ping`, `pong` or `away` in this run, within 5 min, said `"foreground"`), and only when they were last told another state; at most one per state per friend every 30 s (`kPresenceNoticeEvery`), changes within 2 s told as one (`kPresenceNoticeDelay`). One held back goes when its time is over, unless the state is back to what they were told. An iPhone's `"asleep"` goes to every friend who sees presence (their mail should go to the mailboxes now), to one without Zen open at most every 4 min (`kPresenceAwayEvery`). Never mailboxed; ignored by a locked phone (which says `"background"` in its pongs, so it never gets one). A 1.13 Zen applies whatever `state` an `away` names. |
-| `typing` | `isTyping` (bool) | Real-time, not reliable. |
+| `typing` | `isTyping` (bool) | Real-time, not reliable. The sender says `false` when the field empties, a message goes or Zen leaves its screen; the receiver shows "pisze…" for 6 s after the last `true` (`typingShownForProvider`), so a `false` that never came does not leave it shown. |
 
 Presence fields ride on the frames above; nothing is polled only for them.
+A message counts as a sign that its sender is there only when it was written
+at most 2 minutes before it arrived (one that waited in a mailbox or a
+queue says nothing of now); writing to a friend never marks them as seen.
 They go only to accepted friends who may see statuses (not to a friend at
 the "weak acquaintance" level, and never to group members or strangers); to
 anyone else a `ping` or `pong` carries neither field.
@@ -369,6 +449,41 @@ online. A locked Android phone takes `state` and `lo` for its pongs from a
 presence kit the app writes, sealed with the background key, whenever Zen
 leaves the screen (`presence-kit.zenbg`: the friends who may see presence
 and when Zen was last open).
+
+**Rounds of a locked phone** (`locked_receiver.dart`, `zen_wake.dart`):
+
+- The rounds keep to the ten-minute grid of the wall clock (`kWakeGrid`),
+  where the nearby token changes too (2.12), so friends' locked phones,
+  whose clocks follow the network's time, wake on the same boundaries and
+  a round's ping reaches a phone awake for its own. Where exact alarms are
+  allowed (or the phone is shown nearby, whose token alarm is exact) the
+  beat's wake is asked for 1 s before the token's alarm and shares its
+  wake; under Android's inexact alarm windows a wake is asked for early
+  enough that its window ends when it is due, so the rounds and the
+  20-minute looks keep their periods. A wall clock set back counts as a
+  round due.
+- A friend this phone told its status and heard theirs from (a ping and
+  its pong, either way) within the round's period is not pinged in that
+  round: one exchange counts for both phones, so two locked friends no
+  longer wake each other twice a round. A ping or pong lost leaves one side
+  without the other's word, and its next round pings again. A friend whose
+  word says Zen is on their screen is pinged every round.
+- A friend nothing came from for 30 min (`kLockedSilentAfter`) is pinged
+  every third round (`kLockedSilentRoundEvery`). The bookkeeping of the
+  rounds (who was told, heard and pinged) holds at most 2000 friends.
+- A wake with no network at all (flight mode, no signal) does not wait for
+  a link.
+- **Statuses kept for the app** (`presence.zbox`, sealed with the
+  background key): the newest frame of each friend (a friend's other
+  device counts as the friend). A change (a first frame, another state,
+  another last opening) is written at once; an unchanged status is written
+  again once the kept frame is 5 min old (`kKeptPresenceRefreshEvery`; 2 min
+  30 s for a friend online), and at once when the kept frame is 15 min
+  older than the newest (`kKeptPresenceStaleAfter`); what waits is written
+  when the receiver stops. When Zen opens, the app reads the file again
+  after the service stopped, shows each kept status as what it is worth by
+  now (aged from its frame), and never lets a kept status undo a newer one
+  it heard itself (log line `presence-kept`).
 
 Two more states are shown only by the receiver; the last state known is
 kept underneath and nothing is sent for them:
@@ -418,31 +533,82 @@ kept underneath and nothing is sent for them:
 | `message_chunk` | `msgId`, `chunkIndex`, `chunkCount`, `chunkData` (base64), + placeholder fields | Not reliable; has its own protocol. Never compressed (high-entropy). |
 | `message_chunk_ack` | `msgId`, `chunkIndex` | |
 | `message_ack` | `msgId` | Delivery acknowledgement of a message (reliable). |
-| `message_read` | `msgId` | Read receipt (reliable). |
+| `message_read` | `msgId` | Read receipt (reliable, latest-only, 3.1). Sent once per opening of the chat, naming the newest message of the friend's that was read: every message of the friend's up to it is read. Taken only when `msgId` names a message the receiver sent; only such a receipt shows "Przeczytano" under the receiver's own messages. |
 | `message_transfer_cancel` | `msgId` | Reliable. |
 | `transfer_offer` / `transfer_answer` | `transferId`, `description` (WebRTC SDP map), + file fields (`fileSize`, `fileName`, `mimeType`, `messageType`, ...) | File transfer over a WebRTC data channel [P]. |
 | `disappear_timer` | `groupId?`, `seconds` (0 = off), `at` | Reliable. Same `ttl` is carried by messages. |
-| `msg_react` | `msgId`, `groupId?`, `emoji` (<=16 chars; empty = taken back) | Reliable. One reaction per person per message. |
+| `msg_react` | `msgId`, `groupId?`, `author?`, `emoji` (<=16 chars; empty = taken back) | Reliable. One reaction per person per message. In a group `author` names the address of the message's author (2.4). |
 | `msg_edit` | `msgId`, `groupId?`, `text`, `at` (sender clock, ms) | Reliable. Taken only from the message's author, only for text, and only while `at` is within 25 h of the message (24 h + 1 h clock leeway). The earlier text is not kept. |
-| `msg_delete` | `msgId`, `groupId?`, `at` | Reliable. Taken from the author, or in a group from its creator as recorded by the receiver. The content and file go; a note stays; replies drop the quoted text. |
+| `msg_delete` | `msgId`, `groupId?`, `author?`, `at` | Reliable. Taken from the author, or in a group from its creator as recorded by the receiver. The content and file go (a file still on its way stops: no chunk is sent any more, and a chunk that comes late is acknowledged and dropped); a note stays; replies drop the quoted text; the notification that showed the message, its entry in the notification list and its copy in the background queue go, also while the phone is locked and on the account's other devices. A deletion of a message not here yet makes it gone before it comes: the message, when it comes, is acknowledged and never shown. An edit of a message not here yet waits for it; a reaction to one is dropped. |
+
+**Order in a chat.** `createdAt` is the sender's clock. A friend's message
+that came straight from them never goes above a message they are known to
+have had (one of theirs already there, or one from here they confirmed): a
+clock that runs behind would otherwise put the answer above the question.
+The receiver then keeps in memory how far behind that friend's clock runs
+and reads their next messages through it. What really was written earlier
+(a message that waited while this phone was away, a late copy) still goes
+where its time says, and a late copy never puts its older words at the
+top of the chat list.
 
 `msg_react`, `msg_edit` and `msg_delete` (like `message` and `disappear_timer`)
 are mirrored to the sender's other devices, which apply them as their own.
+A message that disappears (`ttl`), is edited, is deleted from one device or
+whose chat is cleared leaves no words behind either: its notification goes
+with it. A disappeared message is remembered with its author, so a late
+copy of it (a re-send, a mailbox, another device) does not bring it back.
+
+**Mirroring to the account's own devices** (`account_routing_transport.dart`):
+what one device sends of the types `message`, `disappear_timer`,
+`msg_react`, `msg_edit`, `msg_delete`, `message_read` and of
+`group_message` with `ttl` goes to the account's other devices as
+`acct_mirror {to, p}` (`to` the friend's address or `group:<id>`, `p` the
+payload), and they apply it as their own. A `message_read` copy marks the
+chat read there up to that message, with no unread count or notification
+left, and sends nothing to the friend. Groups have no read receipts: a
+device that read a group sends its other devices `acct_mirror {to:
+"group:<id>", p: {type: "group_read", groupId, msgId, author}}` naming the
+newest member's message read, and they mark the group read up to it.
+Devices older than 1.16.5 ignore a mirrored type they do not know.
+
+**Numbers and nesting from a peer** (`runtime_signal_parser.dart`): a number
+that is not finite, or lies beyond ±(2^53 − 1) (`kMaxSignalNumber`), and
+anything nested deeper than 16 levels is read as absent (in a list it
+becomes `null`, so the other items keep their places). A group file
+reference (`media`) is kept only with the fields that name and open the
+file, each of its own type and size, so no value a peer sends can
+drop a signal or make a message impossible to store.
 
 ### 2.4 Groups
 
 Groups are fan-out: the sender sends the frame to **each member** individually
-(at most 256 members, `kMaxGroupMemberCount`). Every group frame needs `groupId`
-(<=256 chars).
+(at most 256 people, the creator included, `kMaxGroupMemberCount`; a phone
+keeps no more of a longer list, so creating a group or adding someone past
+that is refused with a message on the phone that tries). Every group frame
+needs `groupId` (<=256 chars).
 
 | type | Fields | Notes |
 |---|---|---|
-| `group_invite` | `groupId`, `groupName` (<=100), `description` (<=1000), `memberAddresses`, `avatarPreset`, `senderName`, `inviteId` | Reliable. `inviteId` is a nonce: re-sends of the same invitation do not revive a declined group. |
-| `group_invite_ack` | `groupId` | Reliable. |
-| `group_message` | `groupId`, `groupName`, `msgId`, `text` (<=64k chars), `senderName`, `timestamp`, `ttl`, `re`, `fwd`; for a file also `messageType`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs` and either `attachmentData` + `attachmentEncoding` (inline, files <=64 KB, or <=1 MB while no block store runs) or `media` (`{id, k, n, mime}`: the reference of `lg_blob_*` blocks, files <=24 MB) | Reliable. A member fetches `media` blocks with `lg_blob_want` from the sender or any other member; a member's device answers such requests from non-friends too. |
-| `group_leave` | `groupId` | Reliable. |
+| `group_invite` | `groupId`, `groupName` (<=100), `description` (<=1000), `memberAddresses`, `memberNames?`, `avatarPreset`, `senderName`, `inviteId`, `added?`, `at?`, `left?` | Reliable. `inviteId` is a nonce: re-sends of the same invitation do not revive a declined group. Also a member-list update: one that adds a person names that address in `added`, stamped `at` (the adder's clock, ms) and lists only the adder and the newcomer, so the others take the newcomer even when the adder's list is a step behind. The members' list sent to someone who just joined carries `left`: who left and when (address → leaver's time, at most 256). Only the creator's list is taken whole; any other member brings in one person per update (from a Zen before 1.16.5, the one unseen address of its list; a list with more is taken from nobody). |
+| `group_invite_ack` | `groupId`, `joined?` (`true`: accepted, not only arrived) | Reliable. |
+| `group_message` | `groupId`, `groupName`, `msgId`, `text` (<=64k chars), `senderName`, `timestamp`, `ttl`, `re`, `fwd`; for a file also `messageType`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs` and either `attachmentData` + `attachmentEncoding` (inline, files <=64 KB, or <=1 MB while no block store runs) or `media` (`{id, k, n, mime}`: the reference of `lg_blob_*` blocks, files <=24 MB) | Reliable. A member fetches `media` blocks with `lg_blob_want` from the sender or any other member; a member's device answers such requests from non-friends too. A text longer than members keep (64k characters) is refused on the sender's phone, not cut. Members choose `msgId` themselves: a message whose id another member's message already holds here is kept under a key of the sender's own (`<msgId>#` + the first 16 hex of SHA-256 of the author's address), never dropped as a copy; only the same author's message under the id is a copy. |
+| `group_leave` | `groupId`, `at?` (the leaver's clock, ms) | Reliable. Only the leaver's own `group_leave` takes it out of a list. A leave stamped before the leaver was last added by name is an older one and changes nothing. A phone that left or declined a group answers a message of it from someone who still counts it as a member with its leave again (at most every 6 h per member and group, never to a blocked person, only for a group it was in or invited to). Leaving or declining removes the group's chat, files and notifications on the leaver's phone. |
 | `group_post` | `groupId`, a board post `{id, a author, n name, x text <=2000, t created, v version, d? removed, m? photo reference {id, k, n, mime}}` | Reliable. A new, edited or removed post; the newest `v` wins. Photos up to 8 MB as `lg_blob_*` blocks. At most 20 new posts per member and group an hour; a board keeps 300. |
 | `group_board_have` / `group_board_put` | `groupId`, post ids and versions / up to 50 posts | Real-time sync between members: what I have, and the asker's missing posts written by the one answering. |
+
+**Who is in a group** (`group_profile.dart`, `departedAt`, `addedAt`): each
+phone keeps per group who left and when, and who was added by name and
+when (each at most 256, the newest). No member's list brings back someone
+who left, the creator's neither: a list carries no time, and a member who
+was away when the leave went out still lists them. Only an addition by
+name stamped later than the leave (a new invitation) does. A time a member
+gives for a leave or an addition counts at most one hour past the
+receiver's clock. Only the leaves a newcomer's inviter tells of in `left`
+are taken from someone other than the leaver. The group's creator speaks
+in it as the receiver recorded it, unless the creator left: from then on
+no phone takes the creator's messages, calls, timers, edits or deletions,
+nor tells of them while locked, until a later invitation makes them a
+member again. A phone restored from a copy keeps who left.
 
 ### 2.5 Calls (signalling) [V]
 
@@ -455,9 +621,28 @@ Not reliable (real-time). `kind` is `"audio"` or `"video"`; most carry `callId`.
 | `ringing`, `call_accept` | `callId`, `kind` |
 | `call_decline`, `busy`, `hangup` (alias `call_end`), `call_offer_request` | `callId`, `kind` (`callId` mandatory for decline/busy/hangup) |
 | `call_mkey` | `callId`, `epoch` (int): the sender's media key moved to `epoch` (2.5.1) |
+| `call_missed` | `callId`, `kind`, `at` (when the call was made, caller's clock, ms). Reliable, latest-only (one per caller waits, 3.1), a notice type: the caller sends it once a ring of its 1:1 call ended unanswered, so a callee who was away (offline, phone off) shows the missed call once when back; a callee whose phone rang notes the call id with the ring and shows it once. It never rings. A Zen before 1.16.5 ignores it. |
+
+A call that rings (out or in) is kept when another call comes: the new
+caller gets `busy` and sees a missed call, and only the first caller may
+replace its ringing call with a new one of theirs; an `offer` or
+`call_invite` of a second caller never takes the screen.
 
 Media: WebRTC, relayed through the local bridge relay (1.3). Screen share and
-recording are signalled inside the call [?].
+recording are signalled inside the call [?]. **Codecs:** both sides keep
+only VP8, then H.264, with their repair formats, VP8 first, for the camera
+and a shared screen (`setCodecPreferences` before every offer and answer,
+or the local description reordered where the platform refuses;
+`call_video_codecs.dart`): the frame encryption of 2.5.1 leaves in the
+clear what the packetizer of those two reads, which is not known of H.265,
+VP9 or AV1, and two phones listing their hardware codecs first could
+otherwise agree on frames the other side could not open (the picture
+stayed black while the sound worked). An older Zen on the other side gets
+VP8 too: it answers in the order offered, and its own offer is answered
+with VP8 first. The technical log names per call the codecs offered, whether
+the camera's frames were sealed and opened, the video packets sent and
+received and the frames decoded and shown (`call_video_trace.dart`, lines
+`Call video`).
 
 **Group calls** (`groupId` and `callId` mandatory): `group_call_invite`,
 `group_call_join`, `group_call_state`, `group_call_leave`, `group_call_decline`,
@@ -675,7 +860,8 @@ See 3.3. Types: `lg_hello`, `lg_keys`, `lg_bridges`, `lg_reach`, `lg_reach_ok`,
 entries in `feed` and `acts` (not the bundled `rx` reactions) go after 30 s,
 in batches of at most 30 KB and 10 an hour per friend, through the reliable
 queue to friends who are offline, so they wait in those friends'
-mailboxes. The receiver takes them like `lg_entries`, with the same checks.
+mailboxes, for 7 days (the ledger's own sync brings them anyway once both
+are online). The receiver takes them like `lg_entries`, with the same checks.
 
 `lg_mention` {`e`, `p`?} is reliable too: the notice to a person
 mentioned in a post, an edit or a comment. `e` is that signed entry and
@@ -710,9 +896,49 @@ sign: payer-signed, next account number), `tsig` (a treasurer's signature
 back), `fin` (an operation with a majority of treasurers' signatures, to the
 treasurers and the parties), `stq` / `st` (a member asks for a balance
 statement; a treasurer's signed answer, every 12 h), `note` (who gets an
-emission), `ldig` / `lwant` / `lops` (treasurers' ledger sync every 30 min).
-Transfers are never records; members who are not treasurers or parties
-receive nothing.
+emission), `ldig` / `lwant` / `lops` (treasurers' ledger sync every 30 min;
+`lops` also carries releases, `rel`). Transfers are never records; members
+who are not treasurers or parties receive nothing.
+
+- **Operations.** An order (`xfer`) or a settlement (`settle`) is signed by
+  the payer, names the next number of the payer's account (`seq`, at most
+  2^40) or the payment it settles, a fresh nonce `nc` (so the id a seal
+  lists cannot be worked out from a guess at the payment) and, when it
+  follows a release, that release (`rel`); at most 4 KiB. A treasurer
+  signs it only against its own copy of the ledger and never two
+  operations for one span of a slot (an account's number, or one
+  settlement per payment). It counts once most treasurers of its time
+  signed it: two majorities of n share 2m − n treasurers (m the majority),
+  so a double spend needs that many to sign two operations for one span,
+  which is proof against them (two of an even number, one of an odd one).
+  A refund of a conditional payment waits until its acceptances are
+  closed. Every phone refuses, when it counts, an operation without the
+  payer's full signature, from or to a non-member, or over the daily limit
+  in force at its time, and a treasurer checks its whole ledger for the
+  numbering and the money too; no balance, emission or statement may pass
+  2^60 (`kPyrMaxBalance`).
+- **Releases** (`xrel {slot, prev?}`, private, `pyramid_ledger.dart`): a
+  span of a slot split between operations none of which can reach a
+  majority any more (cancelled orders, two devices at once, an acceptance
+  and a refund around a payment's time; `PyrLedger.isSplit`) is freed by a
+  release most treasurers of the era sign. A treasurer votes once it has
+  seen the span split for 1 hour (`kPyrReleaseWaitMs`), once per span on
+  every device of the account, and sends its vote to the other treasurers
+  at once; the release, once most voted, goes to everyone the slot's
+  operations concern, and the order waiting goes out again under it. A
+  release leaves every operation of its span behind, and the next span of
+  the number starts; a treasurer never moves on to another order alone.
+  Two releases of one span need 2m − n treasurers signing both, like two
+  operations.
+- **What treasurers keep and answer:** a treasurer keeps only operations a
+  treasurer of their era signed, at most the 32 newest that do not count
+  (orders waiting, or split) per payer (`kPyrMaxEvidencePerPayer`), and
+  answers `ldig` / `lwant` only to the treasurer whose member record names
+  the sending address.
+- **Seals of the eras** (`seal`, public, 3.4): once an era of the
+  treasurers ended, most of the next era's treasurers seal it with the
+  operations dated in it that counted for them; an operation dated in a
+  sealed era that its seal does not list counts nowhere.
 
 ### 2.12 Nearby (Bluetooth LE: Android and computers) [V]
 
@@ -769,14 +995,98 @@ Computers run no GATT server: they cannot receive waves.
 Unknown `type`, or a type the parser does not map, yields no signal
 (`zenSignalFromTransportPayload` returns `null`; relay engine returns `false`).
 
-### 2.13a Recovery circle and account moves [P]
+### 2.13a Key pieces at close friends, and account moves [V]
 
-- `rc_help` (`recovery_service.dart`): a recovering device tells a person of
-  the circle (whose invitation code it was given) that it asks for help. A
-  device holding a piece of that account's key stores the request (at most
-  8, 30 days, once per sender) and shows a notification
-  and a card with *Help* (the new device's address filled in) and
-  *Decline*. A device holding no piece ignores it.
+`account_recovery.dart`, `recovery_service.dart`, `recovery_circle_pick.dart`.
+The account key (its 32-byte seed) comes back with the account password and
+the pieces of enough of the person's close friends; there is no way back
+without the password.
+
+- **The seal.** When the person sets the account password (at least 12
+  characters, not the app password, not easy to guess by the password
+  manager's estimate; `kMinRecoveryPasswordLength`), the device seals the
+  seed under it once: Argon2id (64 MiB, 2 passes, `kRecoveryPasswordCost`)
+  gives the password key, `SHA-256("zen.recovery.inner" | key)` the key of
+  a ChaCha20-Poly1305 box of the seed (`RecoverySeal`, kept on the device
+  that hands the pieces out, `recovery/sealed`).
+- **Generations.** For each generation of pieces the device draws a fresh
+  32-byte circle secret, seals the seal's box again under
+  `SHA-256("zen.recovery.outer" | secret)`, and splits the secret by
+  Shamir over GF(256) among the holders, `t` of `n` (`pieceThreshold`: 2
+  of at most 4, 3 of 5–9, 4 of 10 or more). A piece's `normal` half is
+  `{v: 2, salt, cost, box, share, t, g}`; its `emergency` half keeps the
+  old form for helpers on 1.16.4 and earlier and holds only random bytes.
+  A share of one generation never combines with a share of another. A new
+  generation is made, without the password, whenever the close friends
+  change; the bookkeeping (holders, threshold, who confirmed, `recovery/gen`)
+  is the same on all the account's devices (account state domain
+  `recovery`, 3.3), and only the device whose seal is newest hands pieces
+  out.
+- **Holders**: every friend at the "close" level, at most 12
+  (`kMaxPieceHolders`; with more, an order of their own per account,
+  `SHA-256("pieces|" account "|" address)`, stable when one is added).
+- **Messages** (over the signal transport; a holder takes them only from a
+  friend):
+  - `rc_store {piece, a, g, h?, at, cert, sig}`: owner → holder. Signed
+    (hybrid, 4.1) by a device of account `a`, with its certificate, over
+    the account, the generation `g`, the holder's account `h` and the
+    piece's box; the holder keeps it under that account, not under the
+    sending address, so a piece follows its holder's account to a new
+    phone, to its other devices and into its moves and full copies. Sent
+    again every 30 minutes until confirmed, offered again every 7 days.
+    Unsigned `{piece}` (1.16.4 and earlier) is kept under the sender's
+    address.
+  - `rc_ack {account, created}`: holder → owner, the generation kept.
+    The account counts as secured ("Konto jest zabezpieczone") only once
+    at least `t` holders confirmed the current generation (or a key copy
+    exists).
+  - `rc_forget {a, g, cert, sig}`: owner → holder, signed (`"zen-recovery-forget|"
+    a "|" g`): delete every piece of `a` older than generation `g` (all of
+    them, for someone who holds none now). Sent to every holder of an older
+    generation (the circle of 1.16.4 too) once the new one reached its
+    threshold, again every day for 90 days. `rc_forgot {a, g}`: holder →
+    owner, gone. Helpers on 1.16.4 and earlier ignore it and keep their
+    pieces.
+  - `rc_help {}`: a recovering device tells a holder (whose invitation code
+    the person typed there) that it asks for help. A device holding a piece
+    of that account stores the request (at most 8, 30 days, once per
+    sender) and shows a notification and a card with *Help* (the new
+    device's address filled in) and *Decline*. A device holding no piece
+    ignores it.
+  - `rc_alarm {to, kind, due, o?}`: holder → owner's devices, when the
+    holder agreed to release the piece to a new device (`o`: despite a
+    stop). `rc_cancel {a?, at?, cert?, sig?}`: owner's device → holder ("to
+    nie ja"), signed (`"zen-recovery-cancel|" a "|" at`); it counts only
+    from a device the account has not cut off (an unsigned one, from 1.16.4
+    and earlier, only for the pieces that address handed out, and not from
+    an address its owner unlinked). Seven days after a stop
+    (`kOverrideDelay`) the holder may release anyway; a stop then no longer
+    counts.
+  - `rc_piece {kind, half, more?, account}`: holder → new device, 24 hours
+    after the holder agreed (`kNormalDelay`; the `emergency` half after 7
+    days). `more` carries the holder's previous generation, kept until the
+    new one is complete. The new device takes pieces only while a recovery
+    is started on it, only from its friends and the holders the person
+    listed there (at most 24), at most two of each kind per sender, 48 in
+    all, and only with the Argon2 cost pieces are written with; it tries at
+    most 600 combinations of the halves that came.
+- **What a holder keeps** (`recovery/pieces`, at most 200 accounts): the
+  newest generation and the one before; the one before goes 60 days after
+  a newer one came if nobody said to forget it (`kPreviousPieceKept`), all
+  of them 42 days after the friendship ended (`kPiecesAfterFriendship`; a
+  friendship that comes back within it changes nothing).
+- **Limits.** The delays and the alarm bind honest apps only. Holders of
+  one generation who reach the threshold together open the circle box and
+  can then guess the account password offline, one Argon2id run per guess.
+  People who held pieces of the same generation, kept copies against the
+  app and know or guess the password of that time can still open the seed
+  together. Pieces handed out before 1.15.4 still hold a working
+  `emergency` half (four helpers together, no password); helpers on 1.15.4
+  and later never release it, and handing the pieces out again replaces
+  them.
+
+**Account moves and links.**
+
 - `al_ver {v: [...], app}` (`account_link.dart`): the answer to a device-link
   hello of another protocol version; both sides show "the other device has
   another version of Zen". Moving an account: the transfer code carries
@@ -792,11 +1102,11 @@ Unknown `type`, or a type the parser does not map, yields no signal
   `acx_no {why: "version"}`, and 1.16.x finds a version 2 code to be of
   another version: either way the screen says to update first.
 
-### 2.14 Circle copy (`cbk_*`) [V]
+### 2.14 The copy with friends (`cbk_*`) [V]
 
-`circle_backup_service.dart`, `circle_backup_holder.dart`. Between the
-owner's devices and the people of its recovery circle, over the signal
-transport:
+`circle_backup.dart`, `circle_backup_service.dart`, `circle_backup_holder.dart`.
+Between the owner's devices and the friends who keep its copy, over the
+signal transport:
 
 | type | Direction | Fields |
 |---|---|---|
@@ -804,7 +1114,7 @@ transport:
 | `cbk_need` | holder -> owner | `a` account, `mid` manifest id, `ids` chunks it lacks |
 | `cbk_chunk` | owner -> holder | `a`, `id`, `c` (one chunk) |
 | `cbk_ok` | holder -> owner | `a`, `at`: the copy is complete |
-| `cbk_no` | holder -> owner | `a`, `why`: refused |
+| `cbk_no` | holder -> owner | `a`, `why`: refused (`notInCircle`: neither a key piece of that account nor an accepted friend here, and what a 1.16.4 holder answers anyone outside its circle; `badSignature`; `tooBig`: over one copy's size or no room left; `stale`: older than the copy kept) |
 | `cbk_fetch` | recovered device -> holders | `r`: a signed, fresh request |
 | `cbk_manifest` | holder -> recovered device | `m`: the copy kept |
 | `cbk_get` | recovered device -> holder | `r`, `ids` |
@@ -815,9 +1125,39 @@ at most 192 KB, sealed with ChaCha20-Poly1305 under a key from HKDF of the
 account's self key, with a nonce derived from the content (an unchanged
 chunk keeps its hash and is not sent again). An encrypted index names the
 chunks; the manifest is hybrid-signed by the device, whose certificate the
-account key signed. A holder takes copies only of accounts whose recovery
-key it holds, 10 MB (+10 %) per account and 100 MB in all, and answers
-`cbk_fetch` only for a device the account certified.
+account key signed. Since the copy is sealed under the self key, every way
+back to the account (another device, a key copy on paper or in a file, the
+key pieces) opens it.
+
+- **Sections:** `profile`, `contacts`, `levels`, `settings`, `pyramid`,
+  `household`, `dating`, `passwords` (the stored vault, `passwords/vault`)
+  and `notes` (the notes to self, `notes/self`), and the conversations' text
+  when "with chats" is on (the oldest left out past the cap). `passwords`
+  and `notes` are padded with a `z` field to a multiple of 16 KiB, so the
+  holders cannot tell how many there are, and are taken back by merging,
+  never over what the device has. The `wallet` section is no longer
+  written (nothing took it back). The `passwords` section also goes, with
+  the key, into a full copy of the account (`.zenbackup`) and into a move
+  to another device (`account_archive_collect.dart`).
+- **Holders** (`kMaxCopyHolders`, at most 6): chosen accepted friends,
+  those who serve as this person's mailboxes first, then close friends,
+  others only to reach two (`copyFriendHolders`). A friend who refuses
+  (`cbk_no`) is passed over for 7 days and the next is asked. A holder takes the copy of an account whose key piece it
+  keeps, or of an accepted friend (friends' copies together at most 60 MB),
+  at most 10 MB (+10 %) per account and 100 MB in all; a copy goes when
+  neither holds any more (the piece went, the friendship ended).
+- **When:** at most once a day, and after an important change (a friend, a
+  group, a password, a note) at most once an hour; only the chunks a
+  holder lacks travel. A part that cannot be read now (Zen locked) makes no
+  copy, so holders keep the last whole one.
+- **Taking it back:** a holder answers `cbk_fetch` only for a device the
+  account certified and has not cut off. After a recovery the new device
+  asks the holders the recovery named, its friends and the account's other
+  devices; a device restored from a key copy alone knows nobody, so the
+  person may type one friend's invitation code to reach them. The
+  manifests that come within 30 s of the first are compared and the newest
+  complete copy is taken; a download that stalls moves to another holder of
+  the same copy, or looks again.
 
 ### 2.15 Network census (`census`) [V]
 
@@ -926,6 +1266,8 @@ notification).
   followed by the addresses joined by `,`.
 - *Found note* `{id, f, at, s}`: the finder's account `f` found the pebble
   at `at` (seconds). Signed bytes: `"zen-pebble-found/1\n" id "\n" f "\n" at`.
+  It travels straight from the finder to the author, never through a third
+  phone ("Znaleziono", below).
 
 **Frames** (direct, not reliable; an older Zen ignores them, §2.13):
 
@@ -981,7 +1323,16 @@ keeping requests waiting.
 
 **"Znaleziono".** After collecting, a finder whose account key is at hand
 sends a found note to the author's devices when it knows them (best effort,
-once); the author counts distinct finder accounts.
+once); the author counts distinct finder accounts. A note counts only when
+the device that sent it is one the author's device knows as belonging to
+the account that signed it (a signature alone proves nothing about the
+sender: anyone can sign with a key made a moment ago), so a finder is an
+account the author knows, in practice a friend's; the author's own account
+never counts. Each finder counts once per pebble; one account adds at most
+100 new finders a day over all of an author's pebbles
+(`kFoundNotesPerDay`); at most 1000 finders per pebble and 20000 in all
+are counted (`kPebbleMaxFinders`, `kPebbleMaxFindersTotal`). A note that
+changes nothing does not rewrite the index.
 
 **Profile.** The kind `pebbles` in the account's `profile` space, sealed for
 all friends (`Audience.all`): `{v: 1, c: [{c: card}], k: [{c: card, f:
@@ -1003,14 +1354,62 @@ account's other devices take in what it lists, and its removals.
   `sender|_rid` for 14 days. Types that must go direct only
   (`_directOnlyPayloadTypes`: `friend_request`, `flat_*`) are never mailboxed.
   `_once: true` marks a payload to send once, not queued.
+- **Acknowledged once stored:** a chat message (`message`, `group_message`)
+  is acknowledged to its sender (`rly_ack`), remembered as seen and taken
+  out of the mailboxes only once the app said it has it on its disk
+  (`reportReliableKept`). A message the app failed to store (killed in
+  between, a full disk, a locked store) is not acknowledged: the sender or
+  a mailbox brings it again, and that copy is handed to the app again.
+  Further copies wait for the app's word for at most 1 minute
+  (`appKeepWait`); after a restart nothing was acknowledged. Every other
+  reliable payload is acknowledged as it arrives.
 - The payload is written to disk before the first direct attempt. Direct
   retry schedule: 3 s, 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, 4 h, then
   every 4 h; any sign of life of the recipient, and a restart or 10 minutes
-  of silence, start over. TTL 14 days (`messageTtl`).
+  of silence, start over. TTL 14 days (`messageTtl`); `lg_push` 7 days and
+  `graph_open` 2 days (they come again by other ways).
+- **Latest-only kinds** (`relayReplaceKeyOf`): `profile_update`,
+  `friend_list`, `nearby_key`, `intent`, `graph_open`, `intro_gate`,
+  `zrcpt`, `call_missed` (one per kind and recipient) and `message_read`
+  (one per conversation: the receipt names the newest message read). A
+  newer one replaces the older one waiting in the queue, and in the
+  recipient's mailboxes through the envelope's `rp` tag (3.2).
+- **What a person sent and what the app sends by itself**
+  (`relayIsPersonalPayload`): the notice types (`message`,
+  `group_message`, `message_placeholder`, `friend_request`,
+  `friend_accept`, `group_invite`, `call_invite`, `group_call_invite`,
+  `call_missed`; `kRelayNoticeTypes`), an attachment, `msg_react`,
+  `msg_edit`, `msg_delete`, `disappear_timer` and `profile_update` are what a
+  person sent; everything else (posts pushed ahead of the ledger, friend
+  lists, nearby keys, statuses, receipts, pyramid records, ...) the app
+  sends by itself, and its envelope carries `a: 1` (3.2).
+- **Devices taken for gone:** a friend's device not heard from for 7 days
+  (`goneDeviceAfter`) while another device of the same friend was is taken
+  for gone (a phone they moved away from, one Zen was removed from): what
+  the app sends by itself is no longer queued for it, and what waits or is
+  held for it of that goes; what a person sent still waits as for any
+  device that is away. It is back as soon as it is heard from. A friend who
+  is away with all their devices is never affected.
+- **Receipts for mail** (`zrcpt {ids}`): payloads taken from a mailbox
+  while their sender did not answer (its `rly_ack` was likely lost) are
+  confirmed by one receipt queued for the sender's mailboxes; a receipt
+  still waiting takes new ids in and replaces the older one. The relay
+  layer's own, never handed to the app; a Zen before 1.16.5 opens it,
+  confirms it and ignores it.
+- **Tidied at start:** when the relay engine takes over (an app start, the
+  locked service), what lapsed, was replaced by a newer one, waits for a
+  device taken for gone or for a friend's device its owner unlinked, or is
+  for a former friend goes, the queue of an older version included (log
+  line `Relay tidy`).
+- **"Czeka na doręczenie"** counts what a person sent (the notice types
+  and attachments) that has not reached its recipient yet, once per message
+  and person however many devices or parts, and not once one device of
+  theirs has it.
 - Reactions, edits and deletions (`msg_react`, `msg_edit`, `msg_delete`),
-  group board posts (`group_post`), `lg_push`, `lg_mention`, `date_key` and
-  `date_intro*` are reliable too.
-- Calls, typing, presence and file chunks are not reliable.
+  group board posts (`group_post`), `lg_push`, `lg_mention`, `call_missed`,
+  `date_key` and `date_intro*` are reliable too.
+- Calls (but `call_missed`), typing, presence and file chunks are not
+  reliable.
 
 ### 3.2 Mailboxes (store and forward) [V]
 
@@ -1079,7 +1478,19 @@ relays.
 - `rly_deposit` {`env`: envelope, `tk`?} -> `rly_deposit_ack {id, r}`.
   **Envelope**: `{id, s (sender), r (recipient), c (created ms), x (expires
   ms), q (hybrid KEM ciphertext, 1120 bytes), n (12-byte nonce), b
-  (ciphertext+tag)}`, all base64url; sealing in section 4 ("Mailboxes").
+  (ciphertext+tag), k? (1 when the payload deserves a notice on a locked
+  phone, `kRelayNoticeTypes`), rp? (replace tag), a? (1 on what the app
+  sent by itself)}`, all base64url; sealing in section 4 ("Mailboxes").
+  `k`, `rp` and `a` are bits beside the box, not bound into it. `rp` is
+  set on the latest-only kinds (3.1): base64url of the first 12 bytes of
+  HMAC-SHA256(sender's relay key, `"zen.relay.replace.v1|" + recipient +
+  "|" + kind`), the same for every payload of that kind to that recipient,
+  a tag only the sender can make; a mailbox that holds an older envelope
+  of the same sender with the same tag drops it when the newer one comes
+  from the sender itself (a co-relay catching up only ever adds), and does
+  not take an older one. A mailbox drops what carries `a` for a device
+  taken for gone and keeps the rest. Envelopes from a Zen before 1.16.5
+  carry neither.
 - `rly_poll {p?}` (recipient asks a relay) -> `rly_mail {items:[envelope...]}`
   (batches up to ~6 KB), or `rly_here {}` when nothing is held and `p` was
   set. Recipient answers `rly_mail_ack {ids}`; it also tells other relays
@@ -1116,8 +1527,9 @@ relays.
   serves with their relays and deposit keys, the mail held, tombstones;
   sealed with the background key) it goes on answering `rly_deposit`,
   `rly_poll`, `rly_mail_ack`, `rly_purge`, `rly_sync` and `rly_sync_want`
-  by the same rules, and writes what it holds back to a file of its own,
-  which the app merges after unlock (`relay_engine_locked.dart`).
+  by the same rules, and writes what it holds back to a file of its own
+  (once for a burst of deposits or receipts, within 5 s, not once per
+  envelope), which the app merges after unlock (`relay_engine_locked.dart`).
   Attachments (`rly_bput`...) wait for the unlock. A locked iPhone runs the
   same receiver whenever iOS lets Zen run (a background check, a Shortcuts
   run, the keep-alive; docs/IOS_BACKGROUND.md), so it answers the same
@@ -1127,6 +1539,19 @@ relays.
   public half is with the receiver) and reads a chat message only in
   memory, for a notification of at most 80 characters as the conversation's
   notification level allows (docs/SECURITY_MODEL.md, "The locked phone").
+  Whether a chat message or a call makes it ring, show the call card or
+  tell of a message is decided by the same functions as in the app
+  (`notification_privacy.dart`, `incomingAlertOf`), from the notice kit the
+  app leaves it (sealed with the background key): nothing with
+  "Połączenia" off; a call only from a friend, a group call only from
+  someone who speaks in that joined group; a mention past a mute only from
+  a member, at most 5 per sender in 10 minutes; muted conversations; the
+  group id as the app reads it. Who speaks in each joined group is in the
+  kit as tags (`gt`: the first 32 hex of SHA-256(`group key + "\n" +
+  address`), unkeyed), so the kit names no member. What the kit does not
+  know counts as "no". A kit written before 1.16.5 has no tags: until the
+  app is unlocked once and writes a new one, the background capability's
+  friends and group members count, as before.
 - **Mail for a locked phone** (`rly_mail` to the locked service) is kept
   envelope by envelope, keyed like the direct payload (`sender|id`): a copy
   that came already, directly or from another mailbox, or that the app
@@ -1182,9 +1607,29 @@ A signed, append-only, per-device **log** for each **space**.
   checkpoint, moves to the checkpoint when it asked for entries from its own
   head and the sender answered from a checkpoint (never for entries pushed
   unasked), and treats entries before its start as duplicates, not a fork.
-  A holder may prune a log (`pruneBefore`), only at a checkpoint. When
-  checkpoints are written and when other accounts' logs are pruned is not
-  decided yet; 1.12.0 can read both.
+  A holder may prune a log (`pruneBefore`), only at a checkpoint; 1.12.0
+  can read both. From 1.16.5 a checkpoint may say in its body how many
+  entries right after it carry everything of the log still valid from
+  before it (`n`, at most 400, `kMaxRebaseEntries`; written in one run with
+  them, so no peer ever sees only some). Every holder moves to such a
+  checkpoint, and drops what came before, only once all those entries are
+  held here too: a peer handing on the checkpoint alone cannot make a store
+  give up the last whole state it holds. A checkpoint without `n` is
+  dropped from only by its own writer's devices. Builds before 1.16.5
+  ignore `n`. Two logs are started over this way:
+  - **The private log** (`private/<acct>`, friends keep a copy): a device
+    starts it over when the superseded copies of friends and groups in it
+    outweigh what is still valid by more than 64 KiB
+    (`kPrivateLogSlackBytes`); after the checkpoint come the current
+    backup and the removals made before it (`contact_removals {v, x:
+    {address or group:<id>: millis}}`). Friends drop what came before once
+    the new start has fully reached them, by that device's signed word
+    only.
+  - **The state log** (in `own`, a writer of its own per device,
+    `ledger/state_writer`), see "Account states" below.
+
+  The public logs (`feed`, `acts`, `profile`) are never started over or
+  pruned: other people's entries refer to their ids.
 - **Device certificate** (the device record) =
   `{t:"dev_cert", account, device, dpk, name (<=60), issued, sig}`: `dpk` is the
   device key's ML-DSA public key (base64url, 1952 bytes), `sig` the **account
@@ -1221,12 +1666,20 @@ A signed, append-only, per-device **log** for each **space**.
   account's own devices.
 - **Kinds seen** [P]: `post`, `post_edit`, `post_del`, `reshare`, `comment`,
   `like`, `rx`, `thanks`, `gallery`, `gallery_del`, `profile`, `device`,
-  `contacts`, `contact_removed`, `chat`, `chat_history`; for the Videos
+  `contacts`, `contacts_part`, `contacts_set`, `contact_removed`,
+  `contact_removals`, `chat`, `chat_history`, `acct_state`, `checkpoint`;
+  for the Videos
   section `film` (in `feed`, removed by `post_del`), and in `acts`
   `film_react` (the latest per film wins), `film_seen` (`posts`: film ids the
   author counts) and `film_pass` (a public film passed on to friends of
   friends: the signed film with its certificate, like a reshare); in
   `acts` also `post_ann` (notices of posts passed on beyond friends, below).
+  An `rx` bundle passes on the reactions a friend saw under posts, with the
+  thread's hidden comments and blocked people (`hid`, `blk`) and totals
+  (`nl`, `nc`); a bundle is signed only by the friend who wrote it, so a
+  reader takes `hid`, `blk`, `nl` and `nc` only from the bundle of the
+  post's author, and from anyone else's only the reactions it lists
+  (`reaction_relay.dart`, `feed_model.dart`).
 - **Friends' copy** [V]: a `contacts` entry (sealed in `private`, for the
   account's own devices) is {`v` 1, `friends` [{`a`, `n`?, `k`? nickname,
   `b`? 1 when blocked}], `groups`, `r`? records}. `r` maps each normalized
@@ -1240,8 +1693,53 @@ A signed, append-only, per-device **log** for each **space**.
   that holds a record the newest copy lacks or has older saves its own
   copy. A copy without `r` (Zen 1.14.0) counts its friends as of unknown
   time (older than any record) and its blocks as of the copy's time;
-  `contact_removed` {`a`} entries are taken once each as removals at their
-  ledger time.
+  `contact_removed` {`a`} or {`g`} entries are taken once each as removals at their
+  ledger time. A group item (`{id, name, d?, avatar, by, at, m, mn?}`)
+  carries `left` (who left and when, the newest that fit a part), so a
+  device restored from the copy starts with it (2.4); Zen 1.16.4 ignores
+  it.
+- **Friends' copy in parts** (`contacts_backup.dart`): up to 40 KiB of
+  JSON (`kContactsWholeBytes`, some 240 friends) the copy is one
+  `contacts` entry. Above that every friend, group and record is an item,
+  and the items run into `contacts_part` entries `{v, i}` (at most 32 KiB
+  each, at least 8 KiB; a part ends after an item whose hash says so, so a
+  change to one friend rewrites one part), followed by a `contacts_set`
+  entry `{v, k: the layout of the top-level keys, s: the other values, p:
+  the parts' places in the same log, h: SHA-256 of the whole}` (at most
+  256 parts). A new set writes only the parts that changed and names kept
+  parts only from after the log's newest checkpoint. A reader takes a set
+  only when every part is there and the whole hashes right, so it never
+  mixes two copies, and takes the newest copy that came whole. A one-entry
+  copy carrying `cut` (only some of the friends and groups, for builds
+  before 1.16.5 that read only one entry) is never taken for the whole. A
+  copy that cannot be saved at all (an item bigger than a part, more than
+  256 parts) is told in "Dlaczego nie działa?".
+- **Account states** (`account_state_sync.dart`, `acct_state` entries sealed
+  in `own`, so only the account's devices read them): the states kept the
+  same on all of an account's devices (the account's settings, the
+  hand-picked mailboxes `relay`, the dating profile, the meetings
+  `meet/*`, the profile, the key pieces' bookkeeping `recovery`, the notes
+  to self `notes/self`, the passwords `passwords/vault`, and copies kept for
+  a recovery). Every state is cut into units (a field, a list item by
+  `id`, a set element, a map entry); a unit changed gets the next Lamport
+  clock of its device and is taken elsewhere when its clock is higher (or
+  equal from a device whose id sorts higher); a removed unit leaves a
+  tombstone. A change goes in parts of at most 24 KiB of units
+  (`kAccountSyncPartBytes`), so a large state is never refused for the
+  64 KiB entry limit. Each device writes these into a **state log** of its
+  own and starts it over at most every 6 hours (`kAccountSyncRebaseEvery`),
+  only when something was overwritten or deleted since: a checkpoint, every
+  unit as it is now and the deletions of the last 30 days
+  (`kAccountSyncTombstoneLife`) written again after it, and everything
+  before it dropped there and, once they take the checkpoint, on the
+  account's other devices; so an overwritten or deleted value (an old
+  password, a deleted note) leaves the log within about that time. A device
+  away longer than 30 days gets the state as it is now; deletion markers
+  inside the passwords and notes keep a deleted entry from coming back.
+  Changes opened from other devices are forgotten when Zen locks and
+  opened again at unlock. A device that never had notes or passwords
+  stores an empty set, so the others' arrive there. A Zen of 1.16.4 keeps
+  its old log as it was.
 - **Post reach** [P]: a public post (`aud` `public`, not sealed) may be
   passed on up to 3 steps of friendship from its author; the post carries no
   reach of its own, and any other audience never goes past friends. Each
@@ -1311,11 +1809,13 @@ that carried the hello: a hello whose `k` is not the frame's `senderKey` is
 refused, the signed key is pinned (replacing the session's) when the hello
 is of the account known at that address, and the chat with that friend
 shows "The device key doesn't match." Device records (`device` in
-`acts`: {`address`, `name`, `pq`}) name the key too, so friends' other
-devices are pinned before the first direct contact (1.5). Friend lists
+`acts`: {`address`, `name`, `pq`}) name the key too; they are the
+account's word about an address, not the device's, so for the receiver
+they are hints only (1.5), held before the first direct contact and
+confirmed by the device's own record. Friend lists
 (`friend_list` items {`a`, `n`, `k`}) carry the keys friends proved; for
-the receiver they are hints only (1.5: the first record of the device
-itself decides, and a contradicting hint is reported); `lg_keys` {`items`} gives audience
+the receiver they are hints too (1.5: the first record of the device
+itself decides, and a contradicting hint is only logged); `lg_keys` {`items`} gives audience
 keys; `lg_sibling` {`own`, `levels`} syncs the account's own devices;
 `lg_bridges` {`items`: signed bridge announcements} passes known mesh bridges;
 `lg_reach` {`id`, `uri`} / `lg_reach_ok` {`id`, `ok`} ask a friend to test that a
@@ -1358,8 +1858,9 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   `revoke`, `ban`, `unban`, `decision`, `post`, `comment`, `natpost`,
   `natgrant`, `natpin`, `badge`, `known`, `ref`, `tally`, `const`, `emit`,
   `emitrule`, `emitcancel`, `veto`, `kemkey`, `suit`, `verdict`, `appeal`,
-  `appans`, `alarm`, `offer`; `xfer` and `settle` exist as kinds but the
-  fold refuses them: transfers are private (2.11). The genesis names the power key
+  `appans`, `bench`, `seal`, `vclose`, `alarm`, `offer`; `xfer`, `settle`
+  and `xrel` exist as kinds but the fold refuses them: transfers and
+  releases are private (2.11). The genesis names the power key
   (`pk`) and the fingerprint of its ML-DSA half (`pq`; the original pyramid's
   must, the test pyramid's has none) and is signed by it; `found` (power key +
   founder) seats the first head; `hand` passes the power key to the head at
@@ -1396,6 +1897,61 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   limit (lower at once; higher announced and in force after 30 days unless
   an `emitcancel` comes first). `suit` / `verdict` are the court; `appeal` /
   `appans` go one level above whoever decided, each level twice as long.
+- **The court without names** (`pyramid_court.dart`). Who may judge a
+  matter (a complaint's first instance or one appeal) is fixed by the
+  rules (`courtRing`): below the top the head at the deciding place, at
+  the top the top cell, never the parties. Each judge's phone registers a
+  one-time hybrid card for that matter with the others (scope `bench:` +
+  SHA-256(pyramid|matter|judges)[:32]); `bench` {`of` the complaint or
+  appeal, `toks` the cards} lists them and is signed by the judges like a
+  cell's ballot (every judge of the ring listed, at least as many signers
+  as cards, at least as many cards as a decision needs; a later bench of
+  the same ring counts only with more cards, a changed ring needs a new
+  one). A `verdict` or `appans` is signed by the bench's cards only, never
+  by a member's key, and carries `by` (the bench's cards), `q` (how many
+  it takes: 1 below the top, 2 at the top) and no more signatures than
+  `q` (those of the lowest keys), so the record says that the court
+  decided, not who or how many agreed. A judge's signed decision goes to
+  the other judges, and once it carries `q` cards it is published through
+  a friend outside the court; nothing of the court's way passes through
+  the parties' phones. The screens and the history name the court of a
+  level, never a person. Limit: a court of one person (every level below
+  the top) is known by its seat.
+- **Seals of the treasurers' eras** (`seal`, `PyrSeal`): an era is a span
+  in which the treasurers stayed the same. One hour after an era ended
+  (`kPyrSealWaitMs`, and 10 minutes after the treasurer last offered its
+  ledger to the others) each treasurer of the next era that keeps the
+  whole ledger signs {`n` era number (1: the founder's), `prev` the seal
+  before, `from`, `to`, `set` the era's treasurers, `ops` the ids of the
+  private operations dated in it that counted, `ch` what changed the
+  treasurers at `to`}, dated `to`, `by` the next era's treasurers; equal
+  ledgers give equal records, and the signatures meet as it goes round.
+  The seal that counts for an era is the first well-formed one (earliest
+  end, then id) that follows the seal before, is signed by most of the
+  next treasurers and agrees with the tree; a treasurer that signs two
+  different seals of one era is shown with both. A sealed era is fixed for
+  every phone: its treasurers are the sealed ones, an operation dated in
+  it that the seal does not list counts nowhere, a change of the tree that
+  would change the treasurers inside it (or at its end, not among `ch`) is
+  taken as made after the seal and folds after the last seal, and any
+  other record that would change it is refused. Limits: a seal lists at
+  most about 30000 operation ids (the 2 MiB record limit) and cannot be
+  published with more than 100 next treasurers (`kPyrMaxSigners`); until
+  an era is sealed (at least an hour after its end) its past can still
+  move; sealing stalls while the treasurers' ledgers disagree.
+- **Late records** (`PyrT.foldedLate`, `kPyrLateMs`, 30 min): the timed
+  kinds (below), a change of the tree at the treasurers' levels (or right
+  below them) and a cell vote's ballot and votes, seen by a phone more than
+  30 minutes after their date, fold at the time that phone saw them, so
+  they cannot move a past set of treasurers or turn a vote that ended; the
+  seals and the closes then fix the same on every phone.
+- **Closing a cell vote** (`vclose` {`elect` the vote, `votes` the ids of
+  the votes that count}, dated at the vote's end, `by` its ring): once a
+  vote ended by time, each ring member's app signs the votes that had come
+  to it; equal views give equal records. The first close (by time, then
+  id) listing every member of the ring and signed by most of them counts;
+  a vote it does not list counts nowhere, whenever it comes. A vote where
+  every card voted before the end needs no close.
 - Frames: `pyr_hello` (pyramids kept and fingerprints), `pyr_ids` (ids of a
   differing bucket), `pyr_want`, `pyr_rec` (one new record, passed on),
   `pyr_recs` (bulk), `pyr_prop` / `pyr_sig` (co-signing), `pyr_vote`,
@@ -1451,7 +2007,7 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
 | Locked Android service | background key (random, in the system key store, AES-256-GCM, AAD `zen.background.v1|<storage key>`) seals the kits (alarm, nearby, door, outbox, mailbox) and the node config; contacts kept as keyed tags; the inbox is sealed to the master key's public hybrid inbox key, so the service cannot read it | `background_keys.dart`, `locked_receiver.dart`, `sealed_inbox.dart` |
 | Dating | `DatingBox`: two layers of the classical X25519 box (`zen.relay.v1`) with AAD `zen.date.v1` (inner by the sender's dating key, outer by a one-off key); profile answers are `DatingBox`es padded to 4096-byte buckets; "Yes" token `HMAC-SHA256(DH(me,them), "zen-date-like|" + sorted keys)`; every hop is inside the post-quantum session layer | `dating_crypto.dart` |
 | Pyramid | hybrid record and treasurer signatures, ML-DSA keys fixed by the records; one-time hybrid cards for anonymous requests and votes; LSAG ring signatures (classical) only for card registration between cellmates | `pyramid_record.dart`, `pyramid_state.dart`, `ring_signature.dart` |
-| Recovery | Shamir secret sharing of the key among the recovery circle (up to 6 friends) [?] details | `core/ledger/shamir.dart`, `account/recovery_service.dart` |
+| Recovery | the seed sealed under the account password (Argon2id 64 MiB, ChaCha20-Poly1305), sealed again per generation under a random secret split by Shamir over GF(256) among the close friends (2/3/4 of up to 12, 2.13a); the copy with friends sealed under the self key (2.14) | `core/ledger/shamir.dart`, `account/account_recovery.dart`, `account/recovery_service.dart` |
 | Releases | hybrid maintainer signatures (maintainers pinned by hybrid id) and APK certificate check ("Pass it on") | `update/release.dart`, `apk_signature.dart` |
 
 **Note on direct messages:** every signal between two devices (messages,
@@ -1497,7 +2053,7 @@ ML-DSA.
   public key stays the key's id everywhere. The ML-DSA-65 half is
   `ML-DSA.KeyGen_internal(ξ)` with `ξ = HKDF-SHA256(ikm = seed, no salt,
   info = "zen.sig.mldsa65.v1", 32 bytes)`. Backups and recovery (paper
-  backup, recovery circle) hold the seed only and restore both halves.
+  backup, key pieces at close friends) hold the seed only and restore both halves.
 - **Fingerprint and hybrid id.** `F = SHA-256(ML-DSA public key)`
   (base64url, the key's `pq` id); the **hybrid id** is `<Ed25519 key>.<F>`
   (89 characters).
@@ -1612,7 +2168,7 @@ From 1.12.0 on, older formats are kept readable (the rules are in
    the signal queue, transfers, settings and profile, the ledger identity
    and index, the pyramid log, recipient keys, the bridge book, the census,
    the update book, meetings, the relay state, `.zenbackup` files
-   (`ZENACCT2…` or a manifest `v > 1`), the circle copy and the encrypted
+   (`ZENACCT2…` or a manifest `v > 1`), the copy with friends and the encrypted
    envelope (`ZENENC3…` is "newer", not "no data"). Documents without `v`
    (for example `meet/*`) change incompatibly only under a new key.
 4. **Enums stored by index:** their order is pinned by a test, new values
@@ -1633,7 +2189,17 @@ From 1.12.0 on, older formats are kept readable (the rules are in
    signature's `zen.sig.v1` and its ML-DSA derivation label
    `zen.sig.mldsa65.v1`, the session layer's `ZPQ1` and key record version 1, blob manifest
    `chunk` size, `profile_update.v` (monotonic counter), relay announcement
-   version `v`, recipient keys `v: 1`.
+   version `v`, recipient keys `v: 1`, the stored pins `v: 2` (1.5), a key
+   piece's `normal` half `v: 2` (2.13a), the contacts set and parts `v: 1`
+   (3.3), the password vault format 1, and the single-instance handshake's
+   `ZEN-SINGLE-INSTANCE/3` (1.7).
+14. Fields added in 1.16.5 that older builds ignore: the envelope's `rp`
+    and `a`, `group_invite` `added` / `at` / `left`, `group_leave` `at`,
+    `msg_react` / `msg_delete` `author`, the checkpoint's `n`, the notice
+    kit's `gt`; new types `call_missed`, `zrcpt`, `rc_forget`,
+    `rc_forgot`, `contacts_part`, `contacts_set`, `contact_removals` and the
+    mirrored `group_read`, and the pyramid's `seal`, `vclose`, `bench` and
+    private `xrel` (the pyramid rules version `rv` stayed 1).
 7. **Changing the key exchange (KEM):** always keep opening `ZPQ1`; switch
    on a newer format only after both sides listed it in `caps`, which they
    exchange inside an already sealed session. The key record has a version:
@@ -1670,8 +2236,9 @@ From 1.12.0 on, older formats are kept readable (the rules are in
 - A broken (Ed25519) node key lets an attacker take traffic for that
   address (denial of service) but neither read it nor speak for the
   address to anyone who pinned its device key; first contact with no pin
-  and no signed device record naming the key is trust on first use (a
-  friend's friend list gives only a hint).
+  is trust on first use (a friend's friend list or device record gives only
+  a hint), and the pin it makes stays loose until a session with that
+  device opens or a hybrid-signed hello vouches for it.
 - Yggdrasil answers `debug_remoteGetPeers/Self/Tree` and NodeInfo to any
   node from `Core.ReadFrom`; Zen's packet loop reads below it
   (`readMeshTraffic`) and drops them unanswered, as the doors do, so a

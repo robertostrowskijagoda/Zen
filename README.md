@@ -93,7 +93,7 @@ hybrid **ML-KEM-768 + X25519** and its lasting signatures hybrid
 devices, offline mailboxes, device identity, everything signed and kept, and
 the relay layer around calls. A hybrid stays safe as long as either half
 holds. A few parts stay classical (the Yggdrasil node key and address, the
-ring signature that registers a voting card, local link pair secrets until
+ring signature that registers a voting or court card, local link pair secrets until
 two devices first meet over the mesh, the AES key inside call frames); what
 is protected how, and why the rest is not:
 [security model](docs/SECURITY_MODEL.md).
@@ -128,10 +128,17 @@ Using Zen to break the law is forbidden by the [Terms of use](docs/TERMS.md).
 - 📡 **[Offline links](docs/guide/offline-links.md):** same Wi-Fi, Wi-Fi
   Direct and Bluetooth: Zen without the internet.
 - 🎨 **[Themes](docs/guide/themes.md):** 27 looks, each light and dark.
+- 🔑 **[Hasła — passwords](docs/guide/passwords.md):** a password manager
+  inside Zen, the same on every device of the account, with a generator,
+  an import from browsers' and password managers' CSV files, and filling
+  in other apps and browsers on Android 9 and later.
 - 👥 **[Several accounts](docs/guide/getting-started.md#several-accounts-on-one-device)**
   on one device, hidden ones included, and several ways to get an account
-  back: a second device, an encrypted account copy, a key copy, or a
-  recovery circle of 4 to 6 friends.
+  back: a second device, an encrypted account copy, a key copy, or your
+  close friends, who each keep a piece of the key (with your account
+  password, 2 to 4 of them bring it back). Chosen friends keep a sealed
+  copy of your data, passwords and notes included, which any of these
+  ways opens.
 - ⚙️ **[Settings, public peers](docs/guide/settings-and-peers.md)**,
   **[self-updates](docs/guide/updates.md)**, *Why isn't it working?*
   diagnostics, and **21 languages**.
@@ -178,7 +185,12 @@ internet. Everything is on
   the middle keeps your friends, messages or posts.
 - **On the device** everything is encrypted with your password (AES-256-GCM,
   Argon2id); an emergency wipe password erases the data, and an account
-  kept off the list can't be seen by anyone who picks the device up.
+  kept off the list is not on any list: its folder sits among decoy
+  folders, and a single look at the folders (names, sizes, times) does not
+  tell it from them. Someone who watches the folders over time, compares
+  when they were made, measures how much they hold, or reads the files or
+  the system's keystore may still tell which are in use
+  ([details](docs/SECURITY_MODEL.md)).
 - **You decide who sees what:** friendship levels and per-field profile
   visibility.
 - **GIF search goes through an outside company**, KLIPY: it sees what you

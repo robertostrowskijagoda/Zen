@@ -112,7 +112,9 @@ never your address.
   **Settings → Network → Looking around in the background** sets how often (2 to 30
   minutes) and how long (4 to 15 seconds), with an estimate of the battery
   cost (about 1.4 % a day by default; [details](settings-and-peers.md#settings)).
-  The phone wakes only for each look and goes back to sleep.
+  The looks share the phone's wakes with the mailbox checks and the
+  presence pings, which keep to the clock's ten-minute marks also under
+  Android's inexact alarms, and the phone goes back to sleep after each.
 - **Passed by:** a private log of friends you passed, built only from what
   Nearby heard, kept encrypted on the phone for 30 days (a place rounded to
   about 100 m, only if the alarm's location permission is on). Strangers are
