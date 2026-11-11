@@ -66,6 +66,7 @@ const List<String> _types = <String>[
   'busy',
   'hangup',
   'call_end',
+  'call_missed',
   'group_invite',
   'group_invite_ack',
   'group_message',

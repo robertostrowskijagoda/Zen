@@ -46,6 +46,19 @@ const int _maxSignalDepth = 16;
 /// so one id can belong to messages of two members.
 const String kChangeAuthorKey = 'author';
 
+/// A ring that ended unanswered, told by the caller afterwards: `{callId,
+/// kind, at}` (when the call was made, by the caller's clock). Sent
+/// reliably, so a callee who was away when it rang still learns of it from
+/// the caller's queue or a mailbox. A Zen before 1.16.5 does not know it
+/// and ignores it; it never rings.
+const String kCallMissedType = 'call_missed';
+
+/// The mark in [ZenSignal.chatExtras] of a [kCallMissedType] notice, read as
+/// the end of the call it names (`ZenSignalType.callEnd`): the call is over
+/// wherever it is still on file, and anywhere else only the missed call is
+/// noted ([isMissedCallNotice] in notification_privacy.dart).
+const String kMissedCallMark = 'missed';
+
 ZenSignal? zenSignalFromTransportPayload({
   required String sender,
   required Map<String, dynamic> payload,
@@ -281,6 +294,21 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         sender: sender,
         callId: _readString(payload['callId']),
         content: _readString(payload['kind']) ?? 'audio',
+      );
+    case 'call_missed': // kCallMissedType
+      // Names the one call it is about, like the teardown signals.
+      final String? missedCallId = _readString(payload['callId']);
+      if (missedCallId == null) {
+        return null;
+      }
+      final int? calledAt = _readInt(payload['at']);
+      return ZenSignal(
+        type: ZenSignalType.callEnd,
+        sender: sender,
+        callId: missedCallId,
+        content: _readString(payload['kind']) == 'video' ? 'video' : 'audio',
+        sentAtMillis: calledAt != null && calledAt > 0 ? calledAt : null,
+        chatExtras: const <String, dynamic>{kMissedCallMark: true},
       );
     case 'group_invite':
       if (_readString(payload['groupId']) == null) {

@@ -835,6 +835,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       type: session.isIncoming ? 'call_decline' : 'hangup',
       session: session,
     );
+    if (!session.isIncoming) {
+      // Nobody answered: maybe nobody was there to hear it.
+      await _sendMissedCallNotice(session);
+    }
     await _closeCallMediaSession();
     if (_currentCallMatches(
       call: state.activeCall,
@@ -876,6 +880,41 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     await _persistState();
+  }
+
+  /// Tells the callee, reliably, that [session] (a call from here) rang
+  /// unanswered. The ring and its hangup are real-time only, so a callee
+  /// who was away (offline, the phone off) never learnt of the call; this
+  /// waits in the queue and in the callee's mailboxes like a message
+  /// (`call_missed`: the call id, its kind, when it was made). Only the
+  /// newest per caller waits (`relayReplaceKeyOf`). A callee whose phone
+  /// rang shows the call once: the call id is noted with the ring there. A
+  /// Zen before 1.16.5 ignores it; it never rings.
+  Future<void> _sendMissedCallNotice(CallSession session) async {
+    if (session.isIncoming ||
+        session.isGroup ||
+        !isRoutablePeerAddress(session.peerAddress)) {
+      return;
+    }
+    try {
+      await ref
+          .read(signalTransportProvider)
+          .send(
+            remoteAddress: session.peerAddress,
+            payload: <String, dynamic>{
+              'type': 'call_missed',
+              'callId': session.id,
+              'kind': session.kind.name,
+              'at': session.startedAtMillis,
+            },
+          );
+    } catch (error, stackTrace) {
+      logZenError(
+        'Telling the callee of a missed call failed',
+        error,
+        stackTrace,
+      );
+    }
   }
 
   void _armPendingOfferTimeout(CallSession session) {
@@ -1054,6 +1093,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         type: 'hangup',
         session: session,
       );
+      if (!session.isIncoming && session.status == CallSessionStatus.ringing) {
+        // Hung up before anyone answered.
+        await _sendMissedCallNotice(session);
+      }
     }
     await _closeCallMediaSession();
     state = state.copyWith(
@@ -1280,26 +1323,40 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       await _closeCallMediaSession();
       _pendingIncomingCallAccept = true;
     } else if (currentCall != null &&
-        currentCall.status == CallSessionStatus.active &&
-        !_currentCallMatchesSignal(currentCall, signal) &&
-        isRoutablePeerAddress(signal.sender)) {
-      await _sendCallSignal(
-        remoteAddress: signal.sender,
-        type: 'busy',
-        session: CallSession(
-          id: callId,
-          peerAddress: signal.sender,
-          displayName: _labelFor(signal, friends: state.friends),
-          kind: _callKind(signal.content),
-          status: CallSessionStatus.ringing,
-          startedAtMillis: timestamp,
-          isIncoming: true,
-        ),
-      );
-      return;
-    } else if (currentCall != null &&
-        currentCall.status != CallSessionStatus.active &&
         !_currentCallMatchesSignal(currentCall, signal)) {
+      final _SecondCall second = _secondCallAgainst(currentCall, signal);
+      if (second != _SecondCall.takesOver) {
+        // Another call's offer while this phone is on a call, rings out or
+        // is rung: "busy", as its invite gets, and the call here goes on
+        // with its media. Taken in, it replaced a call still ringing out.
+        // Nothing while the call here is being ended: the newcomer's next
+        // invite rings then.
+        if (second == _SecondCall.busy &&
+            !_isCallAlreadyTornDown(currentCall.id) &&
+            isRoutablePeerAddress(signal.sender)) {
+          await _sendCallSignal(
+            remoteAddress: signal.sender,
+            type: 'busy',
+            session: CallSession(
+              id: callId,
+              peerAddress: signal.sender,
+              displayName: _labelFor(signal, friends: state.friends),
+              kind: _callKind(signal.content),
+              status: CallSessionStatus.ringing,
+              startedAtMillis: timestamp,
+              isIncoming: true,
+            ),
+          );
+        }
+        if (second == _SecondCall.busy &&
+            currentCall.isIncoming &&
+            currentCall.status == CallSessionStatus.ringing &&
+            !_isCallAlreadyTornDown(currentCall.id)) {
+          _keepRingingCallOverRefusedOffer(currentCall, signal.sender, callId);
+        }
+        return;
+      }
+      // Their new call takes the place of their call ringing here.
       await _closeCallMediaSession();
     }
     final CallSession? nextCurrentCall = state.activeCall;
@@ -1375,6 +1432,35 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       // The unqueued one: this already runs inside the queue.
       await _acceptIncomingCall(peerAddress: signal.sender);
     }
+  }
+
+  /// An offer refused as "busy" while [kept] rings in: the offer's own step
+  /// in the signal reducer still puts the newcomer's call in the place of
+  /// any call ringing in, whoever sends it. Right after that step the call
+  /// that rings here is put back, so its ring goes on (its offer is still
+  /// held) and the refused call, already told "busy", is not left on the
+  /// screen with the real caller turned away as "busy" at its next invite.
+  void _keepRingingCallOverRefusedOffer(
+    CallSession kept,
+    String refusedCaller,
+    String refusedCallId,
+  ) {
+    unawaitedLogged(
+      _enqueueStateWork(() async {
+        final CallSession? now = state.activeCall;
+        if (now == null ||
+            now.id != refusedCallId ||
+            !PeerShareCodec.addressesEqual(now.peerAddress, refusedCaller) ||
+            _isCallAlreadyTornDown(kept.id)) {
+          return;
+        }
+        state = state.copyWith(activeCall: kept);
+        _syncCallRingingTimeout();
+        await _persistState();
+        await _syncRingingCallWindow();
+      }),
+      context: 'Keeping the ringing call over a refused one failed',
+    );
   }
 
   @override

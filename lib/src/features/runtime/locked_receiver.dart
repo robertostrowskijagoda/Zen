@@ -70,11 +70,15 @@ const Set<String> _realTimeTypes = <String>{
   'transfer_answer',
 };
 
+/// A missed call told afterwards ([kCallMissedType]) is no part of a call
+/// in progress: it comes reliably, is kept like a message, and leaves the
+/// "missed call" notice ([LockedReceiver._announceMissedCall]).
 bool _isRealTime(String type) =>
-    _realTimeTypes.contains(type) ||
-    type.startsWith('call_') ||
-    type.startsWith('group_call_') ||
-    type.startsWith('gc_');
+    type != kCallMissedType &&
+    (_realTimeTypes.contains(type) ||
+        type.startsWith('call_') ||
+        type.startsWith('group_call_') ||
+        type.startsWith('gc_'));
 
 const Set<String> _ringTypes = <String>{'call_invite', 'group_call_invite'};
 const Set<String> _ringEndTypes = <String>{
@@ -834,6 +838,12 @@ final class LockedReceiver {
   int _keptAtPoll = 0;
   Timer? _ringTimer;
   String? _ringingFrom;
+
+  /// The calls (`<caller>|<call id>`) that rang here in this run, newest
+  /// last: each left its "missed call" when its ring ended, so the caller's
+  /// later word that it went unanswered ([kCallMissedType]) adds none.
+  final List<String> _rangHere = <String>[];
+  static const int _maxRangHere = 64;
   bool _running = false;
 
   /// What was kept in this run (repeats are not kept twice).
@@ -1815,6 +1825,10 @@ final class LockedReceiver {
     BackgroundContactKind kind, {
     String from = '',
   }) async {
+    if (type == kCallMissedType) {
+      await _announceMissedCall(from, payload);
+      return;
+    }
     if (type == 'msg_delete' || type == 'msg_edit') {
       if (kind != BackgroundContactKind.stranger) {
         await _withdrawNoticeOf(from, payload);
@@ -2047,6 +2061,13 @@ final class LockedReceiver {
       }
       final bool fresh = _ringingFrom == null;
       _ringingFrom = from;
+      final String rang = _rangKey(from, call.callId);
+      if (!_rangHere.contains(rang)) {
+        _rangHere.add(rang);
+        while (_rangHere.length > _maxRangHere) {
+          _rangHere.removeAt(0);
+        }
+      }
       // Awake while it rings: the ring ends (and "missed call" shows) when
       // the invites stop, which only a running timer notices.
       unawaited(
@@ -2092,24 +2113,63 @@ final class LockedReceiver {
     await hideIncomingCallPopup();
     try {
       await _notices.dismissSlot(kLockedCallSlot);
-      await _post(
-        RuntimeSystemNotification(
-          id: '$kLockedMissedCallSlot-${_now()}',
-          title: t('Nieodebrane połączenie'),
-          body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
-          createdAtMillis: _now(),
-          category: RuntimeSystemNotificationCategory.message,
-          kind: NoticeKind.call,
-          routeKey: buildInboxRouteKey(),
-          slotKey: kLockedMissedCallSlot,
-          contentRedacted: true,
-        ),
-      );
+      await _postMissedCall();
     } finally {
       unawaited(
         ZenWake.release(tag: 'ring', after: const Duration(seconds: 1)),
       );
     }
+  }
+
+  static String _rangKey(String from, String? callId) =>
+      '${PeerShareCodec.normalizeAddress(from)}|${callId?.trim() ?? ''}';
+
+  /// The "missed call" a ring leaves when it ends, and a missed call told
+  /// afterwards leaves too.
+  Future<void> _postMissedCall() => _post(
+    RuntimeSystemNotification(
+      id: '$kLockedMissedCallSlot-${_now()}',
+      title: t('Nieodebrane połączenie'),
+      body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
+      createdAtMillis: _now(),
+      category: RuntimeSystemNotificationCategory.message,
+      kind: NoticeKind.call,
+      routeKey: buildInboxRouteKey(),
+      slotKey: kLockedMissedCallSlot,
+      contentRedacted: true,
+    ),
+  );
+
+  /// A caller's word, sent reliably after its ring, that the call went
+  /// unanswered ([kCallMissedType]); kept for the app, which notes it in the
+  /// chat after unlock. A call still ringing here (its hangup got lost)
+  /// stops ringing, which leaves the "missed call"; a call whose ring this
+  /// receiver followed left it already; a call that never rang here (the
+  /// phone was away or off) leaves it now. Only as the app tells of it
+  /// ([incomingAlertOf]: from a friend, "Połączenia" on).
+  Future<void> _announceMissedCall(
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final ZenSignal? missed = _signalOf(from, payload);
+    if (missed == null ||
+        incomingAlertOf(missed, _alertFacts, nowMillis: _now()) !=
+            IncomingAlert.notice) {
+      return;
+    }
+    final String rang = _rangKey(from, missed.callId);
+    if (_rangHere.contains(rang)) {
+      if (_ringingFrom == PeerShareCodec.normalizeAddress(from) &&
+          _rangHere.last == rang) {
+        await _ringEnded();
+      }
+      return;
+    }
+    _rangHere.add(rang);
+    while (_rangHere.length > _maxRangHere) {
+      _rangHere.removeAt(0);
+    }
+    await _postMissedCall();
   }
 
   /// The power-button shortcut while the app is locked or closed: the alarm

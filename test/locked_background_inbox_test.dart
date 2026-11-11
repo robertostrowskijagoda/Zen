@@ -1814,6 +1814,108 @@ void main() {
       );
     });
 
+    group('a missed call its caller tells of afterwards', () {
+      List<String> slots() => <String>[
+        for (final RuntimeSystemNotification n in notices.activeNotifications)
+          n.slotKey ?? '',
+      ];
+
+      test('a call that never rang here (the phone was away) is kept for '
+          'the app, confirmed, and leaves one "missed call"', () async {
+        await startReceiver(await publishFor(_masterKey()));
+        final List<bool> rings = <bool>[];
+        receiver.ringForCall = (bool on) async => rings.add(on);
+        transport.sentSignals.clear();
+        final Map<String, dynamic> missed = <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c-away',
+          'kind': 'audio',
+          'at': 900,
+          '_rid': 'cm1',
+        };
+        await receive(_ada, missed);
+        expect(receiver.keptCount, 1);
+        expect(
+          transport.sentSignals.where(
+            (s) => s.payload['type'] == 'rly_ack' && s.payload['rid'] == 'cm1',
+          ),
+          hasLength(1),
+        );
+        expect(slots(), <String>[kLockedMissedCallSlot]);
+        expect(rings, isEmpty, reason: 'it never rings');
+        // Its sender tries again until it hears the acknowledgement.
+        await notices.clear();
+        await receive(_ada, missed);
+        expect(receiver.keptCount, 1);
+        expect(notices.activeNotifications, isEmpty);
+      });
+
+      test('a call whose ring this phone followed left its "missed call" '
+          'already; one still ringing (its hangup got lost) stops', () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          ringTimeout: const Duration(milliseconds: 40),
+        );
+        await receive(_ada, <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c1',
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        expect(slots(), <String>[kLockedMissedCallSlot]);
+        await notices.clear();
+        await receive(_ada, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c1',
+          '_rid': 'cm-c1',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        expect(receiver.keptCount, 1, reason: 'still kept for the app');
+
+        await receive(_bob, <String, dynamic>{
+          'type': 'call_invite',
+          'callId': 'c2',
+        });
+        expect(slots(), <String>[kLockedCallSlot]);
+        await receive(_bob, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c2',
+          '_rid': 'cm-c2',
+        });
+        expect(slots(), <String>[kLockedMissedCallSlot]);
+      });
+
+      test('only as the app tells of it: not with "Połączenia" off, not '
+          "from someone who is no friend", () async {
+        await startReceiver(
+          await publishFor(_masterKey()),
+          noticeKit: const LockedNoticeKit(
+            muted: <NoticeKind>{NoticeKind.call},
+          ),
+        );
+        await receive(_ada, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c3',
+          '_rid': 'cm-c3',
+        });
+        expect(notices.activeNotifications, isEmpty);
+        expect(receiver.keptCount, 1, reason: 'the chat still notes it');
+        await receiver.stop();
+
+        await startReceiver(await publishFor(_masterKey()));
+        await receive(_member, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c4',
+          '_rid': 'cm-c4',
+        });
+        await receive(_stranger, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'c5',
+          '_rid': 'cm-c5',
+        });
+        expect(notices.activeNotifications, isEmpty);
+      });
+    });
+
     test('a friend\'s alarm is loud; anyone else\'s is only kept', () async {
       await startReceiver(await publishFor(_masterKey()));
       await receive(_member, <String, dynamic>{

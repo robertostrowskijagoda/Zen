@@ -655,6 +655,56 @@ void main() {
       );
     });
 
+    test('missed calls to a friend who is away wait in their mailboxes, the '
+        'newest per caller, and reach them when back', () async {
+      final _World w = await _circle(<String, int>{
+        'owner': 1,
+        'ania': 1,
+        'bartek': 1,
+        'celina': 1,
+      });
+      final _Device me = w['owner'].devices.first;
+      final _Device bartek = w['bartek'].devices.first;
+      await w.setOnline(bartek, false);
+      for (int i = 1; i <= 3; i++) {
+        await w.sendToDevice(me, bartek, <String, dynamic>{
+          'type': 'call_missed',
+          'callId': 'call-$i',
+          'kind': 'audio',
+          'at': w.now,
+        });
+        await w.advance(const Duration(minutes: 1));
+      }
+      expect(
+        <Object?>[
+          for (final RelayOutboxEntry e
+              in (await me.store.load()).outbox.values)
+            e.payload['callId'],
+        ],
+        <Object?>['call-3'],
+      );
+      for (final String m in <String>['ania', 'celina']) {
+        final Map<String, Map<String, dynamic>> held =
+            (await w[m].devices.first.store.load()).mailbox[bartek.address]!;
+        expect(held, hasLength(1), reason: '$m holds the newest only');
+      }
+      // Its own kind of mail: a device taken for gone still gets it.
+      expect(
+        relayIsPersonalPayload(<String, dynamic>{'type': 'call_missed'}),
+        isTrue,
+      );
+      await w.setOnline(bartek, true);
+      await w.advance(const Duration(minutes: 1));
+      expect(
+        <Object?>[
+          for (final Map<String, dynamic> p in bartek.got)
+            if (p['type'] == 'call_missed') p['callId'],
+        ],
+        <Object?>['call-3'],
+      );
+      expect((await me.store.load()).outbox, isEmpty);
+    });
+
     test('a fellow mailbox catching up cannot make a mailbox drop what the '
         'sender handed in', () async {
       final _World w = await _circle(<String, int>{

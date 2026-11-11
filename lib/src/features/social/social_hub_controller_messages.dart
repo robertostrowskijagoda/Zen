@@ -1,6 +1,11 @@
 part of 'social_hub_controller.dart';
 
 mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
+  /// The calls (`<caller>|<call id>`) noted as missed in this run, newest
+  /// last: a caller re-sends its invite every second until "busy" lands, and
+  /// the chat is read only for the first of them.
+  final List<String> _missedCallsNoted = <String>[];
+
   /// Sends [text] to [peerAddress]; as a reply to [replyTo], or marked as
   /// [forwarded] from another chat.
   @override
@@ -792,30 +797,14 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           await _closeCallMediaSession();
           _pendingIncomingCallAccept = true;
         } else if (currentCall != null &&
-            currentCall.status == CallSessionStatus.active &&
-            !_currentCallMatchesSignal(currentCall, signal) &&
-            isRoutablePeerAddress(signal.sender)) {
-          await _sendCallSignal(
-            remoteAddress: signal.sender,
-            type: 'busy',
-            session: CallSession(
-              id: signal.callId?.trim().isNotEmpty == true
-                  ? signal.callId!.trim()
-                  : 'call-$timestamp-${signal.sender}',
-              peerAddress: signal.sender,
-              displayName:
-                  state.friends[signal.sender]?.displayLabel ??
-                  _labelFor(signal, friends: state.friends),
-              kind: _callKind(signal.content),
-              status: CallSessionStatus.ringing,
-              startedAtMillis: timestamp,
-              isIncoming: true,
-            ),
-          );
-          return;
-        } else if (currentCall != null &&
-            currentCall.status != CallSessionStatus.active &&
             !_currentCallMatchesSignal(currentCall, signal)) {
+          if (_secondCallAgainst(currentCall, signal) !=
+              _SecondCall.takesOver) {
+            await _refuseSecondCall(currentCall, signal, timestamp);
+            return;
+          }
+          // The person whose call rings here calls anew (their phone
+          // started over): the new call takes the old one's place.
           await _closeCallMediaSession();
         } else if (_isKnownCallSignal(currentCall, signal)) {
           // The caller re-sends its invite once per second: the ringing
@@ -849,6 +838,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           peerAddress: signal.sender,
           event: SocialEventText('call.inviteIn', <String, String>{
             'kind': _callKind(signal.content).name,
+            // The ring reached this phone: the caller's later word that it
+            // went unanswered adds nothing (see `_noteMissedCall`).
+            if (signal.callId?.trim().isNotEmpty ?? false)
+              _kCallEventArg: signal.callId!.trim(),
           }),
           timestamp: timestamp,
         );
@@ -947,6 +940,14 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         );
         return;
       case ZenSignalType.callEnd:
+        if (isMissedCallNotice(signal) &&
+            !_isKnownCallSignal(state.activeCall, signal)) {
+          // The caller's word, sent reliably after its ring, that nobody
+          // answered. A call still on file here (its hangup got lost) ends
+          // below as a hangup ends it.
+          await _noteMissedCallNotice(signal, timestamp);
+          return;
+        }
         if (!_isTeardownForCurrentCall(signal)) {
           return;
         }
@@ -1578,6 +1579,138 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     return true;
   }
 
+  /// Another call coming while this phone is on one, rings out, or is rung
+  /// ([_secondCallAgainst]): the caller hears "busy", and the call already
+  /// here goes on untouched, its media too. Closing them dropped a call
+  /// still ringing out for the newcomer's, and the person called was never
+  /// told: their phone rang on, and answered it waited on "Łączenie…" for a
+  /// call that was gone. The one who called is noted as a missed call.
+  ///
+  /// Not while the call here is being ended (hung up, its ring run out): the
+  /// newcomer's invite comes again a second later and then rings as any call
+  /// does.
+  Future<void> _refuseSecondCall(
+    CallSession current,
+    ZenSignal signal,
+    int timestamp,
+  ) async {
+    if (_isCallAlreadyTornDown(current.id) ||
+        _secondCallAgainst(current, signal) != _SecondCall.busy) {
+      return;
+    }
+    final String callId = signal.callId?.trim() ?? '';
+    final CallSession refused = CallSession(
+      id: callId.isNotEmpty ? callId : 'call-$timestamp-${signal.sender}',
+      peerAddress: signal.sender,
+      displayName:
+          state.friends[signal.sender]?.displayLabel ??
+          _labelFor(signal, friends: state.friends),
+      kind: _callKind(signal.content),
+      status: CallSessionStatus.ringing,
+      startedAtMillis: timestamp,
+      isIncoming: true,
+    );
+    if (isRoutablePeerAddress(signal.sender)) {
+      try {
+        await _sendCallSignal(
+          remoteAddress: signal.sender,
+          type: 'busy',
+          session: refused,
+        );
+      } catch (error, stackTrace) {
+        logZenError('Answering a second call "busy" failed', error, stackTrace);
+      }
+    }
+    if (callId.isNotEmpty) {
+      // The caller re-sends its invite every second until "busy" lands:
+      // noted once, by its call id.
+      await _noteMissedCall(refused, timestamp: timestamp);
+    }
+  }
+
+  /// A caller's word that its ring went unanswered ([isMissedCallNotice]),
+  /// for a call not on file here: noted as a missed call at the time it was
+  /// made (never later than now: the caller's clock may run ahead).
+  Future<void> _noteMissedCallNotice(ZenSignal signal, int timestamp) async {
+    final String callId = signal.callId?.trim() ?? '';
+    if (callId.isEmpty || _isCallAlreadyTornDown(callId)) {
+      // Ended here while it rang (the caller hung up, the ring ran out, it
+      // was declined): that left its own note already.
+      return;
+    }
+    final int calledAt = min(signal.sentAtMillis ?? timestamp, timestamp);
+    await _noteMissedCall(
+      CallSession(
+        id: callId,
+        peerAddress: signal.sender,
+        displayName:
+            state.friends[signal.sender]?.displayLabel ??
+            _labelFor(signal, friends: state.friends),
+        kind: _callKind(signal.content),
+        status: CallSessionStatus.ringing,
+        startedAtMillis: calledAt,
+        isIncoming: true,
+      ),
+      timestamp: timestamp,
+    );
+  }
+
+  /// Notes in the chat with [call]'s caller that [call] went unanswered
+  /// here, once per call: nothing when the chat already tells of that call
+  /// (its invite came, or it was noted as missed before). The line stands
+  /// at the time the call was made. Its notification comes as the app's
+  /// other missed-call notices do: while nobody sees the app, from a friend,
+  /// with "Połączenia" on ([missedCallTold]).
+  Future<void> _noteMissedCall(
+    CallSession call, {
+    required int timestamp,
+  }) async {
+    final String peer = call.peerAddress;
+    final String key = '$peer|${call.id}';
+    if (_missedCallsNoted.contains(key)) {
+      return;
+    }
+    _missedCallsNoted.add(key);
+    while (_missedCallsNoted.length > 64) {
+      _missedCallsNoted.removeAt(0);
+    }
+    final List<ChatMessage> thread = await _messageTimelineStore.load(peer);
+    if (thread.any(
+      (ChatMessage m) => chatMessageEvent(m)?.args[_kCallEventArg] == call.id,
+    )) {
+      return;
+    }
+    final SocialEventText missed = SocialEventText(
+      'call.missed',
+      <String, String>{'kind': call.kind.name, _kCallEventArg: call.id},
+    );
+    await _upsertTimelineMessage(
+      peerAddress: peer,
+      messageId: 'system-missed-${call.id}',
+      build: (ChatMessage? existing) =>
+          existing ??
+          chatMessageWithEvent(
+            ChatMessage(
+              id: 'system-missed-${call.id}',
+              sender: 'system',
+              text: missed.render(),
+              sentAtMillis: call.startedAtMillis,
+              direction: ChatMessageDirection.system,
+            ),
+            missed,
+          ),
+      byTime: true,
+    );
+    if (missedCallTold(peer, _alertFacts) && await _nobodySeesTheApp()) {
+      await _systemNotifications.show(
+        _missedCallSystemNotification(
+          session: call,
+          createdAtMillis: timestamp,
+        ),
+      );
+    }
+  }
+
   @override
   Future<void> _sendCallSignalQuietly({
     required String remoteAddress,
@@ -1630,6 +1763,49 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       );
     }
   }
+}
+
+/// The argument of a call's chat line ([SocialEventText]) that names the
+/// call (`call.inviteIn`, `call.missed`): a missed call the caller tells of
+/// afterwards is noted only for a call the chat does not tell of yet.
+const String _kCallEventArg = 'call';
+
+/// How a call's invite or offer is met while another call is on file here.
+enum _SecondCall {
+  /// It takes the place of the call ringing here: the same person calls
+  /// anew (their phone started over).
+  takesOver,
+
+  /// "Busy": the call here goes on.
+  busy,
+
+  /// Left alone: the person this phone calls, calling in a form the call
+  /// on file cannot be told apart from (no call id).
+  ignored,
+}
+
+/// How a call [signal] (an invite or an offer) of a call other than
+/// [current] is met. A call already talking, one ringing out, one being
+/// answered, a group call ringing in, and a call ringing in from someone
+/// else all stay; the newcomer hears "busy". Only the person whose call
+/// rings here may replace it with a new call of theirs, as the state
+/// reducer does (`_shouldKeepCurrentCallOnIncomingSignal`). Two people
+/// calling each other at once are told apart before this
+/// (`_isSimultaneousCallGlare`).
+_SecondCall _secondCallAgainst(CallSession current, ZenSignal signal) {
+  if (current.status == CallSessionStatus.active) {
+    return _SecondCall.busy;
+  }
+  if (current.isIncoming &&
+      current.status == CallSessionStatus.ringing &&
+      current.peerAddress == signal.sender) {
+    return _SecondCall.takesOver;
+  }
+  if (!current.isGroup &&
+      PeerShareCodec.addressesEqual(current.peerAddress, signal.sender)) {
+    return _SecondCall.ignored;
+  }
+  return _SecondCall.busy;
 }
 
 /// The id of a friend's chat message: its own, else one made from what it

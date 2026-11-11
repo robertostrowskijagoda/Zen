@@ -291,6 +291,18 @@ bool callInviteAdmitted(ZenSignal signal, AlertFacts facts) {
 bool callRings(ZenSignal signal, AlertFacts facts) =>
     callInviteAdmitted(signal, facts) && !facts.mutes(NoticeKind.call);
 
+/// Whether [signal] is a caller's word that its ring ended unanswered
+/// ([kCallMissedType]), read as the end of that call.
+bool isMissedCallNotice(ZenSignal signal) =>
+    signal.type == ZenSignalType.callEnd &&
+    signal.chatExtras?[kMissedCallMark] == true;
+
+/// Whether a call from [caller] that nobody answered here leaves a notice:
+/// from a friend (only friends may ring), and "Połączenia" not switched off.
+/// The chat notes the missed call either way.
+bool missedCallTold(String caller, AlertFacts facts) =>
+    facts.isFriend(caller) && !facts.mutes(NoticeKind.call);
+
 /// How long the limit on mention notices from one person counts back.
 const Duration kMentionAlertWindow = Duration(minutes: 10);
 
@@ -398,6 +410,8 @@ NoticeKind chatNoticeKind(ZenSignal signal) => switch (signal.type) {
 /// signal, which these rules do not cover.
 ///
 /// * A call: [IncomingAlert.ring] when [callRings], else nothing.
+/// * A missed call told by its caller ([isMissedCallNotice]): a notice when
+///   [missedCallTold], else nothing. Never a ring.
 /// * A message: a notice when it comes from a friend; a group message: when
 ///   its sender speaks in that joined group. Either: unless the
 ///   conversation is quiet ([chatIsQuiet]) or its switch
@@ -411,6 +425,10 @@ IncomingAlert? incomingAlertOf(
     case ZenSignalType.callInvite || ZenSignalType.groupCallInvite:
       return callRings(signal, facts)
           ? IncomingAlert.ring
+          : IncomingAlert.nothing;
+    case ZenSignalType.callEnd when isMissedCallNotice(signal):
+      return missedCallTold(signal.sender, facts)
+          ? IncomingAlert.notice
           : IncomingAlert.nothing;
     case ZenSignalType.message:
       if (!facts.isFriend(signal.sender)) {

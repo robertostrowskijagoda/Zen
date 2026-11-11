@@ -522,6 +522,9 @@ const Set<String> kReliablePayloadTypes = <String>{
   'lg_mention',
   'profile_update',
   'disappear_timer',
+  // A ring that ended unanswered (the ring itself is real-time only): a
+  // callee who was away learns of the call when back.
+  'call_missed',
   // Meeting features: a friend offline now still gets them.
   'intent',
   'alarm',
@@ -667,6 +670,11 @@ String? relayReplaceKeyOf(Map<String, dynamic> payload) {
     // A friend's terms at this person's gates: each send carries them all.
     case 'intro_gate':
     case kRelayReceiptType:
+    // The caller's newest missed call: what the callee acts on is that this
+    // friend tried to reach them and when last (one call back answers every
+    // ring before it), so one waits per caller, however often they rang
+    // while the callee was away.
+    case 'call_missed':
       return type as String;
     case 'message_read':
       // The receipt names the newest message read: it covers the older ones
@@ -681,9 +689,9 @@ String? relayReplaceKeyOf(Map<String, dynamic> payload) {
 
 /// Whether [payload] is something a person sent to a person: a message,
 /// an attachment, an invitation, a call notice ([kRelayNoticeTypes]), a
-/// reaction, edit or deletion of a message, the disappearing timer, or the
-/// sender's profile (only the newest waits, and nothing sends it again by
-/// itself). A friend's device taken for gone still gets these, as any
+/// missed call, a reaction, edit or deletion of a message, the disappearing
+/// timer, or the sender's profile (only the newest waits, and nothing sends
+/// it again by itself). A friend's device taken for gone still gets these, as any
 /// device that is away does: it may be a laptop opened every other week,
 /// and the copy between an account's own devices is a single datagram.
 /// Everything else is the app talking to itself (posts pushed ahead of the
@@ -705,6 +713,7 @@ const Set<String> _personalPayloadTypes = <String>{
   'msg_delete',
   'disappear_timer',
   'profile_update',
+  'call_missed',
 };
 
 /// Payload kinds that are worth less after a while than the general
