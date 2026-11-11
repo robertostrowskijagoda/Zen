@@ -28,7 +28,7 @@ final class AccountRestoreRow {
 String accountRestoreMethodLabel(AccountRestoreMethod m) => switch (m) {
   AccountRestoreMethod.device => t('Inne urządzenie'),
   AccountRestoreMethod.backupFile => t('Plik kopii'),
-  AccountRestoreMethod.circle => t('Krąg odzyskiwania'),
+  AccountRestoreMethod.circle => t('Klucz u przyjaciół'),
   AccountRestoreMethod.paperKey => t('Kartka z kluczem'),
   AccountRestoreMethod.keyFile => t('Plik klucza'),
 };
@@ -266,7 +266,7 @@ class AccountRestoreInfoScreen extends StatelessWidget {
               ),
               _Way(
                 icon: Icons.groups_2_outlined,
-                title: t('Krąg odzyskiwania'),
+                title: t('Klucz u przyjaciół'),
                 text: t(
                   'Przyjaciele z kawałkami klucza (dwóch, trzech albo '
                   'czterech, zależnie od tego, ilu je ma) oddają je po 24 h, '

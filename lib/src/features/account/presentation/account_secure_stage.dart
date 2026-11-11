@@ -183,7 +183,7 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   Text(
-                    t('Krąg odzyskiwania'),
+                    t('Klucz u przyjaciół'),
                     style: TextStyle(
                       color: zen.textPrimary,
                       fontWeight: FontWeight.w700,
