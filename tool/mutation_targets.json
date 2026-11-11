@@ -563,5 +563,26 @@
     "tests": [
       "test/meet_friend_list_keys_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/features/account/recovery_service.dart",
+    "tests": [
+      "test/account_recovery_friends_test.dart",
+      "test/account_recovery_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/account_recovery.dart",
+    "tests": [
+      "test/account_recovery_friends_test.dart",
+      "test/account_recovery_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/recovery_circle_pick.dart",
+    "tests": [
+      "test/account_recovery_friends_test.dart",
+      "test/privacy_levels_test.dart"
+    ]
   }
 ]
