@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
+import 'package:zen/src/features/account/recovery_providers.dart';
+import 'package:zen/src/features/account/recovery_service.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -29,21 +31,28 @@ final FutureProvider<bool> ledgerIdentityLoadedProvider = FutureProvider<bool>((
   return node.isReady;
 });
 
-/// Whether the account is secured against a lost phone: the recovery
-/// circle holds pieces (an account password is set) or the paper copy of
-/// the key was written down. `false` while the account is still starting
-/// (nothing proves it is secured).
+/// Whether the account is secured against a lost phone: a copy of the key
+/// was made (`paperBackupDone`: the paper code or the key file, on any of
+/// the account's devices), or enough close friends confirmed their pieces
+/// for a recovery (the current generation's threshold, or two of a circle
+/// of 1.16.4 still valid). An account password alone, with nobody holding
+/// a piece yet, is not enough. `false` while the account is still
+/// starting (nothing proves it is secured).
 bool accountIsSecured(T Function<T>(ProviderListenable<T> provider) watch) {
   if (watch(appSettingsControllerProvider).paperBackupDone) {
     return true;
   }
-  final LedgerNode? node = watch(ledgerNodeProvider);
-  return node != null && node.isReady && node.identity.hasPassword;
+  return watch(recoveryProtectionProvider).value?.secured ?? false;
 }
 
-/// Whether the recovery circle holds pieces of this account (an account
-/// password is set and the pieces were handed out with it).
+/// Whether the person did their part for the pieces with friends: an
+/// account password is set for them (the pieces then follow the close
+/// friends by themselves), or a circle of 1.16.4 is still there.
 bool accountHasCircle(T Function<T>(ProviderListenable<T> provider) watch) {
+  final RecoveryProtection? p = watch(recoveryProtectionProvider).value;
+  if (p != null && (p.sealed || p.legacy > 0)) {
+    return true;
+  }
   final LedgerNode? node = watch(ledgerNodeProvider);
   return node != null && node.isReady && node.identity.hasPassword;
 }
@@ -56,11 +65,11 @@ bool _identityLoaded(Ref ref) =>
 /// The id in `AppSettings.seenTips` of a dismissed circle reminder.
 const String kCircleReminderTip = 'circle-reminder';
 
-/// Whether the person should be told, once, that the circle can be set
-/// up now: enough friends ([kRecoveryCircleMinimum]) and no circle yet — also
+/// Whether the person should be told, once, to set the account password
+/// so that close friends keep pieces of the key: enough friends
+/// ([kRecoveryCircleMinimum]) and no password for the pieces yet — also
 /// when a key copy was made, since the key alone does not bring friends
-/// and conversations back. Gone after "Nie teraz" or once the circle is
-/// there.
+/// and conversations back. Gone after "Nie teraz" or once it is set.
 bool circleReminderDue({
   required bool ledgerOn,
   required bool hasCircle,

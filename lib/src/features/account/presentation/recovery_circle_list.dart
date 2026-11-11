@@ -27,14 +27,18 @@ typedef RecoveryCircleMember = ({
   bool confirmed,
 });
 
-/// The circle of [service] with names from [social].
+/// Who holds this account's pieces, with names from [social]: the close
+/// friends of the current generation (confirmed: they have this one), or,
+/// while there is none, the circle of 1.16.4 and earlier.
 List<RecoveryCircleMember> recoveryCircleMembers(
   RecoveryService service,
   SocialHubState social,
 ) {
-  final Map<String, int> acks = service.acks;
+  final RecoveryGeneration? g = service.generation;
+  final bool current = g != null && g.holders.isNotEmpty;
+  final Map<String, int> acks = current ? g.acks : service.acks;
   return <RecoveryCircleMember>[
-    for (final String address in service.circle)
+    for (final String address in current ? g.holders : service.circle)
       (
         address: address,
         name: switch (social.friendByAddress(address)) {
@@ -42,9 +46,17 @@ List<RecoveryCircleMember> recoveryCircleMembers(
           null => PeerShareCodec.displayNameForAddress(address),
         },
         inviteCode: PeerShareCodec.inviteCodeForAddress(address),
-        confirmed: acks.containsKey(address),
+        confirmed: current
+            ? acks[address] == g.generation
+            : acks.containsKey(address),
       ),
   ];
+}
+
+/// How many of [service]'s holders a recovery needs now.
+int recoveryCircleThreshold(RecoveryService service) {
+  final RecoveryGeneration? g = service.generation;
+  return g != null && g.holders.isNotEmpty ? g.threshold : kNormalThreshold;
 }
 
 /// The list to keep with the paper key: who holds the pieces, with their
@@ -52,6 +64,7 @@ List<RecoveryCircleMember> recoveryCircleMembers(
 String recoveryCircleListText({
   required String fingerprint,
   required List<RecoveryCircleMember> members,
+  int threshold = kNormalThreshold,
 }) {
   final StringBuffer out = StringBuffer()
     ..writeln(t('Zen — krąg odzyskiwania'))
@@ -77,8 +90,10 @@ String recoveryCircleListText({
     ..writeln(
       t(
         'Nowy telefon: Konto i odzyskiwanie → Zacznij odzyskiwanie. Wpisz '
-        'tam kody tych osób i poproś dwie z nich o pomoc. Potrzebne będzie '
-        'hasło konta: bez niego konta nie da się odzyskać.',
+        'tam kody tych osób i poproś o pomoc co najmniej {t} z nich (lista '
+        'mogła się zmienić z Twoimi przyjaciółmi). Potrzebne będzie hasło '
+        'konta: bez niego konta nie da się odzyskać.',
+        <String, Object?>{'t': threshold},
       ),
     );
   return out.toString();
@@ -94,10 +109,12 @@ class RecoveryCircleMembersView extends ConsumerWidget {
     WidgetRef ref,
     String fingerprint,
     List<RecoveryCircleMember> members,
+    int threshold,
   ) async {
     final String text = recoveryCircleListText(
       fingerprint: fingerprint,
       members: members,
+      threshold: threshold,
     );
     String? path;
     Object? failure;
@@ -210,8 +227,15 @@ class RecoveryCircleMembersView extends ConsumerWidget {
             const SizedBox(height: 6),
             OutlinedButton.icon(
               key: const Key('recovery-circle-save'),
-              onPressed: () =>
-                  unawaited(_save(context, ref, fingerprint, members)),
+              onPressed: () => unawaited(
+                _save(
+                  context,
+                  ref,
+                  fingerprint,
+                  members,
+                  recoveryCircleThreshold(service),
+                ),
+              ),
               icon: const Icon(Icons.print_outlined),
               label: Text(t('Zapisz listę do wydruku')),
             ),

@@ -15,6 +15,7 @@ import 'package:zen/src/features/account/recovery_service.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -409,7 +410,9 @@ void main() {
       );
       await _settle();
       expect(services[owner]!.acks, hasLength(6));
-      expect(services[helpers[0]]!.heldFor, <String>[owner]);
+      // Unsigned pieces (as 1.16.4 hands them out) are kept under the
+      // address they came from.
+      expect(services[helpers[0]]!.heldFor, <String>['legacy|$owner']);
       expect(services[helpers[0]]!.heldAccount(owner), key.id);
 
       final RecoveryService f = services[fresh]!;
@@ -546,7 +549,8 @@ void main() {
       await _settle();
       await services[owner]!.cancelAlarm(services[owner]!.alarms.single);
       await _settle();
-      expect(services[helpers[2]]!.pending, isEmpty);
+      // Stopped: kept, so the helper can still give it after all.
+      expect(services[helpers[2]]!.pending.single.stopped, isNotNull);
       now += kEmergencyDelay.inMilliseconds;
       await services[helpers[2]]!.tick();
       await _settle();
@@ -673,7 +677,8 @@ void main() {
     );
   });
 
-  testWidgets('the screen offers the circle only with enough friends', (
+  testWidgets('the screen explains the rule, says there are no pieces '
+      'without the password, and refuses the app password', (
     WidgetTester tester,
   ) async {
     // A tall window: the whole screen (with the circle's backup card) is
@@ -681,6 +686,9 @@ void main() {
     tester.view.physicalSize = const Size(800, 3200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    const String appPassword = 'moje-haslo-aplikacji-77';
+    final MemoryAppSecurityService security = MemoryAppSecurityService();
+    await tester.runAsync(() => security.setPassword(appPassword));
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -689,6 +697,7 @@ void main() {
           ledgerNodeEnabledProvider.overrideWithValue(true),
           ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
           recoveryAcceptedCostsProvider.overrideWithValue(_lightCosts),
+          appSecurityServiceProvider.overrideWithValue(security),
         ],
         child: const MaterialApp(home: AccountRecoveryScreen()),
       ),
@@ -705,22 +714,47 @@ void main() {
     }
     expect(find.text('Nikt jeszcze nie powierzył Ci klucza.'), findsOneWidget);
 
-    // Without two friends the circle is not offered: the button waits,
-    // and the screen says why.
-    expect(find.byKey(const Key('recovery-circle-too-few')), findsOneWidget);
-    expect(find.textContaining('co najmniej 2 znajomych'), findsOneWidget);
+    // No circle to pick: the rule, and plainly that no piece exists
+    // without the account password.
+    expect(find.byKey(const Key('recovery-circle-picker')), findsNothing);
+    expect(find.textContaining('sam dostaje kawałek'), findsOneWidget);
+    expect(
+      find.text('Kawałków jeszcze nie ma: najpierw ustaw hasło konta.'),
+      findsOneWidget,
+    );
     // Without the password there is no way back, and the screen says so.
     expect(find.byKey(const Key('recovery-password-warning')), findsOneWidget);
+    // The password can be set before there are friends.
     expect(
       tester
           .widget<FilledButton>(find.byKey(const Key('recovery-set-password')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
     // The account password is told apart from the app password.
     expect(
       find.byKey(const Key('recovery-password-explained')),
       findsOneWidget,
+    );
+
+    // The app password is refused, with a clear text.
+    await tester.enterText(
+      find.byKey(const Key('recovery-password')),
+      appPassword,
+    );
+    await tester.enterText(
+      find.byKey(const Key('recovery-password-repeat')),
+      appPassword,
+    );
+    await tester.tap(find.byKey(const Key('recovery-set-password')));
+    final Finder message = find.byKey(const Key('recovery-message'));
+    for (int i = 0; i < 40 && message.evaluate().isEmpty; i++) {
+      await tester.runAsync(() => _settle());
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(
+      tester.widget<Text>(message).data,
+      'Hasło konta musi być inne niż hasło aplikacji.',
     );
 
     await tester.pumpWidget(const SizedBox.shrink());

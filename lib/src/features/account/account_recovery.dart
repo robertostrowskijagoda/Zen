@@ -8,28 +8,43 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/shamir.dart';
+import 'package:zen/src/features/passwords/password_generator.dart';
 
-/// Account password and recovery through the circle.
+/// Account password and recovery through the circle: the close friends.
 ///
-/// The account key (its 32-byte seed) is got back with 2 people from the
-/// circle + the account password, released by them 24 h after they agree
-/// to help (the old devices get an alarm and can stop it). There is no way
-/// back without the password (since 1.15.4: the "emergency" path of 4
-/// people without it is gone, a piece's `emergency` half opens nothing).
+/// The account key (its 32-byte seed) is got back with the account
+/// password and the pieces of several of the person's close friends
+/// ([FriendLevel.close]): every close friend holds one piece, by itself,
+/// and [pieceThreshold] of them are needed (2 of at most 4, 3 of 5–9, 4 of
+/// 10 or more), released 24 h after they agree to help (the old devices
+/// get an alarm and can stop it). There is no way back without the
+/// password.
 ///
-/// Each person holds one [RecoveryPiece]: a share of each of two random
-/// secrets plus the two encrypted copies of the seed. One piece alone
-/// reveals nothing; the delays are kept by the helpers' apps.
+/// Since 1.16.5 the seed is sealed twice. Inside, a [RecoverySeal]: the
+/// seed under the account password (Argon2id, [kRecoveryPasswordCost]),
+/// made once when the person sets the password and kept on the device
+/// that hands the pieces out. Around it, for each generation of pieces, a
+/// box under a fresh random circle secret, split [pieceThreshold] of n
+/// among the holders ([createGenerationPieces]). So the device makes new
+/// pieces whenever the close friends change, without the password, and a
+/// share of one generation never combines with a share of another.
 ///
 /// Known limits (by design, documented):
 ///
 /// * The delays and the alarm on the old devices are kept by honest apps
 ///   only. Helpers who modify their app can hand their halves over at once.
-/// * Two helpers who collude hold the whole circle secret of the normal
-///   half; what is left between them and the account is the account
-///   password, which they can then guess offline at their own pace. Every
-///   guess costs one Argon2id run ([kRecoveryPasswordCost], heavier than
-///   the device's own); a long passphrase is what really protects it.
+/// * Enough holders of one generation who collude open the circle box and
+///   get the [RecoverySeal]; what is left between them and the account is
+///   the account password, which they can then guess offline at their own
+///   pace. Every guess costs one Argon2id run ([kRecoveryPasswordCost]);
+///   so the password must be long ([checkRecoveryPassword]) and not the
+///   app password.
+/// * The seed never changes and the seal changes only with the password.
+///   An honest helper deletes a piece when told to forget it or when the
+///   friendship ended, and never releases an older generation once told;
+///   but people who were holders of the same generation at the same time,
+///   kept copies of their pieces against the app, and know or guess the
+///   account password of that time, can still open the seed together.
 /// * Pieces handed out before 1.15.4 still hold a working `emergency` half
 ///   (four helpers together, no password); helpers on 1.15.4 never release
 ///   it, and handing the pieces out again replaces them.
@@ -37,6 +52,18 @@ const int kNormalThreshold = 2;
 
 /// The fewest people a circle may have: as many as a recovery needs.
 const int kRecoveryCircleMinimum = kNormalThreshold;
+
+/// The most agreements a recovery may need (the largest band of
+/// [pieceThreshold]).
+const int kMaxPieceThreshold = 4;
+
+/// How many people must agree to a recovery when [holders] people keep
+/// pieces: 2 of at most 4, 3 of 5–9, 4 of 10 or more.
+int pieceThreshold(int holders) => holders <= 4
+    ? 2
+    : holders <= 9
+    ? 3
+    : kMaxPieceThreshold;
 const Duration kNormalDelay = Duration(hours: 24);
 const Duration kEmergencyDelay = Duration(days: 7);
 
@@ -103,8 +130,12 @@ const List<PasswordCost> kAcceptedRecoveryCosts = <PasswordCost>[
   kRecoveryPasswordCost,
 ];
 
-/// Minimum length of the account password.
+/// Minimum length of the account password kept on a device.
 const int kMinAccountPasswordLength = 8;
+
+/// Minimum length of an account password set since 1.16.5: the pieces
+/// leave the device, and enough holders together can guess it offline.
+const int kMinRecoveryPasswordLength = 12;
 
 /// For tests: hears the cost of every [derivePasswordKey] (how much work an
 /// answer took).
@@ -251,6 +282,181 @@ void checkAccountPassword(String password) {
   }
 }
 
+/// Throws [ArgumentError] (with a Polish message) for an account password
+/// too weak to protect pieces that leave the device: shorter than
+/// [kMinRecoveryPasswordLength], or easy to guess by the estimate the
+/// password manager shows (common, one kind of character in a run or a
+/// keyboard row, fewer than about 36 bits).
+void checkRecoveryPassword(String password) {
+  if (password.runes.length < kMinRecoveryPasswordLength) {
+    throw ArgumentError(
+      tn(
+        kMinRecoveryPasswordLength,
+        one: 'Hasło konta musi mieć co najmniej {n} znak.',
+        few: 'Hasło konta musi mieć co najmniej {n} znaki.',
+        many: 'Hasło konta musi mieć co najmniej {n} znaków.',
+      ),
+    );
+  }
+  final PasswordStrength strength = estimatePasswordStrength(password);
+  if (strength.level.index < PasswordStrengthLevel.fair.index ||
+      strength.weaknesses.contains(PasswordWeakness.common)) {
+    throw ArgumentError(
+      t('To hasło łatwo zgadnąć. Użyj dłuższego, najlepiej kilku słów.'),
+    );
+  }
+}
+
+/// The seed under the account password, the inside of every piece handed
+/// out since 1.16.5: made when the person sets the password (the seed is
+/// at hand only then) and kept on the device that hands the pieces out,
+/// which seals it again for each generation without the password.
+@immutable
+final class RecoverySeal {
+  const RecoverySeal({
+    required this.salt,
+    required this.cost,
+    required this.box,
+    required this.at,
+  });
+
+  final Uint8List salt;
+  final PasswordCost cost;
+
+  /// The seed sealed under the password's key (`{n, c}`).
+  final Map<String, dynamic> box;
+
+  /// When it was made (a new seal: a new generation of pieces).
+  final int at;
+
+  static Future<RecoverySeal> make(
+    Uint8List seed,
+    String password, {
+    required int now,
+    PasswordCost cost = kRecoveryPasswordCost,
+  }) async {
+    checkRecoveryPassword(password);
+    final Uint8List salt = randomBytes(16);
+    final Uint8List key = await derivePasswordKey(password, salt, cost: cost);
+    return RecoverySeal(
+      salt: salt,
+      cost: cost,
+      box: await _seal(_innerKey(key), seed),
+      at: now,
+    );
+  }
+
+  /// The box as bytes (nonce, then cipher text with its tag): what the
+  /// circle box of a generation seals.
+  Uint8List get boxBytes => Uint8List.fromList(<int>[
+    ...unb64(box['n'], length: 12)!,
+    ...unb64(box['c'], length: 48)!,
+  ]);
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'salt': b64(salt),
+    'cost': cost.toJson(),
+    'box': box,
+    'at': at,
+  };
+
+  static RecoverySeal? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final Uint8List? salt = unb64(json['salt'], length: 16);
+    final PasswordCost? cost = PasswordCost.fromJson(json['cost']);
+    final Object? box = json['box'];
+    final Object? at = json['at'];
+    if (salt == null ||
+        cost == null ||
+        box is! Map ||
+        unb64(box['n'], length: 12) == null ||
+        unb64(box['c'], length: 48) == null ||
+        at is! int) {
+      return null;
+    }
+    return RecoverySeal(
+      salt: salt,
+      cost: cost,
+      box: <String, dynamic>{'n': box['n'], 'c': box['c']},
+      at: at,
+    );
+  }
+}
+
+/// The key of a [RecoverySeal]'s box from the password's key.
+Uint8List _innerKey(Uint8List passwordKey) => Uint8List.fromList(
+  crypto.sha256.convert(<int>[
+    ...utf8.encode('zen.recovery.inner'),
+    ...passwordKey,
+  ]).bytes,
+);
+
+/// The key of a generation's circle box from its circle secret.
+Uint8List _outerKey(Uint8List circleSecret) => Uint8List.fromList(
+  crypto.sha256.convert(<int>[
+    ...utf8.encode('zen.recovery.outer'),
+    ...circleSecret,
+  ]).bytes,
+);
+
+/// The version of a piece's `normal` half made from a [RecoverySeal].
+const int kSealedPieceVersion = 2;
+
+/// One generation of pieces for [holders] people: a fresh circle secret,
+/// split [pieceThreshold] of [holders], seals [seal] again. A share opens
+/// nothing without [pieceThreshold] - 1 others of the same [generation].
+/// The `emergency` half keeps its old form (helpers on 1.16.4 and earlier
+/// take only pieces that have one) and holds random bytes.
+Future<List<RecoveryPiece>> createGenerationPieces({
+  required String account,
+  required RecoverySeal seal,
+  required int holders,
+  required int generation,
+}) async {
+  if (holders < kRecoveryCircleMinimum || holders > 255) {
+    throw ArgumentError.value(holders, 'holders');
+  }
+  final int threshold = pieceThreshold(holders);
+  final Uint8List circleSecret = randomBytes(32);
+  final Map<String, dynamic> box = await _seal(
+    _outerKey(circleSecret),
+    seal.boxBytes,
+  );
+  final List<Uint8List> shares = shamirSplit(circleSecret, threshold, holders);
+  final Uint8List emergencyKey = randomBytes(32);
+  final Map<String, dynamic> emergencyBox = await _seal(
+    emergencyKey,
+    randomBytes(32),
+  );
+  final List<Uint8List> emergencyShares = shamirSplit(
+    emergencyKey,
+    holders,
+    holders,
+  );
+  return <RecoveryPiece>[
+    for (int i = 0; i < holders; i++)
+      RecoveryPiece(
+        account: account,
+        created: generation,
+        normal: <String, dynamic>{
+          'v': kSealedPieceVersion,
+          'salt': b64(seal.salt),
+          'cost': seal.cost.toJson(),
+          'box': box,
+          'share': b64(shares[i]),
+          't': threshold,
+          'g': generation,
+        },
+        emergency: <String, dynamic>{
+          'box': emergencyBox,
+          'share': b64(emergencyShares[i]),
+        },
+      ),
+  ];
+}
+
 /// What one helper keeps for one account. [normal] and [emergency] are the
 /// two halves released separately (after [kNormalDelay] and
 /// [kEmergencyDelay]).
@@ -271,6 +477,17 @@ final class RecoveryPiece {
 
   /// `{box, share}`: needs three more pieces, no password.
   final Map<String, dynamic> emergency;
+
+  /// The generation it belongs to (when it was made; pieces of 1.16.4 and
+  /// earlier: when that circle was handed out).
+  int get generation => created;
+
+  /// How many pieces of its generation open it (2 for the pieces of 1.16.4
+  /// and earlier).
+  int get threshold => switch (normal['t']) {
+    final int t when t >= kNormalThreshold && t <= kMaxPieceThreshold => t,
+    _ => kNormalThreshold,
+  };
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'account': account,
@@ -306,7 +523,10 @@ final class RecoveryPiece {
   }
 }
 
-/// Splits the account [seed] into one piece per helper (the circle).
+/// Splits the account [seed] into one piece per helper: the form of the
+/// circles handed out by 1.16.4 and earlier (the seed sealed once, under
+/// the password and the circle secret together, 2 of n). Recovery still
+/// opens them; new pieces come from [createGenerationPieces].
 Future<List<RecoveryPiece>> createRecoveryPieces({
   required String account,
   required Uint8List seed,
@@ -405,10 +625,13 @@ Map<String, dynamic>? recoveryHalfFields(
   }
   final Object? box = half['box'];
   final Object? share = half['share'];
-  // A sealed 32-byte seed (+16 bytes of tag); a share of a 32-byte secret.
+  final bool sealed = normal && half['v'] == kSealedPieceVersion;
+  // A sealed 32-byte seed (+16 bytes of tag), or (a generation's circle
+  // box) a sealed seal: its nonce, the seed and two tags; a share of a
+  // 32-byte secret.
   if (box is! Map ||
       unb64(box['n'], length: 12) == null ||
-      unb64(box['c'], length: 48) == null ||
+      unb64(box['c'], length: sealed ? 12 + 48 + 16 : 48) == null ||
       unb64(share, length: 33) == null) {
     return null;
   }
@@ -425,10 +648,33 @@ Map<String, dynamic>? recoveryHalfFields(
       !acceptedCosts.contains(cost)) {
     return null;
   }
-  return fields
+  fields
     ..['salt'] = half['salt']
     ..['cost'] = cost.toJson();
+  if (!sealed) {
+    return fields;
+  }
+  final Object? threshold = half['t'];
+  final Object? generation = half['g'];
+  if (threshold is! int ||
+      threshold < kNormalThreshold ||
+      threshold > kMaxPieceThreshold ||
+      generation is! int ||
+      generation <= 0) {
+    return null;
+  }
+  return fields
+    ..['v'] = kSealedPieceVersion
+    ..['t'] = threshold
+    ..['g'] = generation;
 }
+
+/// How many halves of its set a received half needs (its generation's
+/// threshold; 2 for the halves of 1.16.4 and earlier).
+int recoveryHalfThreshold(Map<String, dynamic> half) =>
+    half['v'] == kSealedPieceVersion && half['t'] is int
+    ? (half['t'] as int).clamp(kNormalThreshold, kMaxPieceThreshold)
+    : kNormalThreshold;
 
 /// The account a received half names (`account`), or `null` when it names
 /// none.
@@ -516,14 +762,15 @@ Future<Uint8List?> _openHalves(
 /// account (several copies) are merged.
 Future<List<RecoveredAccount>> _recoverAccounts(
   List<Map<String, dynamic>> halves, {
-  required int threshold,
+  required int Function(List<Map<String, dynamic>> set) threshold,
   required String Function(Map<String, dynamic> half) setKey,
   required Future<_Opener?> Function(List<Map<String, dynamic>> set) opener,
   int limit = 600,
 }) async {
   final Map<String, RecoveredAccount> found = <String, RecoveredAccount>{};
   for (final List<Map<String, dynamic>> set in _candidateSets(halves, setKey)) {
-    if (set.length < threshold) {
+    final int needed = threshold(set);
+    if (set.length < needed) {
       continue;
     }
     final _Opener? open = await opener(set);
@@ -532,7 +779,7 @@ Future<List<RecoveredAccount>> _recoverAccounts(
     }
     for (final List<Map<String, dynamic>> subset in _subsets(
       set,
-      threshold,
+      needed,
       limit: limit,
     )) {
       final Uint8List? seed = await _openHalves(subset, open);
@@ -611,11 +858,13 @@ Iterable<List<T>> _subsets<T>(List<T> items, int k, {int limit = 600}) sync* {
   }
 }
 
-/// The accounts that the `normal` halves of at least two pieces of the same
-/// set open with [password]; empty if nothing fits or the password is
-/// wrong. Each seed is checked against the account its halves name (see
-/// [RecoveredAccount]); the person still confirms the account before
-/// taking it. Halves asking for a cost outside [acceptedCosts] are skipped.
+/// The accounts that the `normal` halves of enough pieces of the same set
+/// open with [password] (two of a circle of 1.16.4 and earlier, the
+/// generation's threshold of one since 1.16.5); empty if nothing fits or
+/// the password is wrong. Each seed is checked against the account its
+/// halves name (see [RecoveredAccount]); the person still confirms the
+/// account before taking it. Halves asking for a cost outside
+/// [acceptedCosts] are skipped.
 Future<List<RecoveredAccount>> recoverWithPassword(
   List<Map<String, dynamic>> normals,
   String password, {
@@ -625,11 +874,13 @@ Future<List<RecoveredAccount>> recoverWithPassword(
   final Map<String, Uint8List> keys = <String, Uint8List>{};
   return _recoverAccounts(
     normals,
-    threshold: kNormalThreshold,
-    // Halves of one copy share the salt and the cost too; a half that only
-    // copies the box cannot spoil the others' Argon2 run.
+    threshold: (List<Map<String, dynamic>> set) =>
+        recoveryHalfThreshold(set.first),
+    // Halves of one copy share the salt, the cost, the form and the
+    // threshold too; a half that only copies the box cannot spoil the
+    // others' Argon2 run, nor ask for fewer or more of them.
     setKey: (Map<String, dynamic> h) =>
-        jsonEncode(<Object?>[h['box'], h['salt'], h['cost']]),
+        jsonEncode(<Object?>[h['box'], h['salt'], h['cost'], h['v'], h['t']]),
     opener: (List<Map<String, dynamic>> set) async {
       final Object? rawSalt = set.first['salt'];
       final Uint8List? salt = unb64(rawSalt, length: 16);
@@ -637,11 +888,25 @@ Future<List<RecoveredAccount>> recoverWithPassword(
       if (salt == null || cost == null || !acceptedCosts.contains(cost)) {
         return null;
       }
-      final Uint8List passwordKey =
+      Future<Uint8List> passwordKey() async =>
           keys[jsonEncode(<Object?>[rawSalt, cost.toJson()])] ??=
               await derivePasswordKey(password, salt, cost: cost);
-      return (Uint8List secret, Object? box) =>
-          _open(_mix(passwordKey, secret), box);
+      if (set.first['v'] != kSealedPieceVersion) {
+        final Uint8List key = await passwordKey();
+        return (Uint8List secret, Object? box) => _open(_mix(key, secret), box);
+      }
+      // The circle box first (no Argon2 for a combination that opens
+      // nothing), then the seal inside it with the password.
+      return (Uint8List secret, Object? box) async {
+        final Uint8List? inner = await _open(_outerKey(secret), box);
+        if (inner == null || inner.length != 12 + 48) {
+          return null;
+        }
+        return _open(_innerKey(await passwordKey()), <String, dynamic>{
+          'n': b64(inner.sublist(0, 12)),
+          'c': b64(inner.sublist(12)),
+        });
+      };
     },
   );
 }

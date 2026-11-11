@@ -13,6 +13,7 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
+import 'package:zen/src/features/account/recovery_circle_pick.dart';
 import 'package:zen/src/features/account/recovery_service.dart';
 import 'package:zen/src/features/chat/self_notes.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
@@ -54,6 +55,13 @@ final Provider<RecoveryService?> recoveryServiceProvider =
       if (!ref.watch(ledgerNodeEnabledProvider)) {
         return null;
       }
+      LedgerNode? ready() {
+        final LedgerNode? node = ref.read(ledgerNodeProvider);
+        return node != null && node.isReady ? node : null;
+      }
+
+      bool hydrated() =>
+          ref.read(socialHubControllerProvider.notifier).isHydrated;
       final RecoveryService service = RecoveryService(
         transport: ref.read(meshTransportProvider),
         disk: ref.read(ledgerDiskProvider),
@@ -61,6 +69,46 @@ final Provider<RecoveryService?> recoveryServiceProvider =
         isFriend: (String address) => _acceptedFriends(
           ref.read(socialHubControllerProvider),
         ).contains(PeerShareCodec.normalizeAddress(address)),
+        identity: () {
+          final LedgerNode? node = ready();
+          return node == null
+              ? null
+              : RecoveryIdentity(
+                  account: node.identity.account,
+                  deviceKey: node.identity.deviceKey,
+                  certificate: node.identity.certificate,
+                );
+        },
+        // Every close friend holds a piece, by itself: read on every tick,
+        // so a level or a friendship changed anywhere counts. Not before
+        // both the levels and the friends are loaded (an empty list then
+        // would take everyone's piece away).
+        holders: () {
+          final LedgerNode? node = ready();
+          if (node == null || !hydrated()) {
+            return null;
+          }
+          return pieceHolders(
+            close: _acceptedFriends(
+              ref.read(socialHubControllerProvider),
+            ).where((String a) => node.levelOf(a) == FriendLevel.close),
+            account: node.account,
+          );
+        },
+        accountOf: (String address) => ready()?.accountOf(address),
+        addressesOf: (String account) =>
+            ready()?.addressesOfAccount(account) ?? const <String>[],
+        isFriendAccount: (String account) {
+          final LedgerNode? node = ready();
+          if (node == null || !hydrated()) {
+            return null;
+          }
+          return node.friendAccounts.containsValue(account);
+        },
+        isRevoked: (String account, String device) =>
+            ready()?.store.directory.isRevoked(account, device) ?? false,
+        isUnlinkedAddress: (String address) =>
+            ready()?.isUnlinkedAddress(address) ?? false,
       );
       // Help requests and alarms must reach the person even with the
       // screen closed.
@@ -116,10 +164,41 @@ final Provider<RecoveryService?> recoveryServiceProvider =
         service.start(),
         context: 'Starting account recovery failed',
       );
+      // A friend added or removed: the pieces follow at once (a level
+      // changed is seen at the next tick).
+      ref.listen<int>(
+        socialHubControllerProvider.select(
+          (SocialHubState s) => _acceptedFriends(s).length,
+        ),
+        (int? previous, int next) {
+          if (previous != null && previous != next) {
+            unawaitedLogged(
+              service.reconcile(),
+              context: 'Handing out recovery pieces',
+            );
+          }
+        },
+      );
       ref.onDispose(() {
         unawaitedLogged(service.stop(), context: 'Zatrzymanie odzyskiwania');
       });
       return service;
+    });
+
+/// How well the account is kept by its friends ([RecoveryService.protection]),
+/// read again whenever it changes.
+final StreamProvider<RecoveryProtection> recoveryProtectionProvider =
+    StreamProvider<RecoveryProtection>((Ref ref) async* {
+      final RecoveryService? service = ref.watch(recoveryServiceProvider);
+      if (service == null) {
+        yield const RecoveryProtection();
+        return;
+      }
+      await service.start();
+      yield service.protection;
+      await for (final void _ in service.changes) {
+        yield service.protection;
+      }
     });
 
 /// The friends asked to keep this account's copy, best first: those that
@@ -191,7 +270,10 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
                   certificate: node.identity.certificate,
                 );
         },
-        holders: () => recovery.acks.keys,
+        // The holders of the key's pieces are a list of their own (the
+        // close friends, see recoveryServiceProvider); the copy goes to the
+        // chosen friends below, and the two lists may overlap.
+        holders: () => const <String>[],
         isInCircle: (String account) => recovery.heldAccounts.contains(account),
         restoreCandidates: () =>
             _acceptedFriends(ref.read(socialHubControllerProvider)),

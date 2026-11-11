@@ -329,6 +329,13 @@ const List<_Name> _names = <_Name>[
     max: 200000,
     many: true,
   ),
+  // The recovery pieces (from 1.16.5 every close friend holds one by
+  // itself): those kept for friends by account, this account's password
+  // seal, its generation and what it hands out.
+  _Name('recovery/pieces', used: 0.35, min: 120, max: 60000),
+  _Name('recovery/sealed', used: 0.25, min: 150, max: 300),
+  _Name('recovery/gen', used: 0.25, min: 120, max: 3000),
+  _Name('recovery/out', used: 0.25, min: 200, max: 30000),
 ];
 
 /// What `account/sync/<id>` is kept for (account_state_sync_app.dart).

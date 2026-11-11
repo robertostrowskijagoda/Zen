@@ -352,61 +352,37 @@ void main() {
       ]);
     });
 
-    test('recovery helpers: close friends, then mailboxes, at most six', () {
-      final List<String> others = <String>[
-        for (int i = 0; i < 8; i++) PeerShareCodec.normalizeAddress('200::e$i'),
+    test('the key\'s pieces: every close friend once, at most twelve, in an '
+        'order of their own for each account', () {
+      final List<String> many = <String>[
+        for (int i = 0; i < 15; i++)
+          PeerShareCodec.normalizeAddress('200::e$i'),
       ];
-      final List<String> picked = pickRecoveryHelpers(
-        mailboxes: <String>[weak, others[0]],
-        friends: <String>[...others, weak, close],
-        levelOf: levelOf,
+      final List<String> picked = pieceHolders(
+        close: <String>[...many, many[0], close],
+        account: 'konto-a',
       );
-      expect(picked, hasLength(kMaxRecoveryHelpers));
-      expect(picked.first, close);
-      expect(picked[1], others[0], reason: 'a mailbox before other friends');
-      expect(picked, isNot(contains(weak)), reason: 'weak ones come last');
+      expect(picked, hasLength(kMaxPieceHolders));
       expect(picked.toSet(), hasLength(picked.length));
-    });
-
-    test('weak acquaintances are left out of the default circle', () {
-      final List<String> few = <String>[
-        for (int i = 0; i < 3; i++) PeerShareCodec.normalizeAddress('200::f$i'),
-      ];
       expect(
-        pickRecoveryHelpers(
-          mailboxes: const <String>[],
-          friends: <String>[...few, weak],
-          levelOf: levelOf,
+        pieceHolders(
+          close: <String>[close, ...many.reversed],
+          account: 'konto-a',
         ),
-        isNot(contains(weak)),
+        picked,
+        reason: 'the same for the same account, whatever the order given',
       );
       expect(
-        pickRecoveryHelpers(
-          mailboxes: const <String>[],
-          friends: <String>[...few, weak],
-          levelOf: levelOf,
-          includeWeak: true,
-        ).last,
-        weak,
+        pieceHolders(close: <String>[...many, close], account: 'konto-b'),
+        isNot(picked),
+        reason: 'not the same friends keep everyone\'s',
       );
-      // Everyone can still be picked by hand, weak ones last.
+      // Under the limit every close friend holds one.
+      final List<String> few = many.take(5).toList();
+      expect(pieceHolders(close: few, account: 'k').toSet(), few.toSet());
       expect(
-        recoveryHelperCandidates(
-          friends: <String>[weak, ...few, close],
-          levelOf: levelOf,
-        ),
-        <String>[close, ...few, weak],
-      );
-      expect(
-        checkRecoveryCircle(few, minimum: 4),
-        RecoveryCircleProblem.tooFew,
-      );
-      expect(checkRecoveryCircle(<String>[...few, weak], minimum: 4), isNull);
-      expect(
-        checkRecoveryCircle(<String>[
-          for (int i = 0; i < 7; i++) '200::a$i',
-        ], minimum: 4),
-        RecoveryCircleProblem.tooMany,
+        pieceHolders(close: <String>[...few, close], account: 'k').toSet(),
+        <String>{...few, close},
       );
     });
 

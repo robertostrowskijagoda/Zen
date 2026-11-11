@@ -497,12 +497,13 @@ void main() {
     );
     expect(container.read(userProfileControllerProvider).publicName, 'Ania');
     expect(find.byKey(const Key('account-secure-circle')), findsOneWidget);
-    // A new account has no friends yet: the circle waits for four.
+    // A new account has no friends yet, but its password can be set now:
+    // the pieces follow the close friends by themselves later.
     expect(
       tester
           .widget<FilledButton>(find.byKey(const Key('account-secure-circle')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
     expect(find.byKey(const Key('account-secure-key')), findsOneWidget);
     await tester.tap(find.byKey(const Key('account-secure-later')));

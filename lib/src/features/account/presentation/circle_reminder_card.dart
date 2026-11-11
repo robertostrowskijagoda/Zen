@@ -11,9 +11,9 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// "Masz już n znajomych — ustaw krąg": shown once the person has enough
-/// friends for the recovery circle and has none (see [circleReminderDue]),
-/// until they set it up or say "Nie teraz".
+/// "Masz już n znajomych — ustaw hasło konta": shown once the person has
+/// enough friends for the pieces of the key and no account password for
+/// them (see [circleReminderDue]), until they set it or say "Nie teraz".
 class CircleReminderCard extends ConsumerWidget {
   const CircleReminderCard({super.key, this.padding = EdgeInsets.zero});
 
@@ -42,14 +42,14 @@ class CircleReminderCard extends ConsumerWidget {
               icon: Icons.groups_2_outlined,
               title: tn(
                 friends,
-                one: 'Masz już {n} znajomego — ustaw krąg odzyskiwania',
-                few: 'Masz już {n} znajomych — ustaw krąg odzyskiwania',
-                many: 'Masz już {n} znajomych — ustaw krąg odzyskiwania',
+                one: 'Masz już {n} znajomego — ustaw hasło konta',
+                few: 'Masz już {n} znajomych — ustaw hasło konta',
+                many: 'Masz już {n} znajomych — ustaw hasło konta',
               ),
               text: t(
-                'Kopia klucza zwraca samo konto. Krąg pozwala odzyskać je '
-                'z pomocą znajomych, a ich kopia przywróci też znajomych, '
-                'grupy i rozmowy.',
+                'Kopia klucza zwraca samo konto. Z hasłem konta Twoi '
+                'przyjaciele przechowają kawałki klucza, a kopia u znajomych '
+                'przywróci też znajomych, grupy i rozmowy.',
               ),
             ),
             Wrap(
@@ -69,7 +69,7 @@ class CircleReminderCard extends ConsumerWidget {
                   key: const Key('circle-reminder-open'),
                   onPressed: () =>
                       unawaited(AccountRecoveryScreen.open(context)),
-                  child: Text(t('Ustaw krąg')),
+                  child: Text(t('Ustaw hasło konta')),
                 ),
               ],
             ),

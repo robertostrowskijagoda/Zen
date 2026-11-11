@@ -13,6 +13,7 @@ import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_media.dart';
 import 'package:zen/src/features/account/account_state_sync.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
+import 'package:zen/src/features/account/recovery_service.dart';
 import 'package:zen/src/features/chat/self_notes.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
@@ -269,6 +270,35 @@ final class HeldStateSyncDomain extends _PokedDomain {
       await disk.write(_heldKey(id), _bytes(state));
     }
   }
+}
+
+/// The recovery pieces this account keeps for friends, each friend's as one
+/// unit, and this account's own generation of pieces (who holds them, who
+/// confirmed): the same on every device, so a helper's pieces are not lost
+/// with one phone and every device says the same about the account's.
+final class RecoveryPiecesSyncDomain implements AccountSyncDomain {
+  RecoveryPiecesSyncDomain(this.service);
+
+  final RecoveryService service;
+
+  @override
+  String get id => 'recovery';
+
+  @override
+  Set<String> get wholeKeys => const <String>{'own'};
+
+  @override
+  Future<Map<String, Object?>?> read() async {
+    await service.start();
+    return service.syncState();
+  }
+
+  @override
+  Future<void> write(Map<String, Object?> state) =>
+      service.takeSyncState(state);
+
+  @override
+  Stream<void> get changes => service.changes;
 }
 
 /// The held copy [id] on this device, if any.
@@ -727,11 +757,18 @@ final class AccountDevicesKeeper {
       strangers,
       ?mailboxes,
     ]);
+    // The recovery pieces kept for friends, and this account's own.
+    final RecoveryService? recovery = ref.read(recoveryServiceProvider);
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
     final AccountStateSync sync = AccountStateSync(
       channel: LedgerAccountSyncChannel(node),
       disk: disk,
-      domains: <AccountSyncDomain>[..._domains, household, passwords],
+      domains: <AccountSyncDomain>[
+        ..._domains,
+        household,
+        passwords,
+        if (recovery != null) RecoveryPiecesSyncDomain(recovery),
+      ],
       // Locked: the stores do not open (nothing to scan until the unlock).
       mayRead: () async => await security.currentEncryptionKey() != null,
     );

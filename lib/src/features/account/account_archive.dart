@@ -54,8 +54,15 @@ String accountScopeLabel(AccountScope scope) => switch (scope) {
 const Map<AccountScope, List<String>> kAccountRawKeys =
     <AccountScope, List<String>>{
       // The notes to oneself go with the key, as the passwords do: every
-      // copy brings them back, whatever else is ticked.
-      AccountScope.keys: <String>['notes/self'],
+      // copy brings them back, whatever else is ticked. So do the recovery
+      // pieces kept for friends (a helper who moves to a new phone keeps
+      // them) and this account's own state of its pieces.
+      AccountScope.keys: <String>[
+        'notes/self',
+        'recovery/pieces',
+        'recovery/held',
+        'recovery/gen',
+      ],
       AccountScope.chats: <String>['chat/strangers'],
       AccountScope.pyramid: <String>['pyramid/ledger'],
       AccountScope.meet: <String>[
