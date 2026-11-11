@@ -146,9 +146,12 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
           title: Text(t('Jak to działa')),
           content: Text(
             t(
-              'Hasła są tylko na Twoich urządzeniach, zaszyfrowane. Zen '
-              'przenosi je między Twoimi urządzeniami i przywraca razem '
-              'z kopią konta. Skopiowane hasło znika ze schowka po 30 '
+              'Hasła są zaszyfrowane na Twoich urządzeniach, a kilkoro '
+              'Twoich znajomych trzyma ich zamkniętą kopię, której nie '
+              'otworzą. Zen przenosi je między Twoimi urządzeniami, '
+              'przywraca z kopią konta, a po odzyskaniu konta z samego '
+              'klucza — z kopii u znajomych; bez żadnego znajomego wtedy '
+              'nie wrócą. Skopiowane hasło znika ze schowka po 30 '
               'sekundach.',
             ),
           ),

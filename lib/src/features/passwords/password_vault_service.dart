@@ -262,19 +262,41 @@ final class PasswordVaultService extends ChangeNotifier {
       });
 
   /// Forgets the entry [id]'s earlier versions (its old passwords), on
-  /// every device.
+  /// every device. A marker names them (a deletion marker that saw only
+  /// them, so the entry stays): a copy or a device that was away and still
+  /// holds them never brings them back ([_pruned] drops what a marker
+  /// saw). Earlier markers of the entry are folded into it.
   Future<PasswordEntry> clearHistory(String id) => _serial(() async {
     await _ready();
     final PasswordEntry current = _existing(id);
+    final PasswordVersion now = _doc.versions[current.versionKey]!;
+    final Set<String> seen = <String>{};
     final Map<String, Map<String, Object?>> raw =
-        <String, Map<String, Object?>>{
-          for (final MapEntry<String, Map<String, Object?>> e
-              in _doc.raw.entries)
-            if (_doc.versions[e.key]?.entryId != id ||
-                e.key == current.versionKey ||
-                _doc.versions[e.key]!.deleted)
-              e.key: e.value,
-        };
+        <String, Map<String, Object?>>{};
+    for (final MapEntry<String, Map<String, Object?>> e in _doc.raw.entries) {
+      final PasswordVersion? v = _doc.versions[e.key];
+      if (v == null || v.entryId != id || e.key == current.versionKey) {
+        raw[e.key] = e.value;
+      } else if (v.deleted) {
+        // Folded into the new marker (it keeps what they saw).
+        seen.addAll(v.seen);
+      } else {
+        seen.add(v.key);
+      }
+    }
+    if (seen.isEmpty) {
+      return current;
+    }
+    final PasswordVersion marker = PasswordVersion(
+      key: _newId(),
+      entryId: id,
+      // Not after the current version's base: the entry is not shown as
+      // kept over a deletion ([PasswordEntry.keptOverDeletion]).
+      atMillis: now.baseMillis,
+      deleted: true,
+      seen: seen.take(256).toList(),
+    );
+    raw[marker.key] = marker.toJson();
     await _save(raw);
     return entry(id)!;
   });
@@ -453,11 +475,31 @@ final class PasswordVaultService extends ChangeNotifier {
 
   /// Writes [state] (the account's sync merged another device's change
   /// in) and reads it back. Throws while locked: the sync tries again.
+  /// What no longer counts (versions a deletion or a cleared history saw,
+  /// history past its length) is dropped on the way, as a save here drops
+  /// it: an old password that comes back from a device that was away is
+  /// not written into the store again. Versions this build does not read
+  /// stay as they are.
   Future<void> takeSyncState(Map<String, Object?> state) => _serial(() async {
     _ensureOpen();
+    Map<String, Object?> next = state;
+    final PasswordVaultDoc? doc = PasswordVaultDoc.fromJson(state);
+    final Object? e = state['e'];
+    if (doc != null && !doc.newer && e is Map) {
+      final Set<String> keep = _pruned(doc.raw).keys.toSet();
+      final Map<Object?, Object?> kept = <Object?, Object?>{
+        for (final MapEntry<Object?, Object?> v in e.entries)
+          if (!doc.raw.containsKey(v.key) || keep.contains(v.key))
+            v.key: v.value,
+      };
+      next = <String, Object?>{...state, 'e': kept};
+      if (kept.isEmpty) {
+        next.remove('e');
+      }
+    }
     await disk.write(
       kPasswordVaultKey,
-      Uint8List.fromList(utf8.encode(jsonEncode(state))),
+      Uint8List.fromList(utf8.encode(jsonEncode(next))),
     );
     await _read();
   });

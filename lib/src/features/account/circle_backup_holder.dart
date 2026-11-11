@@ -9,12 +9,19 @@ import 'package:zen/src/features/account/circle_backup.dart';
 /// Most bytes all the copies this device keeps for others take.
 const int kCircleBackupHolderTotalBytes = 100 * 1024 * 1024;
 
+/// Of those, most bytes the copies of friends whose recovery key this
+/// device does not keep take together (the circles' copies always find
+/// room).
+const int kCircleBackupFriendsBytes = 60 * 1024 * 1024;
+
 /// What a holder said to a copy offered to it.
 enum CircleBackupOfferResult {
   /// Taken: [CircleBackupHolder.missing] lists what to send.
   accepted,
 
-  /// This device keeps no recovery key of that account.
+  /// This device keeps no recovery key of that account, and it is not an
+  /// accepted friend here (the name is the one 1.16.4 sends, which knows
+  /// only the circle).
   notInCircle,
 
   /// Not signed by a device of the account.
@@ -27,26 +34,42 @@ enum CircleBackupOfferResult {
   stale,
 }
 
-/// The copies of other people's data this device keeps as one of their
-/// recovery circle: sealed chunks it cannot open, under the account they
-/// belong to, at most [kCircleBackupMaxBytes] (and a little) each and
-/// [totalBytes] in all. Only accounts whose recovery key this device keeps
-/// ([isInCircle]); a copy goes when the key does ([prune]) or when the
-/// person here drops it ([drop]).
+/// The copies of other people's data this device keeps for them: sealed
+/// chunks it cannot open, under the account they belong to, at most
+/// [kCircleBackupMaxBytes] (and a little) each and [totalBytes] in all.
+///
+/// Whose: the accounts whose recovery key this device keeps
+/// ([isInCircle]), and the accounts of its accepted friends ([isFriend]),
+/// these within [friendsBytes] together. A copy goes when neither is true
+/// any more ([prune]: the key went, the friendship ended) or when the
+/// person here drops it ([drop]). Its chunks are named by their id's first
+/// 32 hex digits (copies kept by earlier versions under the whole id are
+/// renamed at [load]), as the decoy accounts' files are.
 final class CircleBackupHolder {
   CircleBackupHolder({
     required this.disk,
     required this.isInCircle,
+    bool Function(String account)? isFriend,
     this.totalBytes = kCircleBackupHolderTotalBytes,
+    this.friendsBytes = kCircleBackupFriendsBytes,
     this.perAccountBytes = kCircleBackupMaxBytes + kCircleBackupMaxBytes ~/ 10,
-  });
+  }) : isFriend = isFriend ?? _nobody;
 
   final LedgerDisk disk;
 
   /// Whether this device keeps a recovery key of [account].
   final bool Function(String account) isInCircle;
+
+  /// Whether [account] is an accepted friend here.
+  final bool Function(String account) isFriend;
   final int totalBytes;
+  final int friendsBytes;
   final int perAccountBytes;
+
+  static bool _nobody(String _) => false;
+
+  /// Whether a copy of [account] may be kept here.
+  bool mayKeep(String account) => isInCircle(account) || isFriend(account);
 
   static const String _indexKey = 'circle-backup/held';
 
@@ -64,6 +87,10 @@ final class CircleBackupHolder {
       'circle-backup/k/${sha256Hex(utf8.encode(account)).substring(0, 32)}';
 
   static String _chunkKey(String account, String id) =>
+      '${_folder(account)}/${id.substring(0, 32)}';
+
+  /// Where an earlier version kept a chunk (the whole id).
+  static String _oldChunkKey(String account, String id) =>
       '${_folder(account)}/$id';
 
   Future<void> load() async {
@@ -87,6 +114,16 @@ final class CircleBackupHolder {
       }
     } on FormatException {
       logZenWarning('The circle copies index is damaged.');
+    }
+    // Chunks an earlier version kept under the whole id: renamed once.
+    for (final CircleBackupManifest m in _kept.values) {
+      for (final String id in m.chunks.keys) {
+        final Uint8List? old = await disk.read(_oldChunkKey(m.account, id));
+        if (old != null) {
+          await disk.write(_chunkKey(m.account, id), old);
+          await disk.delete(_oldChunkKey(m.account, id));
+        }
+      }
     }
   }
 
@@ -114,11 +151,17 @@ final class CircleBackupHolder {
     (int sum, CircleBackupManifest m) => sum + m.totalBytes,
   );
 
+  /// Bytes of the copies kept only as a friend's (no key of theirs here).
+  int get _usedByFriends => _kept.values
+      .where((CircleBackupManifest m) => !isInCircle(m.account))
+      .fold(0, (int sum, CircleBackupManifest m) => sum + m.totalBytes);
+
   /// Takes [manifest] as the copy being received for its account.
   Future<CircleBackupOfferResult> offer(CircleBackupManifest manifest) async {
     await load();
     final String account = manifest.account;
-    if (!isInCircle(account)) {
+    final bool circle = isInCircle(account);
+    if (!circle && !isFriend(account)) {
       return CircleBackupOfferResult.notInCircle;
     }
     final CircleBackupManifest? coming = _incoming[account];
@@ -133,7 +176,9 @@ final class CircleBackupHolder {
     }
     final int size = manifest.totalBytes;
     if (size > perAccountBytes ||
-        _used - (had?.totalBytes ?? 0) + size > totalBytes) {
+        _used - (had?.totalBytes ?? 0) + size > totalBytes ||
+        (!circle &&
+            _usedByFriends - (had?.totalBytes ?? 0) + size > friendsBytes)) {
       return CircleBackupOfferResult.tooBig;
     }
     if (!await manifest.verify()) {
@@ -220,12 +265,13 @@ final class CircleBackupHolder {
     await _saveIndex();
   }
 
-  /// Drops the copies of accounts whose recovery key is no longer here.
+  /// Drops the copies of accounts whose recovery key is no longer here
+  /// and that are no longer friends here.
   Future<int> prune() async {
     await load();
     final List<String> gone = <String>[
       for (final String account in _kept.keys)
-        if (!isInCircle(account)) account,
+        if (!mayKeep(account)) account,
     ];
     for (final String account in gone) {
       await drop(account);

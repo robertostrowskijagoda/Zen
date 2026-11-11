@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -13,6 +14,7 @@ import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/account/recovery_service.dart';
+import 'package:zen/src/features/chat/self_notes.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
@@ -25,6 +27,8 @@ import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -118,9 +122,50 @@ final Provider<RecoveryService?> recoveryServiceProvider =
       return service;
     });
 
-/// The copy of this account's data kept by its recovery circle, and the
-/// copies this device keeps for the circles it is in; `null` while the
-/// ledger is off.
+/// The friends asked to keep this account's copy, best first: those that
+/// serve as its mailboxes, then the close friends; other friends only to
+/// reach two (a person with friends always has a holder). Accepted
+/// friends only, by the addresses the app knows them by.
+List<String> copyFriendHolders({
+  required Set<String> accepted,
+  required Iterable<String> mailboxFriends,
+  required bool Function(String address) isClose,
+  required String account,
+}) {
+  final List<String> out = <String>[];
+  void add(String a) {
+    final String n = PeerShareCodec.normalizeAddress(a);
+    if (accepted.contains(n) && !out.contains(n)) {
+      out.add(n);
+    }
+  }
+
+  mailboxFriends.forEach(add);
+  for (final String a in accepted) {
+    if (isClose(a)) {
+      add(a);
+    }
+  }
+  if (out.length < 2) {
+    // In an order of their own for each account: not the same friends
+    // keep everyone's.
+    String rank(String a) => sha256Hex(utf8.encode('$account|$a'));
+    final List<String> others =
+        accepted.where((String a) => !out.contains(a)).toList()
+          ..sort((String a, String b) => rank(a).compareTo(rank(b)));
+    for (final String a in others) {
+      if (out.length >= 2) {
+        break;
+      }
+      add(a);
+    }
+  }
+  return out;
+}
+
+/// The copy of this account's data kept by friends (and its recovery
+/// circle, if there is one), and the copies this device keeps for others;
+/// `null` while the ledger is off.
 final Provider<CircleBackupService?> circleBackupServiceProvider =
     Provider<CircleBackupService?>((Ref ref) {
       final RecoveryService? recovery = ref.watch(recoveryServiceProvider);
@@ -150,6 +195,22 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
         isInCircle: (String account) => recovery.heldAccounts.contains(account),
         restoreCandidates: () =>
             _acceptedFriends(ref.read(socialHubControllerProvider)),
+        // No circle needed: chosen friends keep it too.
+        friendHolders: () {
+          final RelayEngine? relay = ref.read(relayEngineProvider);
+          return copyFriendHolders(
+            accepted: _acceptedFriends(ref.read(socialHubControllerProvider)),
+            mailboxFriends:
+                relay?.overview.value.mailboxFriends ?? const <String>[],
+            isClose: (String a) => node.levelOf(a) == FriendLevel.close,
+            account: node.isReady ? node.account : '',
+          );
+        },
+        // A friend's copy is kept here as long as they are a friend.
+        isFriend: (String account) =>
+            node.isReady && node.friendAccounts.containsValue(account),
+        isRevoked: (String account, String device) =>
+            node.store.directory.isRevoked(account, device),
       );
       // A new friend, a group joined or left: a fresh copy soon.
       ref.listen<String>(
@@ -165,12 +226,16 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
       // A password added, changed or deleted: a fresh copy soon.
       final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
       vault.edits.addListener(service.changed);
+      // A note written or deleted: a fresh copy soon too.
+      final SelfNotesService notes = ref.read(selfNotesServiceProvider);
+      notes.addListener(service.changed);
       unawaitedLogged(
         node.start().then((_) => service.start()),
         context: 'Starting the circle backup failed',
       );
       ref.onDispose(() {
         vault.edits.removeListener(service.changed);
+        notes.removeListener(service.changed);
         unawaitedLogged(
           service.stop().whenComplete(service.dispose),
           context: 'Stopping the circle backup',
@@ -199,10 +264,8 @@ final class AppCircleBackupData implements CircleBackupData {
           ..remove('avatarPath')
           ..remove('coverPath');
     final PyramidService pyramid = ref.read(pyramidServiceProvider);
-    final String? me = pyramid.myKey;
-    final int? balance = me == null || !pyramid.isMember
-        ? null
-        : pyramid.balance;
+    // No wallet statement: nothing takes it back (the balance comes back
+    // with the pyramid's records, which its members confirm).
     // The passwords, padded so the holders cannot tell how many there are.
     // Unreadable now (locked, damaged): no copy rather than one without
     // them.
@@ -216,6 +279,9 @@ final class AppCircleBackupData implements CircleBackupData {
     if (vault.damaged) {
       throw const CircleBackupNotNow('passwords');
     }
+    final Map<String, Object?>? notesSection = await ref
+        .read(selfNotesServiceProvider)
+        .exportForCopy();
     final Map<String, List<Map<String, dynamic>>> conversations =
         <String, List<Map<String, dynamic>>>{};
     if (chats) {
@@ -250,12 +316,9 @@ final class AppCircleBackupData implements CircleBackupData {
         ),
         if (vaultSection != null)
           CircleBackupSections.passwords: padPasswordSection(vaultSection),
-        if (balance != null)
-          CircleBackupSections.wallet: <String, Object>{
-            'key': me!,
-            'balance': balance,
-            'at': DateTime.now().millisecondsSinceEpoch,
-          },
+        // The notes to oneself, padded the same way.
+        if (notesSection != null)
+          CircleBackupSections.notes: padPasswordSection(notesSection),
       },
       chats: conversations,
     );
@@ -266,7 +329,7 @@ final class AppCircleBackupData implements CircleBackupData {
     CircleBackupContent content,
     void Function(int done, int total) progress,
   ) async {
-    final int total = 8 + content.messageCount;
+    final int total = 9 + content.messageCount;
     int done = 0;
     void step() => progress(++done, total);
     // The passwords first: merged with any written here since (never over
@@ -275,6 +338,12 @@ final class AppCircleBackupData implements CircleBackupData {
     final Object? passwords = content.sections[CircleBackupSections.passwords];
     if (passwords != null) {
       await ref.read(passwordVaultServiceProvider).mergeCopy(passwords);
+    }
+    step();
+    // The notes: merged too (a note or a deletion here stays).
+    final Object? notes = content.sections[CircleBackupSections.notes];
+    if (notes != null) {
+      await ref.read(selfNotesServiceProvider).mergeCopy(notes);
     }
     step();
     final Object? settings = content.sections[CircleBackupSections.settings];

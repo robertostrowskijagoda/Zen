@@ -440,8 +440,10 @@ final class ProfileSyncDomain extends _PokedDomain {
 }
 
 /// The ledger between the account's devices: sealed entries in its `own`
-/// space.
-final class LedgerAccountSyncChannel implements AccountSyncChannel {
+/// space, in a log of each device's own that starts over now and then
+/// ([AccountSyncLog]: what came before is dropped on every device).
+final class LedgerAccountSyncChannel
+    implements AccountSyncChannel, AccountSyncLog {
   LedgerAccountSyncChannel(this.node);
 
   final LedgerNode node;
@@ -479,7 +481,29 @@ final class LedgerAccountSyncChannel implements AccountSyncChannel {
 
   @override
   Future<bool> publish(Map<String, dynamic> body) async =>
-      await node.publishForOwnDevices(kAccountStateKind, body) != null;
+      await node.publishForOwnDevices(
+        kAccountStateKind,
+        body,
+        stateLog: true,
+      ) !=
+      null;
+
+  @override
+  Future<Object?> startOver() => node.stateLogStart();
+
+  @override
+  Future<int> dropBefore(Object start) async {
+    if (start is! ({String writer, int seq})) {
+      return 0;
+    }
+    return node.stateLogDropBefore(start.writer, start.seq);
+  }
+
+  @override
+  void close() => node.closeOwnKind(kAccountStateKind);
+
+  @override
+  Future<void> reopen() => node.reopenOwnKind(kAccountStateKind);
 }
 
 /// Every file of the account's posts, gallery, films and profile, fetched
@@ -712,7 +736,21 @@ final class AccountDevicesKeeper {
       mayRead: () async => await security.currentEncryptionKey() != null,
     );
     _sync = sync;
+    // Locked: nothing of the changes stays opened in memory (a password).
+    void onSecurity() {
+      if (security.isLocked) {
+        sync.lock();
+      } else {
+        sync.unlock();
+      }
+    }
+
+    security.addListener(onSecurity);
+    _unlisten.add(() => security.removeListener(onSecurity));
     await sync.start();
+    if (security.isLocked) {
+      sync.lock();
+    }
     if (_stopped) {
       await sync.stop();
       return;

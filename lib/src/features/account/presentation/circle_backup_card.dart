@@ -18,10 +18,10 @@ String circleBackupSize(int bytes) {
   return '${ZenFormat.number(bytes / (1024 * 1024), decimals: 1)} MB';
 }
 
-/// "Kopia u kręgu" in "Konto i odzyskiwanie": when the circle last
-/// confirmed a copy and how big it is, whether conversation text goes in,
-/// the restore after a recovery, and the copies this device keeps for
-/// others.
+/// "Kopia u znajomych" in "Konto i odzyskiwanie": when friends (or the
+/// circle) last confirmed a copy and how big it is, that nobody can keep
+/// it while there is no friend, whether conversation text goes in, the
+/// restore after a recovery, and the copies this device keeps for others.
 class CircleBackupCard extends ConsumerWidget {
   const CircleBackupCard({super.key});
 
@@ -82,14 +82,28 @@ class CircleBackupCard extends ConsumerWidget {
                   style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                 ),
               ],
+              if (status.candidates == 0) ...<Widget>[
+                const SizedBox(height: 8),
+                ZenInfo(
+                  key: const Key('circle-backup-nobody'),
+                  icon: Icons.person_off_outlined,
+                  tone: zen.warning,
+                  text: t(
+                    'Nikt nie może jej teraz przechować: nie masz jeszcze '
+                    'znajomych.',
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               ZenInfo(
                 icon: Icons.lock_outline_rounded,
                 text: t(
-                  'Osoby z kręgu odzyskiwania przechowują zaszyfrowaną kopię: '
-                  'profil, znajomych, grupy, ustawienia, piramidę i portfel, '
-                  'a także teksty rozmów. Nie mogą jej odczytać. Po '
-                  'odzyskaniu konta Zen sam ją pobierze.',
+                  'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, którzy '
+                  'są Twoimi skrzynkami, i bliscy znajomi) oraz osoby '
+                  'z kręgu odzyskiwania, jeśli go masz: profil, znajomych, '
+                  'grupy, ustawienia, piramidę, hasła, notatki, a także '
+                  'teksty rozmów. Nie mogą jej odczytać. Po odzyskaniu konta '
+                  'Zen sam ją pobierze.',
                 ),
               ),
               SwitchListTile(

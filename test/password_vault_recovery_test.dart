@@ -12,9 +12,12 @@ import 'package:zen/src/features/account/account_archive_collect.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_state_sync.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
+import 'package:zen/src/features/account/circle_backup_holder.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/key_file.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
+import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
+import 'package:zen/src/features/chat/self_notes.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/passwords/password_vault_service.dart';
@@ -22,12 +25,15 @@ import 'package:zen/src/features/passwords/password_vault_sync.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-// The passwords come back with every way an account comes back or moves:
-// another device of the account (its sync), a full copy (file), a second
+// The passwords and the notes to oneself come back with every way an
+// account comes back or moves: another device of the account (its sync;
+// the notes: account_sync_pruning_test.dart), a full copy (file), a second
 // device or a move (the copy sent over), and after the recovery circle or
-// a key copy (paper, key file) from the copy kept with friends. Each test
-// sets passwords on the old device, brings the account back on a fresh
-// one by that way, and finds the passwords there.
+// a key copy (paper, key file), with a circle or without one, from the
+// copy kept with friends. Each test sets them on the old device, brings
+// the account back on a fresh one by that way, and finds them there. The
+// only way that loses them is a key copy alone with no friend at all, and
+// the app says so before.
 
 const PasswordCost _light = PasswordCost(memoryKiB: 64, iterations: 1);
 
@@ -324,6 +330,9 @@ final class _Linked extends MemorySignalTransport {
   static final Map<String, _Linked> nodes = <String, _Linked>{};
   final String address;
 
+  /// What it sends that never arrives (a holder that stalls).
+  bool Function(Map<String, dynamic> payload)? drops;
+
   @override
   Future<void> send({
     required String remoteAddress,
@@ -332,7 +341,7 @@ final class _Linked extends MemorySignalTransport {
     await super.send(remoteAddress: remoteAddress, payload: payload);
     final _Linked? target =
         nodes[PeerShareCodec.normalizeAddress(remoteAddress)];
-    if (target != null) {
+    if (target != null && !(drops?.call(payload) ?? false)) {
       final Map<String, dynamic> wire =
           jsonDecode(jsonEncode(payload)) as Map<String, dynamic>;
       scheduleMicrotask(
@@ -342,13 +351,51 @@ final class _Linked extends MemorySignalTransport {
   }
 }
 
-/// The passwords part of the app's copy with friends (`AppCircleBackupData`
-/// in recovery_providers.dart): the vault padded in; no copy while it
-/// cannot be read; merged back first.
+Future<_Linked> _started(String address) async {
+  final _Linked t = _Linked(address);
+  await t.start();
+  return t;
+}
+
+/// The notes of the old device.
+Future<SelfNotesService> _oldNotes() async {
+  final SelfNotesService notes = SelfNotesService(disk: MemoryLedgerDisk());
+  await notes.add('kod do furtki 4321');
+  final SelfNote gone = (await notes.add('skasowana notatka'))!;
+  await notes.delete(gone.id);
+  return notes;
+}
+
+/// The old device's notes, stored on [disk].
+Future<void> _notesOn(LedgerDisk disk) async {
+  final SelfNotesService notes = SelfNotesService(disk: disk);
+  await notes.add('kod do furtki 4321');
+  final SelfNote gone = (await notes.add('skasowana notatka'))!;
+  await notes.delete(gone.id);
+}
+
+/// The notes stored on [disk], read.
+Future<SelfNotesService> _notesAt(LedgerDisk disk) async {
+  final SelfNotesService notes = SelfNotesService(disk: disk);
+  await notes.load();
+  return notes;
+}
+
+void _expectNotes(SelfNotesService notes) {
+  expect(notes.notes.map((SelfNote n) => n.text), <String>[
+    'kod do furtki 4321',
+  ]);
+}
+
+/// The passwords and notes part of the app's copy with friends
+/// (`AppCircleBackupData` in recovery_providers.dart): padded in; no copy
+/// while the vault cannot be read; merged back first.
 final class _VaultData implements CircleBackupData {
-  _VaultData(this.vault);
+  _VaultData(this.vault, [SelfNotesService? notes])
+    : notes = notes ?? SelfNotesService(disk: MemoryLedgerDisk());
 
   final PasswordVaultService vault;
+  final SelfNotesService notes;
 
   @override
   Future<CircleBackupContent> collect({required bool chats}) async {
@@ -358,11 +405,14 @@ final class _VaultData implements CircleBackupData {
     } on PasswordVaultException catch (error) {
       throw CircleBackupNotNow(error.error.name);
     }
+    final Map<String, Object?>? notesSection = await notes.exportForCopy();
     return CircleBackupContent(
       sections: <String, Object?>{
         CircleBackupSections.profile: <String, Object?>{'displayName': 'Ania'},
         if (section != null)
           CircleBackupSections.passwords: padPasswordSection(section),
+        if (notesSection != null)
+          CircleBackupSections.notes: padPasswordSection(notesSection),
       },
     );
   }
@@ -376,6 +426,7 @@ final class _VaultData implements CircleBackupData {
     if (passwords != null) {
       await vault.mergeCopy(passwords);
     }
+    await notes.mergeCopy(content.sections[CircleBackupSections.notes]);
     progress(1, 1);
   }
 }
@@ -396,23 +447,31 @@ CircleBackupIdentity _idOf(LedgerIdentity i) => CircleBackupIdentity(
   certificate: i.certificate,
 );
 
-/// The old phone's copy with friends, kept by one holder; returns the
-/// holder's service (to answer the recovered device).
+/// The old phone's copy with friends, kept by the holder at
+/// [holderAddress]: a helper of its recovery circle ([circle]) or a chosen
+/// friend only (no circle at all). Returns the holder's service.
 Future<CircleBackupService> _copyWithFriends(
   LedgerIdentity me,
-  PasswordVaultService vault,
-) async {
-  _Linked.nodes.clear();
+  PasswordVaultService vault, {
+  SelfNotesService? notes,
+  bool circle = true,
+  String holderAddress = '200::b',
+  bool clear = true,
+}) async {
+  if (clear) {
+    _Linked.nodes.clear();
+  }
   final _Linked tOwner = _Linked('200::a');
-  final _Linked tHolder = _Linked('200::b');
+  final _Linked tHolder = _Linked(holderAddress);
   await tOwner.start();
   await tHolder.start();
   final CircleBackupService owner = CircleBackupService(
     transport: tOwner,
     disk: MemoryLedgerDisk(),
-    data: _VaultData(vault),
+    data: _VaultData(vault, notes),
     identity: () => _idOf(me),
-    holders: () => <String>[tHolder.address],
+    holders: () => circle ? <String>[tHolder.address] : const <String>[],
+    friendHolders: () => circle ? const <String>[] : <String>[tHolder.address],
     isInCircle: (_) => false,
     restoreCandidates: () => const <String>[],
   );
@@ -422,52 +481,500 @@ Future<CircleBackupService> _copyWithFriends(
     data: _VaultData(_freshVault()),
     identity: () => null,
     holders: () => const <String>[],
-    isInCircle: (String a) => a == me.account,
+    isInCircle: (String a) => circle && a == me.account,
+    isFriend: (String a) => a == me.account,
     restoreCandidates: () => const <String>[],
   );
   await holder.start();
   await owner.start();
   await _settleCircle(<CircleBackupService>[owner, holder]);
   expect(holder.holder.kept.keys, <String>[me.account]);
-  // The holder cannot read a password (nor tell how many there are).
+  expect(owner.status.value.holders, 1);
+  // The holder cannot read a password or a note (nor tell how many there
+  // are).
   final String kept = latin1.decode(<int>[
     for (final String id in holder.holder.manifestOf(me.account)!.chunks.keys)
       ...(await holder.holder.chunk(me.account, id))!,
   ]);
   expect(kept, isNot(contains('nowe-haslo')));
   expect(kept, isNot(contains('Bank')));
+  expect(kept, isNot(contains('furtki')));
   await owner.stop();
   return holder;
 }
 
-/// The recovered account [recovered] (its key back by some way) fetches
-/// its copy from the holder and takes the passwords in.
-Future<PasswordVaultService> _restoreFromFriends(
+/// The recovered account [recovered] (its key back by some way, [disk]
+/// marked) fetches its copy and takes the passwords and notes in. A fresh
+/// phone knows no friend: only the helpers or the friend named at the
+/// restore are asked ([candidates]: friends known on the device).
+Future<(PasswordVaultService, SelfNotesService)> _restoreFromFriends(
   LedgerIdentity recovered,
   LedgerDisk disk,
-  CircleBackupService holder,
-) async {
+  CircleBackupService holder, {
+  List<String> candidates = const <String>[],
+}) async {
   final _Linked tNew = _Linked('200::c');
   await tNew.start();
   final PasswordVaultService vault = _freshVault();
+  final SelfNotesService notes = SelfNotesService(disk: MemoryLedgerDisk());
   final CircleBackupService fresh = CircleBackupService(
     transport: tNew,
     disk: disk,
-    data: _VaultData(vault),
+    data: _VaultData(vault, notes),
     identity: () => _idOf(recovered),
     holders: () => const <String>[],
     isInCircle: (_) => false,
-    restoreCandidates: () => <String>['200::b'],
+    restoreCandidates: () => candidates,
   );
   await fresh.start();
   await _settleCircle(<CircleBackupService>[fresh, holder]);
   expect(fresh.restore.value.phase, CircleBackupRestorePhase.done);
   await fresh.stop();
   await holder.stop();
-  return vault;
+  return (vault, notes);
+}
+
+/// Back by the key copy on paper; [friend]: the invitation code of a friend
+/// typed at the restore (its address).
+Future<LedgerIdentity> _byPaper(
+  LedgerIdentity me,
+  MemoryLedgerDisk disk, {
+  String? friend,
+}) async {
+  final PaperBackupDecoded read = decodePaperBackup(
+    encodePaperBackup(me.accountKey!.seed),
+  );
+  return adoptPaperBackup(
+    disk,
+    await PaperBackupAccount.fromSeed(read.seed!),
+    friends: <String>[?friend],
+  );
+}
+
+/// Back by the key file (the restore screen takes it the same way).
+Future<LedgerIdentity> _byKeyFile(
+  LedgerIdentity me,
+  MemoryLedgerDisk disk, {
+  String? friend,
+}) async {
+  final Uint8List file = await encryptKeyFile(
+    me.accountKey!.seed,
+    'haslo-pliku-123',
+    cost: _light,
+  );
+  final KeyFileDecoded read = await decryptKeyFile(file, 'haslo-pliku-123');
+  return adoptPaperBackup(
+    disk,
+    await PaperBackupAccount.fromSeed(read.seed!),
+    friends: <String>[?friend],
+  );
 }
 
 void main() {
+  for (final (
+        String way,
+        Future<LedgerIdentity> Function(
+          LedgerIdentity,
+          MemoryLedgerDisk, {
+          String? friend,
+        })
+        recover,
+      )
+      in <
+        (
+          String,
+          Future<LedgerIdentity> Function(
+            LedgerIdentity,
+            MemoryLedgerDisk, {
+            String? friend,
+          }),
+        )
+      >[('a key copy on paper', _byPaper), ('a key file', _byKeyFile)]) {
+    for (final bool circle in <bool>[true, false]) {
+      test('$way, ${circle ? 'a recovery circle' : 'no circle'}, a friend '
+          '(no other device, no backup file): the passwords and notes from '
+          'the copy with friends', () async {
+        final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
+          MemoryLedgerDisk(),
+        );
+        final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
+        final CircleBackupService holder = await _copyWithFriends(
+          me,
+          vault,
+          notes: await _oldNotes(),
+          circle: circle,
+        );
+        final MemoryLedgerDisk newDisk = MemoryLedgerDisk();
+        // The fresh phone knows nobody: the friend's invitation code typed
+        // at the restore names whom to ask.
+        final LedgerIdentity recovered = await recover(
+          me,
+          newDisk,
+          friend: '200::b',
+        );
+        final (PasswordVaultService v, SelfNotesService n) =
+            await _restoreFromFriends(recovered, newDisk, holder);
+        _expectPasswords(v);
+        _expectNotes(n);
+      });
+    }
+
+    test('$way and no friend at all: the passwords and notes are lost, and '
+        'the app said so before (where the key copy is made)', () async {
+      _Linked.nodes.clear();
+      final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
+        MemoryLedgerDisk(),
+      );
+      final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
+      final _Linked tOwner = _Linked('200::a');
+      await tOwner.start();
+      final CircleBackupService owner = CircleBackupService(
+        transport: tOwner,
+        disk: MemoryLedgerDisk(),
+        data: _VaultData(vault, await _oldNotes()),
+        identity: () => _idOf(me),
+        holders: () => const <String>[],
+        isInCircle: (_) => false,
+        restoreCandidates: () => const <String>[],
+      );
+      await owner.refresh(force: true);
+      expect(tOwner.sentSignals, isEmpty, reason: 'nobody to keep it');
+      expect(owner.status.value.candidates, 0);
+      expect(
+        CopyWithFriendsNote.textOf(owner.status.value),
+        allOf(contains('Nie masz jeszcze znajomych'), contains('nie wrócą')),
+      );
+
+      final MemoryLedgerDisk newDisk = MemoryLedgerDisk();
+      final LedgerIdentity recovered = await recover(me, newDisk);
+      final _Linked tNew = _Linked('200::c');
+      await tNew.start();
+      final PasswordVaultService fresh = _freshVault();
+      final CircleBackupService restoring = CircleBackupService(
+        transport: tNew,
+        disk: newDisk,
+        data: _VaultData(fresh),
+        identity: () => _idOf(recovered),
+        holders: () => const <String>[],
+        isInCircle: (_) => false,
+        restoreCandidates: () => const <String>[],
+      );
+      await restoring.start();
+      await _settleCircle(<CircleBackupService>[restoring]);
+      expect(restoring.restoring, isTrue);
+      expect(fresh.entries, isEmpty);
+      await restoring.stop();
+    });
+  }
+
+  test('the note where the key copy is made says what a key alone brings '
+      'back, and from whom', () {
+    expect(
+      CopyWithFriendsNote.textOf(const CircleBackupStatus(candidates: 2)),
+      contains('jeszcze nie powstała'),
+    );
+    expect(
+      CopyWithFriendsNote.textOf(
+        const CircleBackupStatus(candidates: 2, holders: 2, lastAt: 1),
+      ),
+      allOf(contains('hasła, notatki'), contains('kod zaproszenia')),
+    );
+  });
+
+  test('a holder decides: a circle it keeps a piece of, or an accepted friend '
+      'within its budget; a 1.16.4 holder refuses a friend and another '
+      'friend takes over; a friend removed drops it', () async {
+    _Linked.nodes.clear();
+    final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
+      MemoryLedgerDisk(),
+    );
+    final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
+    final _Linked tOwner = _Linked('200::a');
+    final _Linked tOld = _Linked('200::0');
+    final _Linked tB = _Linked('200::b');
+    for (final _Linked t in <_Linked>[tOwner, tOld, tB]) {
+      await t.start();
+    }
+    // 1.16.4 knows only the circle: no `isFriend`, so a friend's copy is
+    // refused (`cbk_no notInCircle`).
+    final CircleBackupService old = CircleBackupService(
+      transport: tOld,
+      disk: MemoryLedgerDisk(),
+      data: _VaultData(_freshVault()),
+      identity: () => null,
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      restoreCandidates: () => const <String>[],
+    );
+    bool stillFriends = true;
+    final CircleBackupService b = CircleBackupService(
+      transport: tB,
+      disk: MemoryLedgerDisk(),
+      data: _VaultData(_freshVault()),
+      identity: () => null,
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      isFriend: (String a) => stillFriends && a == me.account,
+      restoreCandidates: () => const <String>[],
+    );
+    final CircleBackupService owner = CircleBackupService(
+      transport: tOwner,
+      disk: MemoryLedgerDisk(),
+      data: _VaultData(vault),
+      identity: () => _idOf(me),
+      holders: () => const <String>[],
+      friendHolders: () => <String>[tOld.address, tB.address],
+      isInCircle: (_) => false,
+      restoreCandidates: () => const <String>[],
+    );
+    for (final CircleBackupService s in <CircleBackupService>[old, b, owner]) {
+      await s.start();
+    }
+    await _settleCircle(<CircleBackupService>[old, b, owner]);
+    expect(old.holder.kept, isEmpty);
+    expect(b.holder.kept.keys, <String>[me.account]);
+    expect(owner.targets(), isNot(contains(tOld.address)));
+    expect(owner.status.value.holders, 1);
+
+    // A friend's copy stays within the friends' budget.
+    final CircleBackupService tight = CircleBackupService(
+      transport: await _started('200::d'),
+      disk: MemoryLedgerDisk(),
+      data: _VaultData(_freshVault()),
+      identity: () => null,
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      isFriend: (_) => true,
+      restoreCandidates: () => const <String>[],
+    );
+    expect(tight.holder.friendsBytes, kCircleBackupFriendsBytes);
+
+    // B no longer has the owner as a friend: it drops the copy.
+    stillFriends = false;
+    await b.tick();
+    expect(b.holder.kept, isEmpty);
+    for (final CircleBackupService s in <CircleBackupService>[old, b, owner]) {
+      await s.stop();
+    }
+  });
+
+  test('after a recovery the newest copy is taken, not the first to come '
+      'whole; a holder that stalls is replaced by another one', () async {
+    _Linked.nodes.clear();
+    final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
+      MemoryLedgerDisk(),
+    );
+    final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
+    int now = DateTime.now().millisecondsSinceEpoch;
+    final _Linked tOwner = _Linked('200::a');
+    final _Linked tOld = _Linked('200::b');
+    final _Linked tNew = _Linked('200::e');
+    for (final _Linked t in <_Linked>[tOwner, tOld, tNew]) {
+      await t.start();
+    }
+    CircleBackupService holderAt(_Linked t) => CircleBackupService(
+      transport: t,
+      disk: MemoryLedgerDisk(),
+      data: _VaultData(_freshVault()),
+      identity: () => null,
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      isFriend: (String a) => a == me.account,
+      restoreCandidates: () => const <String>[],
+      clock: () => now,
+    );
+    final CircleBackupService older = holderAt(tOld);
+    final CircleBackupService newer = holderAt(tNew);
+    List<String> keepers = <String>[tOld.address];
+    final CircleBackupService owner = CircleBackupService(
+      transport: tOwner,
+      disk: MemoryLedgerDisk(),
+      data: _VaultData(vault),
+      identity: () => _idOf(me),
+      holders: () => const <String>[],
+      friendHolders: () => keepers,
+      isInCircle: (_) => false,
+      restoreCandidates: () => const <String>[],
+      clock: () => now,
+    );
+    for (final CircleBackupService s in <CircleBackupService>[
+      older,
+      newer,
+      owner,
+    ]) {
+      await s.start();
+    }
+    await _settleCircle(<CircleBackupService>[older, newer, owner]);
+    // A newer password, kept only by the second friend.
+    await vault.add(const PasswordFields(name: 'Nowe', password: 'najnowsze'));
+    keepers = <String>[tNew.address];
+    now += const Duration(hours: 2).inMilliseconds;
+    await owner.refresh(force: true);
+    await _settleCircle(<CircleBackupService>[older, newer, owner]);
+    expect(
+      newer.holder.manifestOf(me.account)!.createdAt,
+      greaterThan(older.holder.manifestOf(me.account)!.createdAt),
+    );
+    await owner.stop();
+
+    final MemoryLedgerDisk newDisk = MemoryLedgerDisk();
+    final LedgerIdentity recovered = await _byPaper(me, newDisk);
+    await CircleBackupService.markRestore(
+      newDisk,
+      helpers: <String>[tOld.address, tNew.address],
+      at: now,
+    );
+    final PasswordVaultService fresh = _freshVault();
+    final CircleBackupService restoring = CircleBackupService(
+      transport: await _started('200::c'),
+      disk: newDisk,
+      data: _VaultData(fresh),
+      identity: () => _idOf(recovered),
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      restoreCandidates: () => const <String>[],
+      clock: () => now,
+    );
+    await restoring.start();
+    await _settleCircle(<CircleBackupService>[restoring, older, newer]);
+    expect(restoring.restore.value.phase, CircleBackupRestorePhase.done);
+    expect(
+      fresh.entries.map((PasswordEntry e) => e.password),
+      contains('najnowsze'),
+    );
+
+    // A holder that offers its copy and then sends no chunk: after a while
+    // the newest copy another holder offered is taken instead.
+    final MemoryLedgerDisk stallDisk = MemoryLedgerDisk();
+    final LedgerIdentity again = await _byPaper(me, stallDisk);
+    await CircleBackupService.markRestore(
+      stallDisk,
+      helpers: <String>[tOld.address, tNew.address],
+      at: now,
+    );
+    tNew.drops = (Map<String, dynamic> p) => p['type'] == 'cbk_part';
+    final PasswordVaultService fresh2 = _freshVault();
+    final CircleBackupService stalled = CircleBackupService(
+      transport: await _started('200::c'),
+      disk: stallDisk,
+      data: _VaultData(fresh2),
+      identity: () => _idOf(again),
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      restoreCandidates: () => const <String>[],
+      clock: () => now,
+    );
+    await stalled.start();
+    await _settleCircle(<CircleBackupService>[stalled, older, newer]);
+    expect(stalled.restore.value.phase, CircleBackupRestorePhase.downloading);
+    now += const Duration(hours: 2).inMilliseconds;
+    await stalled.tick();
+    await _settleCircle(<CircleBackupService>[stalled, older, newer]);
+    expect(stalled.restore.value.phase, CircleBackupRestorePhase.done);
+    _expectPasswords(fresh2);
+    for (final CircleBackupService s in <CircleBackupService>[
+      older,
+      newer,
+      restoring,
+      stalled,
+    ]) {
+      await s.stop();
+    }
+  });
+
+  test('a device the account cut off gets no copy', () async {
+    _Linked.nodes.clear();
+    final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
+      MemoryLedgerDisk(),
+    );
+    final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
+    final CircleBackupService holder = await _copyWithFriends(
+      me,
+      vault,
+      circle: false,
+    );
+    await holder.stop();
+    bool revoked = true;
+    final CircleBackupService cautious = CircleBackupService(
+      transport: await _started('200::b'),
+      disk: holder.disk,
+      data: _VaultData(_freshVault()),
+      identity: () => null,
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      isFriend: (String a) => a == me.account,
+      isRevoked: (String account, String device) => revoked,
+      restoreCandidates: () => const <String>[],
+    );
+    await cautious.start();
+    final MemoryLedgerDisk newDisk = MemoryLedgerDisk();
+    final LedgerIdentity thief = await _byPaper(me, newDisk, friend: '200::b');
+    final _Linked tThief = _Linked('200::c');
+    await tThief.start();
+    final CircleBackupService fetching = CircleBackupService(
+      transport: tThief,
+      disk: newDisk,
+      data: _VaultData(_freshVault()),
+      identity: () => _idOf(thief),
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      restoreCandidates: () => const <String>[],
+    );
+    await fetching.start();
+    await _settleCircle(<CircleBackupService>[fetching, cautious]);
+    expect(fetching.restore.value.phase, CircleBackupRestorePhase.searching);
+    expect(
+      tThief.sentSignals.where(
+        (({Map<String, dynamic> payload, String remoteAddress}) f) =>
+            f.payload['type'] == 'cbk_get',
+      ),
+      isEmpty,
+    );
+    // The same device, not cut off: it gets the copy.
+    revoked = false;
+    await fetching.tick();
+    await _settleCircle(<CircleBackupService>[fetching, cautious]);
+    expect(fetching.restore.value.phase, CircleBackupRestorePhase.done);
+    await fetching.stop();
+    await cautious.stop();
+  });
+
+  test('a copy a friend serves is old: it only adds, it never undoes a '
+      'newer password, a deletion or a cleared history', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final PasswordVaultService vault = await _oldVault(disk);
+    final Map<String, Object?> old = padPasswordSection(
+      (await vault.exportForCopy())!,
+    );
+    final PasswordEntry bank = vault.entries.first;
+    final PasswordEntry mail = vault.entries.last;
+    await vault.edit(
+      bank.id,
+      const PasswordFields(
+        name: 'Bank',
+        login: 'ania',
+        password: 'najnowsze',
+        address: 'https://bank.example.com',
+      ),
+    );
+    await vault.clearHistory(bank.id);
+    await vault.delete(mail.id);
+    expect(await vault.mergeCopy(old), 0);
+    expect(vault.entries.single.password, 'najnowsze');
+    expect(vault.entries.single.history, isEmpty);
+    expect(vault.entry(mail.id), isNull);
+    expect(
+      utf8.decode(disk.files[kPasswordVaultKey]!),
+      isNot(contains('haslo')),
+    );
+    // The notes the same way: an older copy brings no deleted note back.
+    final SelfNotesService notes = await _oldNotes();
+    final Map<String, Object?> oldNotes = (await notes.exportForCopy())!;
+    await notes.delete(notes.notes.single.id);
+    expect(await notes.mergeCopy(padPasswordSection(oldNotes)), 0);
+    expect(notes.notes, isEmpty);
+  });
+
   test(
     'another device of the account: a fresh device gets every password '
     'through the sync, in parts no larger than an entry of the log',
@@ -553,112 +1060,131 @@ void main() {
     },
   );
 
-  test('a full account copy (file), even one with nothing ticked but the '
-      'key: the passwords come back on a fresh install', () async {
-    final MemoryLedgerDisk oldDisk = MemoryLedgerDisk();
-    await _oldVault(oldDisk);
-    final _Source source = _Source(
-      oldDisk,
-      Uint8List.fromList(List<int>.filled(32, 7)),
-    );
-    for (final Set<AccountScope> scope in <Set<AccountScope>>[
-      <AccountScope>{AccountScope.keys},
-      kAllAccountScopes,
-    ]) {
-      final AccountArchiveBuild build = await buildAccountArchive(
+  test(
+    'a full account copy (file), even one with nothing ticked but the '
+    'key: the passwords and the notes come back on a fresh install',
+    () async {
+      final MemoryLedgerDisk oldDisk = MemoryLedgerDisk();
+      await _oldVault(oldDisk);
+      await _notesOn(oldDisk);
+      final _Source source = _Source(
+        oldDisk,
+        Uint8List.fromList(List<int>.filled(32, 7)),
+      );
+      for (final Set<AccountScope> scope in <Set<AccountScope>>[
+        <AccountScope>{AccountScope.keys},
+        kAllAccountScopes,
+      ]) {
+        final AccountArchiveBuild build = await buildAccountArchive(
+          source,
+          scope,
+          at: 1,
+        );
+        expect(
+          build.archive.sections,
+          contains(CircleBackupSections.passwords),
+        );
+        final Uint8List file = await _backupFile(build);
+        // The file never shows a password.
+        expect(latin1.decode(file), isNot(contains('nowe-haslo')));
+
+        final _NewDevice device = _NewDevice();
+        final AccountImportStaging staging = AccountImportStaging(device.disk);
+        final AccountArchive archive = await _readBackup(file, staging);
+        final AccountArchiveImporter importer = AccountArchiveImporter(
+          sink: device,
+          staging: staging,
+        );
+        expect(await importer.take(archive), AccountImportOutcome.restarting);
+        expect(await importer.resume(), isNotNull);
+        _expectPasswords(device.vault);
+        _expectNotes(await _notesAt(device.disk));
+      }
+      // Without the key no copy carries them.
+      final AccountArchiveBuild contacts = await buildAccountArchive(
         source,
-        scope,
+        <AccountScope>{AccountScope.contacts},
         at: 1,
       );
-      expect(build.archive.sections, contains(CircleBackupSections.passwords));
-      final Uint8List file = await _backupFile(build);
-      // The file never shows a password.
-      expect(latin1.decode(file), isNot(contains('nowe-haslo')));
+      expect(
+        contacts.archive.sections,
+        isNot(contains(CircleBackupSections.passwords)),
+      );
+    },
+  );
 
+  test(
+    'a second device or a move (the copy sent to it): the passwords come '
+    'and the notes along, and merge into a device that has the account',
+    () async {
+      final MemoryLedgerDisk oldDisk = MemoryLedgerDisk();
+      await _oldVault(oldDisk);
+      await _notesOn(oldDisk);
+      final AccountArchiveBuild build = await buildAccountArchive(
+        _Source(oldDisk, Uint8List.fromList(List<int>.filled(32, 7))),
+        kAllAccountScopes,
+        at: 1,
+      );
+      // Sent as the copy screen sends it: the manifest as JSON, the key
+      // apart, the files block by block.
+      final AccountArchive sent = AccountArchive.fromJson(
+        jsonDecode(jsonEncode(build.archive.withoutSeed().toJson())),
+      )!.withSeed(build.archive.seed!);
       final _NewDevice device = _NewDevice();
       final AccountImportStaging staging = AccountImportStaging(device.disk);
-      final AccountArchive archive = await _readBackup(file, staging);
+      for (final MapEntry<String, AccountArchiveBlob> f
+          in build.blobs.entries) {
+        final BytesBuilder all = BytesBuilder();
+        await for (final Uint8List part in f.value.chunks()) {
+          all.add(part);
+        }
+        await staging.put(f.key, all.takeBytes());
+      }
       final AccountArchiveImporter importer = AccountArchiveImporter(
         sink: device,
         staging: staging,
       );
-      expect(await importer.take(archive), AccountImportOutcome.restarting);
-      expect(await importer.resume(), isNotNull);
+      expect(await importer.take(sent), AccountImportOutcome.restarting);
+      await importer.resume();
       _expectPasswords(device.vault);
-    }
-    // Without the key no copy carries them.
-    final AccountArchiveBuild contacts = await buildAccountArchive(
-      source,
-      <AccountScope>{AccountScope.contacts},
-      at: 1,
-    );
-    expect(
-      contacts.archive.sections,
-      isNot(contains(CircleBackupSections.passwords)),
-    );
-  });
+      _expectNotes(await _notesAt(device.disk));
 
-  test('a second device or a move (the copy sent to it): the passwords come '
-      'along, and merge into a device that has the account', () async {
-    final MemoryLedgerDisk oldDisk = MemoryLedgerDisk();
-    await _oldVault(oldDisk);
-    final AccountArchiveBuild build = await buildAccountArchive(
-      _Source(oldDisk, Uint8List.fromList(List<int>.filled(32, 7))),
-      kAllAccountScopes,
-      at: 1,
-    );
-    // Sent as the copy screen sends it: the manifest as JSON, the key
-    // apart, the files block by block.
-    final AccountArchive sent = AccountArchive.fromJson(
-      jsonDecode(jsonEncode(build.archive.withoutSeed().toJson())),
-    )!.withSeed(build.archive.seed!);
-    final _NewDevice device = _NewDevice();
-    final AccountImportStaging staging = AccountImportStaging(device.disk);
-    for (final MapEntry<String, AccountArchiveBlob> f in build.blobs.entries) {
-      final BytesBuilder all = BytesBuilder();
-      await for (final Uint8List part in f.value.chunks()) {
-        all.add(part);
+      // The same account, with a password of its own: nothing is lost.
+      final _NewDevice same = _NewDevice(account: 'acc-1');
+      await same.vault.add(
+        const PasswordFields(name: 'Tylko tu', password: 'moje'),
+      );
+      final AccountImportStaging staging2 = AccountImportStaging(same.disk);
+      for (final MapEntry<String, AccountArchiveBlob> f
+          in build.blobs.entries) {
+        final BytesBuilder all = BytesBuilder();
+        await for (final Uint8List part in f.value.chunks()) {
+          all.add(part);
+        }
+        await staging2.put(f.key, all.takeBytes());
       }
-      await staging.put(f.key, all.takeBytes());
-    }
-    final AccountArchiveImporter importer = AccountArchiveImporter(
-      sink: device,
-      staging: staging,
-    );
-    expect(await importer.take(sent), AccountImportOutcome.restarting);
-    await importer.resume();
-    _expectPasswords(device.vault);
-
-    // The same account, with a password of its own: nothing is lost.
-    final _NewDevice same = _NewDevice(account: 'acc-1');
-    await same.vault.add(
-      const PasswordFields(name: 'Tylko tu', password: 'moje'),
-    );
-    final AccountImportStaging staging2 = AccountImportStaging(same.disk);
-    for (final MapEntry<String, AccountArchiveBlob> f in build.blobs.entries) {
-      final BytesBuilder all = BytesBuilder();
-      await for (final Uint8List part in f.value.chunks()) {
-        all.add(part);
-      }
-      await staging2.put(f.key, all.takeBytes());
-    }
-    expect(
-      await AccountArchiveImporter(sink: same, staging: staging2).take(sent),
-      AccountImportOutcome.done,
-    );
-    expect(same.vault.entries.map((PasswordEntry e) => e.name), <String>[
-      'Bank',
-      'Poczta',
-      'Tylko tu',
-    ]);
-  });
+      expect(
+        await AccountArchiveImporter(sink: same, staging: staging2).take(sent),
+        AccountImportOutcome.done,
+      );
+      expect(same.vault.entries.map((PasswordEntry e) => e.name), <String>[
+        'Bank',
+        'Poczta',
+        'Tylko tu',
+      ]);
+    },
+  );
 
   test('the recovery circle: the key from two helpers and the password, the '
       'passwords from the copy with friends', () async {
     final MemoryLedgerDisk oldDisk = MemoryLedgerDisk();
     final LedgerIdentity me = await LedgerIdentity.loadOrCreate(oldDisk);
     final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
-    final CircleBackupService holder = await _copyWithFriends(me, vault);
+    final CircleBackupService holder = await _copyWithFriends(
+      me,
+      vault,
+      notes: await _oldNotes(),
+    );
 
     // The phone is lost. Two helpers give their halves back.
     final List<RecoveryPiece> pieces = await createRecoveryPieces(
@@ -683,47 +1209,10 @@ void main() {
       found.single.seed,
     );
     await CircleBackupService.markRestore(newDisk, helpers: <String>['200::b']);
-    _expectPasswords(await _restoreFromFriends(recovered, newDisk, holder));
-  });
-
-  test(
-    'a key copy on paper: the passwords from the copy with friends',
-    () async {
-      final MemoryLedgerDisk oldDisk = MemoryLedgerDisk();
-      final LedgerIdentity me = await LedgerIdentity.loadOrCreate(oldDisk);
-      final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
-      final CircleBackupService holder = await _copyWithFriends(me, vault);
-
-      final String paper = encodePaperBackup(me.accountKey!.seed);
-      final PaperBackupDecoded read = decodePaperBackup(paper);
-      final MemoryLedgerDisk newDisk = MemoryLedgerDisk();
-      final LedgerIdentity recovered = await adoptPaperBackup(
-        newDisk,
-        await PaperBackupAccount.fromSeed(read.seed!),
-      );
-      _expectPasswords(await _restoreFromFriends(recovered, newDisk, holder));
-    },
-  );
-
-  test('a key file: the passwords from the copy with friends', () async {
-    final MemoryLedgerDisk oldDisk = MemoryLedgerDisk();
-    final LedgerIdentity me = await LedgerIdentity.loadOrCreate(oldDisk);
-    final PasswordVaultService vault = await _oldVault(MemoryLedgerDisk());
-    final CircleBackupService holder = await _copyWithFriends(me, vault);
-
-    final Uint8List file = await encryptKeyFile(
-      me.accountKey!.seed,
-      'haslo-pliku-123',
-      cost: _light,
-    );
-    final KeyFileDecoded read = await decryptKeyFile(file, 'haslo-pliku-123');
-    final MemoryLedgerDisk newDisk = MemoryLedgerDisk();
-    final LedgerIdentity recovered = await LedgerIdentity.adoptAccount(
-      newDisk,
-      read.seed!,
-    );
-    await CircleBackupService.markRestore(newDisk);
-    _expectPasswords(await _restoreFromFriends(recovered, newDisk, holder));
+    final (PasswordVaultService v, SelfNotesService n) =
+        await _restoreFromFriends(recovered, newDisk, holder);
+    _expectPasswords(v);
+    _expectNotes(n);
   });
 
   test('while the vault cannot be read no copy with friends is made: the '

@@ -182,11 +182,44 @@ void main() {
     expect(back.password, 'haslo-6');
     expect(back.history.first.password, 'haslo-9');
 
+    final Map<String, Object?> beforeClear = _stored(disk);
     final PasswordEntry clean = await vault.clearHistory(e.id);
     expect(clean.history, isEmpty);
     expect(clean.password, 'haslo-6');
-    expect(_keys(disk), <String>{clean.versionKey});
+    expect(clean.keptOverDeletion, isFalse);
+    // The current version and a marker naming the forgotten ones (no
+    // password in it).
+    expect(_keys(disk), hasLength(2));
+    expect(_keys(disk), contains(clean.versionKey));
     expect(jsonEncode(_stored(disk)), isNot(contains('haslo-9')));
+    // A copy (or a device that was away) made before brings none of them
+    // back: the marker saw them.
+    expect(await vault.mergeCopy(beforeClear), 0);
+    expect(vault.entry(e.id)!.history, isEmpty);
+    expect(jsonEncode(_stored(disk)), isNot(contains('haslo-9')));
+    // Nor does the sync's taking of such a state.
+    await vault.takeSyncState(<String, Object?>{
+      ..._stored(disk),
+      'e': <String, Object?>{
+        ...(_stored(disk)['e']! as Map).cast<String, Object?>(),
+        ...(beforeClear['e']! as Map).cast<String, Object?>(),
+      },
+    });
+    expect(vault.entry(e.id)!.history, isEmpty);
+    expect(jsonEncode(_stored(disk)), isNot(contains('haslo-9')));
+    // Cleared again later: the markers fold into one.
+    await vault.edit(
+      e.id,
+      PasswordFields(
+        name: 'Bank',
+        login: 'ania',
+        password: 'haslo-10',
+        address: _bank.address,
+      ),
+    );
+    await vault.clearHistory(e.id);
+    expect(_keys(disk), hasLength(2));
+    expect(vault.entry(e.id)!.password, 'haslo-10');
   });
 
   test('a deletion removes the entry and its old passwords from the store, '

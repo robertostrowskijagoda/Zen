@@ -73,6 +73,27 @@ List<AccountRestoreRow> accountRestoreRows() => <AccountRestoreRow>[
   AccountRestoreRow(t('Piramida i portfel'), _row(_partly(5), _partly(5))),
   AccountRestoreRow(t('Randki'), _row(_partly(4), _partly(2))),
   AccountRestoreRow(t('Sąsiedzi'), _row(_yes, _partly(2))),
+  AccountRestoreRow(
+    t('Hasła'),
+    <AccountRestoreMethod, (AccountRestoreCell, int?)>{
+      AccountRestoreMethod.device: _yes,
+      // Always with the key, whatever else is ticked.
+      AccountRestoreMethod.backupFile: _yes,
+      AccountRestoreMethod.circle: _yes,
+      AccountRestoreMethod.paperKey: _partly(7),
+      AccountRestoreMethod.keyFile: _partly(7),
+    },
+  ),
+  AccountRestoreRow(
+    t('Notatki dla siebie'),
+    <AccountRestoreMethod, (AccountRestoreCell, int?)>{
+      AccountRestoreMethod.device: _yes,
+      AccountRestoreMethod.backupFile: _yes,
+      AccountRestoreMethod.circle: _yes,
+      AccountRestoreMethod.paperKey: _partly(7),
+      AccountRestoreMethod.keyFile: _partly(7),
+    },
+  ),
   AccountRestoreRow(t('Spotkania i kółka'), _row(_no, _no)),
   AccountRestoreRow(t('Filmy'), _row(_no, _no)),
 ];
@@ -90,6 +111,10 @@ Map<int, String> accountRestoreNotes() => <int, String>{
   6: t(
     'Ustawienia konta tak; ustawienia urządzenia (blokada, łączność, '
     'powiadomienia, pamięć) zostają na nim.',
+  ),
+  7: t(
+    'Hasła i notatki wracają z kopii u znajomych, także bez kręgu; kto nie '
+    'ma żadnego znajomego w Zen, po samym kluczu ich nie odzyska.',
   ),
 };
 
@@ -253,7 +278,9 @@ class AccountRestoreInfoScreen extends StatelessWidget {
                 icon: Icons.history_edu_rounded,
                 title: t('Kartka z kluczem i plik klucza'),
                 text: t(
-                  'Przywracają samo konto, od razu i bez niczyjej pomocy. '
+                  'Przywracają konto od razu i bez niczyjej pomocy; resztę '
+                  '— hasła, notatki, znajomych, rozmowy — z kopii u '
+                  'znajomych, gdy podasz kod zaproszenia jednego z nich. '
                   'Kto ma kartkę albo plik z hasłem, ma konto — trzymaj je '
                   'bezpiecznie.',
                 ),

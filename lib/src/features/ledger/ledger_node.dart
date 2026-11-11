@@ -783,6 +783,12 @@ final class LedgerNode {
         // Files another own device sent: always fetched, from the others.
         _fetchMediaOf(e);
       }
+      if (e.account == account &&
+          e.device != identity.deviceKey.id &&
+          e.space == accountSpace('own', account) &&
+          isLedgerCheckpoint(e)) {
+        _ownCheckpoint(e);
+      }
       if (e.kind == kDeviceRecordKind) {
         unawaitedLogged(
           _onDeviceRecord(e),
@@ -1367,27 +1373,158 @@ final class LedgerNode {
   // ---- what own devices share (chats, removed contacts) ----
 
   /// Seals [plain] for this account's devices and writes it ([spaceKind]
-  /// `own`: never leaves them; `private`: friends keep a copy).
+  /// `own`: never leaves them; `private`: friends keep a copy). With
+  /// [stateLog] it goes into this device's state log ([stateLogStart]).
   Future<LogEntry?> publishForOwnDevices(
     String kind,
     Map<String, dynamic> plain, {
     String spaceKind = 'own',
     List<String> blobs = const <String>[],
+    bool stateLog = false,
   }) async {
     await start();
     final Uint8List? key = identity.selfKey;
     if (key == null || _suspended) {
       return null;
     }
-    final LogEntry e = await publish(
-      kind,
-      await sealForSelf(plain, key, account: account),
-      spaceKind: spaceKind,
-      blobs: blobs,
+    final Map<String, dynamic> sealed = await sealForSelf(
+      plain,
+      key,
+      account: account,
     );
+    final LogEntry e;
+    if (stateLog) {
+      final LedgerAuthor log = await _stateLog();
+      final Completer<void>? gate = _resumed;
+      if (gate != null) {
+        await gate.future;
+      }
+      e = await log.append(accountSpace('own', account), kind, sealed);
+    } else {
+      e = await publish(kind, sealed, spaceKind: spaceKind, blobs: blobs);
+    }
     _opened[e.id] = plain;
     _ownApplied.add(e.id);
     return e;
+  }
+
+  // ---- the state log: the account's states, held only as long as needed
+
+  /// This device's log of the account's states in `own` (settings, notes,
+  /// passwords…), apart from its other own entries (chat copies) under a
+  /// writer of its own, so that it can start over: a checkpoint, the states
+  /// as they are now written again after it, and everything before it
+  /// dropped here and on the account's other devices
+  /// ([stateLogStart], [stateLogDropBefore]). Superseded and deleted
+  /// values then leave the log for good.
+  Future<LedgerAuthor> _stateLog() => _stateAuthor ??= _openStateLog();
+  Future<LedgerAuthor>? _stateAuthor;
+  static const String _stateWriterKey = 'ledger/state_writer';
+
+  Future<LedgerAuthor> _openStateLog() async {
+    final Uint8List? raw = await disk.read(_stateWriterKey);
+    String? writer = raw == null
+        ? null
+        : utf8.decode(raw, allowMalformed: true);
+    if (writer == null ||
+        writer.isEmpty ||
+        writer == identity.writer ||
+        archive.lostOwnLog(writer)) {
+      // Never written, or its log did not come back whole (writing on would
+      // number entries like lost ones: a fork): a new one.
+      writer = randomId();
+      await disk.write(
+        _stateWriterKey,
+        Uint8List.fromList(utf8.encode(writer)),
+      );
+    }
+    return LedgerAuthor(
+      deviceKey: identity.deviceKey,
+      certificate: identity.certificate,
+      store: store,
+      writer: writer,
+    );
+  }
+
+  /// Appends a checkpoint to this device's state log; returns its writer
+  /// and the checkpoint's place (null when nothing can be written now).
+  Future<({String writer, int seq})?> stateLogStart() async {
+    await start();
+    if (_suspended || identity.selfKey == null) {
+      return null;
+    }
+    final LedgerAuthor log = await _stateLog();
+    final LogEntry e = await log.checkpoint(accountSpace('own', account));
+    return (writer: log.writer, seq: e.seq);
+  }
+
+  /// Drops what this device holds of the own log [writer] before its
+  /// checkpoint [seq], with what was opened of it; returns how many went.
+  int stateLogDropBefore(String writer, int seq) {
+    final String space = accountSpace('own', account);
+    final List<String> ids = <String>[
+      for (final LogEntry e in store.entriesAfter(space, writer, 0))
+        if (e.seq < seq) e.id,
+    ];
+    final int removed = store.pruneBefore(space, writer, seq);
+    if (removed > 0) {
+      for (final String id in ids) {
+        _opened.remove(id);
+      }
+    }
+    return removed;
+  }
+
+  /// Another device of the account started its state log over (a
+  /// checkpoint in `own`): what came before goes here too, a little later,
+  /// once what was still being opened of it is taken.
+  void _ownCheckpoint(LogEntry e) {
+    Timer(stateLogDropDelay, () {
+      if (_stopping == null) {
+        stateLogDropBefore(e.writer, e.seq);
+      }
+    });
+  }
+
+  /// How long after another device's checkpoint what came before it goes
+  /// here ([_ownCheckpoint]).
+  @visibleForTesting
+  static Duration stateLogDropDelay = const Duration(seconds: 30);
+
+  /// The opened bodies of sealed entries held in memory (tests).
+  @visibleForTesting
+  Iterable<Map<String, dynamic>> get debugOpenedBodies => _opened.values;
+
+  /// Own entries of these kinds are not opened while Zen is locked, and
+  /// what was opened of them is forgotten then ([closeOwnKind]).
+  final Set<String> _closedOwnKinds = <String>{};
+
+  /// Forgets the opened bodies of own entries of [kind] (Zen locked: no
+  /// plain copy of them stays in memory) and opens none until
+  /// [reopenOwnKind].
+  void closeOwnKind(String kind) {
+    _closedOwnKinds.add(kind);
+    if (!isReady) {
+      return;
+    }
+    for (final LogEntry e in store.entries(accountSpace('own', account))) {
+      if (e.kind == kind) {
+        _opened.remove(e.id);
+      }
+    }
+  }
+
+  /// Opens own entries of [kind] again (Zen unlocked): those other devices
+  /// wrote come once more through [ownEntries].
+  Future<void> reopenOwnKind(String kind) async {
+    _closedOwnKinds.remove(kind);
+    if (!isReady) {
+      return;
+    }
+    await _open(<LogEntry>[
+      for (final LogEntry e in store.entries(accountSpace('own', account)))
+        if (e.kind == kind && isSealed(e.body)) e,
+    ]);
   }
 
   /// Readable entries other own devices wrote for this one that were not
@@ -2868,7 +3005,9 @@ final class LedgerNode {
   Future<void> _open(Iterable<LogEntry> entries) async {
     bool any = false;
     for (final LogEntry e in entries.toList()) {
-      if (_opened.containsKey(e.id)) {
+      if (_opened.containsKey(e.id) ||
+          (_closedOwnKinds.contains(e.kind) &&
+              e.space == accountSpace('own', account))) {
         continue;
       }
       final Uint8List? selfKey = identity.selfKey;

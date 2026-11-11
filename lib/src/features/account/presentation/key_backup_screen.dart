@@ -12,10 +12,12 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/key_file.dart';
 import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/account/presentation/recovery_circle_list.dart';
+import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
@@ -23,6 +25,56 @@ import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+
+/// What a key copy alone brings back, as it stands now, where the key copy
+/// is made: only the account while no friend can keep the copy with
+/// friends (said before it happens), not yet the rest while nobody
+/// confirmed it, else the rest from the friends that keep it.
+class CopyWithFriendsNote extends ConsumerWidget {
+  const CopyWithFriendsNote({super.key});
+
+  /// The text for [status] (tests read it).
+  static String textOf(CircleBackupStatus status) {
+    if (status.candidates == 0) {
+      return t(
+        'Nie masz jeszcze znajomych, więc nikt nie trzyma kopii Twoich '
+        'danych. Jeśli odzyskasz konto z samego klucza, nie wrócą hasła, '
+        'notatki, znajomi ani rozmowy. Dodaj znajomego albo zrób kopię '
+        'całego konta.',
+      );
+    }
+    if (status.holders == 0) {
+      return t(
+        'Kopia u znajomych jeszcze nie powstała: czeka, aż ktoś z nich '
+        'będzie w sieci. Do tego czasu z samego klucza wróci tylko konto.',
+      );
+    }
+    return t(
+      'Kopię Twoich danych (hasła, notatki, znajomi, rozmowy) trzymają '
+      'znajomi (osób: {n}). Po odzyskaniu konta z klucza wrócą od nich: na '
+      'nowym telefonie podaj kod zaproszenia jednego z nich.',
+      <String, Object?>{'n': status.holders},
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final CircleBackupService? copy = ref.watch(circleBackupServiceProvider);
+    if (copy == null) {
+      return const SizedBox.shrink();
+    }
+    final ZenColors zen = ZenColors.of(context);
+    return ValueListenableBuilder<CircleBackupStatus>(
+      valueListenable: copy.status,
+      builder: (BuildContext context, CircleBackupStatus status, _) => ZenInfo(
+        key: const Key('copy-with-friends-note'),
+        icon: Icons.groups_2_outlined,
+        tone: status.holders == 0 ? zen.warning : null,
+        text: textOf(status),
+      ),
+    );
+  }
+}
 
 /// "Kopia klucza": the two ways to back up the account key,
 /// on one screen. (a) an encrypted file protected by a password the person
@@ -260,6 +312,7 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
           'nie poprosi Cię o nie.',
         ),
       ),
+      const CopyWithFriendsNote(),
       ZenCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

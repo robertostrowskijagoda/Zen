@@ -8,8 +8,12 @@ import 'package:zen/src/features/passwords/password_vault_service.dart';
 /// the sync into its versions (one unit each, never changed once written),
 /// so edits on two devices at once both arrive and a deletion goes
 /// everywhere. Read and written through the vault's own queue, never
-/// beside it; nothing is read while Zen is locked.
-final class PasswordVaultSyncDomain implements AccountSyncDomain {
+/// beside it; nothing is read while Zen is locked. Versions a deletion or
+/// a cleared history saw are dropped when another device's change is
+/// taken ([AccountSyncPruning]): they are deletions here then, never kept
+/// aside with their passwords.
+final class PasswordVaultSyncDomain
+    implements AccountSyncDomain, AccountSyncPruning {
   PasswordVaultSyncDomain(this.vault) {
     vault.edits.addListener(_poke);
   }

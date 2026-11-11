@@ -316,6 +316,19 @@ const List<_Name> _names = <_Name>[
   // The passwords (from 1.16.5): a few hand-made entries to an imported
   // export of hundreds (random passwords do not compress).
   _Name('passwords/vault', used: 0.15, min: 160, max: 60000),
+  // The copy with friends (from 1.16.5 every account with a friend makes
+  // one, circle or not, and keeps its friends'): its state, the index of
+  // the copies kept here and their chunks (named by 32 hex digits).
+  _Name('circle-backup/status', used: 0.6, min: 90, max: 200),
+  _Name('circle-backup/held', used: 0.4, min: 120, max: 12000),
+  _Name('circle-backup/restore', used: 0.01, min: 90, max: 400),
+  _Name(
+    'circle-backup/k/{h32}/{h32}',
+    used: 0.4,
+    min: 120,
+    max: 200000,
+    many: true,
+  ),
 ];
 
 /// What `account/sync/<id>` is kept for (account_state_sync_app.dart).

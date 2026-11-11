@@ -137,6 +137,81 @@ final class SelfNotesService extends ChangeNotifier {
     await _save();
   }
 
+  /// The stored notes for the copy with friends (deletion markers too, so
+  /// a note deleted before the copy was made does not come back from an
+  /// older one), or null when there are none.
+  /// Throws when the store does not read (locked): no copy is made then,
+  /// rather than one without the notes.
+  Future<Map<String, Object?>?> exportForCopy() async {
+    final Map<String, SelfNote> notes = await _readStrict();
+    if (notes.isEmpty) {
+      return null;
+    }
+    return <String, Object?>{
+      for (final SelfNote n in notes.values) n.id: n.toJson(),
+    };
+  }
+
+  /// The stored notes; throws when they do not read (never taken for
+  /// none: a merge would then write the others over).
+  Future<Map<String, SelfNote>> _readStrict() async {
+    final Uint8List? raw = await disk.read(kSelfNotesKey);
+    if (raw == null) {
+      return <String, SelfNote>{};
+    }
+    final Object? json = jsonDecode(utf8.decode(raw));
+    if (json is! Map) {
+      throw const FormatException('The notes do not read.');
+    }
+    return <String, SelfNote>{
+      for (final MapEntry<dynamic, dynamic> e in json.entries)
+        if (e.key is String)
+          if (SelfNote.fromJson(e.key as String, e.value)
+              case final SelfNote note)
+            note.id: note,
+    };
+  }
+
+  /// Takes the notes of a copy ([section]: the copy with friends) in with
+  /// those here: a note missing here is added, of one here the newer
+  /// version stays (a deletion is newer than its note), so nothing here is
+  /// written over by an older copy. Returns how many came in or changed.
+  Future<int> mergeCopy(Object? section) async {
+    if (section is! Map) {
+      return 0;
+    }
+    final Map<String, SelfNote> next = await _readStrict();
+    int changed = 0;
+    for (final MapEntry<dynamic, dynamic> e in section.entries) {
+      if (e.key is! String) {
+        continue;
+      }
+      final SelfNote? note = SelfNote.fromJson(e.key as String, e.value);
+      if (note == null) {
+        // The copy's padding and anything unreadable.
+        continue;
+      }
+      final SelfNote? here = next[note.id];
+      if (here == null || note.atMillis > here.atMillis) {
+        next[note.id] = SelfNote(
+          id: note.id,
+          text: note.text.length > kMaxSelfNoteChars
+              ? note.text.substring(0, kMaxSelfNoteChars)
+              : note.text,
+          atMillis: note.atMillis,
+          deleted: note.deleted,
+        );
+        changed++;
+      }
+    }
+    if (changed > 0) {
+      _notes = next;
+      _loaded = true;
+      await _save();
+    }
+    return changed;
+  }
+
   Future<void> _ensureLoaded() async {
     if (!_loaded) {
       await load();

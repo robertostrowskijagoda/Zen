@@ -53,6 +53,9 @@ String accountScopeLabel(AccountScope scope) => switch (scope) {
 /// store) that go into a copy as they are.
 const Map<AccountScope, List<String>> kAccountRawKeys =
     <AccountScope, List<String>>{
+      // The notes to oneself go with the key, as the passwords do: every
+      // copy brings them back, whatever else is ticked.
+      AccountScope.keys: <String>['notes/self'],
       AccountScope.chats: <String>['chat/strangers'],
       AccountScope.pyramid: <String>['pyramid/ledger'],
       AccountScope.meet: <String>[

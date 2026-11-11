@@ -7,14 +7,16 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 
-/// The copy of an account's data kept by the people of its recovery
-/// circle ("Kopia u kręgu").
+/// The copy of an account's data kept by chosen friends and by the people
+/// of its recovery circle, if it has one ("Kopia u znajomych").
 ///
 /// What is in it: the profile (without photos), friends and groups with
 /// their levels, the settings, the pyramid state this person keeps (votes,
-/// private data, the power key of the head), a wallet statement, the
-/// passwords, and — unless turned off — the text of the conversations (no
-/// photos, videos or files: ids, times, authors, text).
+/// private data, the power key of the head), the passwords, the notes to
+/// oneself, and — unless turned off — the text of the conversations (no
+/// photos, videos or files: ids, times, authors, text). Copies made by
+/// earlier versions may carry a wallet statement, which nothing takes
+/// back.
 ///
 /// How it is kept: every piece of it (a section, one month of one
 /// conversation) is split into chunks of at most [kCircleBackupChunkBytes],
@@ -57,6 +59,10 @@ abstract final class CircleBackupSections {
   /// with friends padded to hide how many there are, in a copy of the
   /// account with its key. Taken back by merging, never over what is here.
   static const String passwords = 'passwords';
+
+  /// The notes to oneself ("Notatki dla siebie", `kSelfNotesKey`), padded
+  /// as the passwords are; taken back by merging.
+  static const String notes = 'notes';
 }
 
 /// What a copy holds, in plain JSON.
