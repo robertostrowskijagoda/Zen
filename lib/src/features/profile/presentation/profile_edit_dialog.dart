@@ -17,6 +17,7 @@ import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/feed/presentation/rich_text_controller.dart';
 import 'package:zen/src/features/media/crop_region.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/media/platform_picture.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/presentation/image_crop_screen.dart';
@@ -42,6 +43,57 @@ class ProfileEditDialog extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<ProfileEditDialog> createState() => _ProfileEditDialogState();
+}
+
+/// A picture for the profile photo or cover from the phone's gallery or
+/// camera, as a file; `null` when the person closed the picker.
+///
+/// The gallery hands the file over as it is: given a size or a quality,
+/// the Android picker decodes the picture to a single bitmap and writes it
+/// again as a JPEG, which leaves an animated GIF (or WebP) a still of its
+/// first frame. The picture is made small afterwards anyway, a GIF as a GIF
+/// that still plays ([makeAvatarImage], `makeCoverImage`); a HEIC photo,
+/// which the picker used to turn into a JPEG, is read by the phone's own
+/// decoder instead ([checkPickedPicture]). A camera shot is
+/// never animated, so it is made smaller right away (a phone camera's photo
+/// can be bigger than [kMaxAvatarSourceBytes]).
+@visibleForTesting
+Future<String?> pickProfilePicturePath({required bool camera}) async {
+  final XFile? image = camera
+      ? await ImagePicker().pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 88,
+        )
+      : await ImagePicker().pickImage(source: ImageSource.gallery);
+  return image?.path;
+}
+
+/// The picked picture [bytes] made ready to be framed as the profile photo
+/// or cover: as it is when this app reads it itself (a GIF, or an animated
+/// WebP or PNG, keeps every frame); a photo in another format (HEIC/HEIF,
+/// AVIF: the gallery now hands it over as it is) as a PNG of it made by the
+/// phone's own decoder ([decode]), at most [kPlatformPictureSide] a side.
+/// Throws [FormatException] (said to the person) for anything dangerous or
+/// that neither can read.
+@visibleForTesting
+Future<Uint8List> checkPickedPicture(
+  Uint8List bytes, {
+  PlatformPictureDecoder decode = decodeWithPlatform,
+}) async {
+  if (AvatarSanitizer.hasDangerousHeader(bytes)) {
+    throw FormatException(
+      t('Wykryto niebezpieczną zawartość lub plik wykonywalny.'),
+    );
+  }
+  final Uint8List? readable = await readablePicture(bytes, decode: decode);
+  if (readable == null || !AvatarSanitizer.isValidImageBytes(readable)) {
+    throw FormatException(
+      t('Nieobsługiwany format pliku. Wybierz obraz JPG, PNG, WEBP lub GIF.'),
+    );
+  }
+  return readable;
 }
 
 /// A picked picture: a file, or bytes already in memory.
@@ -253,15 +305,10 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
         break;
     }
     try {
-      final XFile? image = await ImagePicker().pickImage(
-        source: source == _PictureSource.camera
-            ? ImageSource.camera
-            : ImageSource.gallery,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 88,
+      final String? path = await pickProfilePicturePath(
+        camera: source == _PictureSource.camera,
       );
-      return image == null ? null : (path: image.path, bytes: null);
+      return path == null ? null : (path: path, bytes: null);
     } catch (error, stackTrace) {
       // Some ROMs have no usable gallery/camera intent; the file browser is a
       // reliable fallback there.
@@ -299,17 +346,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
         ),
       );
     }
-    if (AvatarSanitizer.hasDangerousHeader(bytes)) {
-      throw FormatException(
-        t('Wykryto niebezpieczną zawartość lub plik wykonywalny.'),
-      );
-    }
-    if (!AvatarSanitizer.isValidImageBytes(bytes)) {
-      throw FormatException(
-        t('Nieobsługiwany format pliku. Wybierz obraz JPG, PNG, WEBP lub GIF.'),
-      );
-    }
-    return bytes;
+    return checkPickedPicture(bytes);
   }
 
   Future<void> _storePickedAvatar(_Picked source) async {

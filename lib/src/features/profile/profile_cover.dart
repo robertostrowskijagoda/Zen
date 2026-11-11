@@ -25,16 +25,18 @@ const int kMaxCoverSourceBytes = 20 * 1024 * 1024;
 const int kCoverGifWidth = 600;
 const int kMaxCoverGifBytes = 3 * 1024 * 1024;
 
-/// A cropped, scaled JPEG of [bytes] (a GIF: a cropped, scaled GIF that
-/// still plays), or `null` when it is not an image this app is willing to
-/// handle: the part [region] names (framed by the person, made 3:1), or
-/// the middle band. Runs in an isolate.
-Uint8List? makeCoverImage(Uint8List bytes, {CropRegion? region}) {
-  if (bytes.length > kMaxCoverSourceBytes ||
-      !AvatarSanitizer.isValidImageBytes(bytes) ||
-      AvatarSanitizer.hasDangerousHeader(bytes)) {
+/// A cropped, scaled JPEG of [picked] (a GIF: a cropped, scaled GIF that
+/// still plays; an animated WebP or PNG is made a GIF first), or `null`
+/// when it is not an image this app is willing to handle: the part
+/// [region] names (framed by the person, made 3:1), or the middle band.
+/// Runs in an isolate.
+Uint8List? makeCoverImage(Uint8List picked, {CropRegion? region}) {
+  if (picked.length > kMaxCoverSourceBytes ||
+      !AvatarSanitizer.isValidImageBytes(picked) ||
+      AvatarSanitizer.hasDangerousHeader(picked)) {
     return null;
   }
+  final Uint8List bytes = animatedPictureAsGif(picked) ?? picked;
   if (looksLikeGif(bytes)) {
     return shrinkGif(
       bytes,

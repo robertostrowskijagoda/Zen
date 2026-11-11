@@ -66,14 +66,17 @@ Future<Map<String, dynamic>> buildProfilePayload(UserProfile profile) async {
   };
 }
 
-/// A square [kProfileAvatarSize] JPEG of [bytes], or `null` when it is not
+/// A square [kProfileAvatarSize] JPEG of [picked], or `null` when it is not
 /// an image this app is willing to handle. A GIF stays animated: a square
-/// GIF of at most [kMaxAvatarGifBytes]. Runs in an isolate.
-Uint8List? makeAvatarThumbnail(Uint8List bytes) {
-  if (!AvatarSanitizer.isValidImageBytes(bytes) ||
-      AvatarSanitizer.hasDangerousHeader(bytes)) {
+/// GIF of at most [kMaxAvatarGifBytes] (an animated WebP or PNG, such as a
+/// dating photo picked as a file, is made a GIF first). Runs in an
+/// isolate.
+Uint8List? makeAvatarThumbnail(Uint8List picked) {
+  if (!AvatarSanitizer.isValidImageBytes(picked) ||
+      AvatarSanitizer.hasDangerousHeader(picked)) {
     return null;
   }
+  final Uint8List bytes = animatedPictureAsGif(picked) ?? picked;
   if (looksLikeGif(bytes)) {
     return shrinkGif(
       bytes,

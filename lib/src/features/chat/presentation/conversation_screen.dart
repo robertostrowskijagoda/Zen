@@ -47,6 +47,7 @@ import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/media/media_vault.dart';

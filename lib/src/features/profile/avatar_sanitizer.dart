@@ -227,20 +227,22 @@ const int kAvatarGifSide = 512;
 /// smaller).
 const int kMaxAvatarSourceBytes = 20 * 1024 * 1024;
 
-/// The part [region] of the picture [bytes] (framed by the person, made
+/// The part [region] of the picture [picked] (framed by the person, made
 /// square) as one's photo: a JPEG at most [kAvatarSide] a side (a PNG when
 /// it has see-through parts), turned upright and without its metadata
-/// (no EXIF, no GPS); a GIF stays animated ([kAvatarGifSide]). `null` when
-/// it is not a picture this app handles. Pure and slow for a big picture:
-/// run it in an isolate.
+/// (no EXIF, no GPS); a GIF stays animated ([kAvatarGifSide]), and so does
+/// an animated WebP or PNG, made a GIF first ([animatedPictureAsGif]).
+/// `null` when it is not a picture this app handles. Pure and slow for a
+/// big picture: run it in an isolate.
 Uint8List? makeAvatarImage((Uint8List, CropRegion?) job) {
-  final Uint8List bytes = job.$1;
+  final Uint8List picked = job.$1;
   final CropRegion? region = job.$2;
-  if (bytes.length > kMaxAvatarSourceBytes ||
-      !AvatarSanitizer.isValidImageBytes(bytes) ||
-      AvatarSanitizer.hasDangerousHeader(bytes)) {
+  if (picked.length > kMaxAvatarSourceBytes ||
+      !AvatarSanitizer.isValidImageBytes(picked) ||
+      AvatarSanitizer.hasDangerousHeader(picked)) {
     return null;
   }
+  final Uint8List bytes = animatedPictureAsGif(picked) ?? picked;
   if (looksLikeGif(bytes)) {
     return shrinkGif(
       bytes,

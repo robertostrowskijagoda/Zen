@@ -16,6 +16,7 @@ import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
 
 /// Where a file for a chat comes from.
@@ -245,7 +246,8 @@ Future<PickedChatAttachment?> _fromGallery() async {
       type: ChatMessageType.video,
     );
   }
-  final Uint8List bytes = await file.readAsBytes();
+  // An animated WebP or PNG plays as a GIF instead of becoming a still.
+  final Uint8List bytes = await gifIfAnimated(await file.readAsBytes());
   final PickedChatAttachment? gif = _gif(bytes, name);
   return gif ?? await _photo(bytes, name);
 }
