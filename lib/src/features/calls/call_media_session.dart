@@ -14,6 +14,7 @@ import 'package:zen/src/features/calls/call_recorder.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
+import 'package:zen/src/features/calls/call_video_codecs.dart';
 import 'package:zen/src/features/calls/call_video_trace.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -1084,8 +1085,11 @@ final class WebRtcCallMediaSessionController
       );
       await _pinLocalVideoDirection(sending: _localCameraWanted);
       final Map<String, dynamic>? e2ee = await _offerE2eeBlock();
-      final RTCSessionDescription offer = await _requireConnection()
-          .createOffer(_offerConstraints());
+      final RTCSessionDescription offer = await createCallDescription(
+        _requireConnection(),
+        offer: true,
+        constraints: _offerConstraints(),
+      );
       final RTCSessionDescription pinned = await _commitLocalDescription(offer);
       _lastSentOfferDescription = _withE2ee(_descriptionToMap(pinned), e2ee);
       _awaitingRemoteAnswer = true;
@@ -1127,8 +1131,11 @@ final class WebRtcCallMediaSessionController
       _lastRemoteOfferSdp = firstSdp is String ? firstSdp : null;
       await _bindLocalTracksToAnswerTransceivers();
       await _pinLocalVideoDirection(sending: _localCameraWanted);
-      final RTCSessionDescription answer = await _requireConnection()
-          .createAnswer(_offerConstraints());
+      final RTCSessionDescription answer = await createCallDescription(
+        _requireConnection(),
+        offer: false,
+        constraints: _offerConstraints(),
+      );
       final RTCSessionDescription pinned = await _commitLocalDescription(
         answer,
       );
@@ -1178,8 +1185,10 @@ final class WebRtcCallMediaSessionController
       }
       await _bindLocalTracksToAnswerTransceivers();
       await _pinLocalVideoDirection(sending: _localCameraWanted);
-      final RTCSessionDescription answer = await connection.createAnswer(
-        _offerConstraints(),
+      final RTCSessionDescription answer = await createCallDescription(
+        connection,
+        offer: false,
+        constraints: _offerConstraints(),
       );
       final RTCSessionDescription pinned = await _commitLocalDescription(
         answer,
@@ -2382,8 +2391,10 @@ final class WebRtcCallMediaSessionController
       throw StateError(t('Brak aktywnej rozmowy do renegocjacji.'));
     }
     await _pinLocalVideoDirection(sending: _localCameraWanted);
-    final RTCSessionDescription offer = await connection.createOffer(
-      _offerConstraints(),
+    final RTCSessionDescription offer = await createCallDescription(
+      connection,
+      offer: true,
+      constraints: _offerConstraints(),
     );
     final RTCSessionDescription pinned = await _commitLocalDescription(offer);
     _lastSentOfferDescription = _descriptionToMap(pinned);
@@ -2457,7 +2468,9 @@ final class WebRtcCallMediaSessionController
     // Every sender and receiver gets its transformer before the
     // description that lets media flow on it.
     await _e2ee?.attachAll(connection);
-    await connection.setLocalDescription(desc);
+    // VP8 first: see call_video_codecs.dart.
+    desc = await setCallLocalDescription(connection, desc);
+    _logNegotiatedVideoCodec(desc, 'our');
     logZenMessage(
       'Call SDP local ${desc.type}: ${describeCallSdp(desc.sdp ?? '')}',
     );
@@ -2465,6 +2478,21 @@ final class WebRtcCallMediaSessionController
     _captureRelayMetadata(desc.sdp);
     _screenMid ??= screenShareSlotInSdp(desc.sdp ?? '')?.mid;
     return desc;
+  }
+
+  /// The video codec an answer settles (its first video codec: both sides
+  /// send with it), in the technical log; [whose] answer it is.
+  void _logNegotiatedVideoCodec(
+    RTCSessionDescription description,
+    String whose,
+  ) {
+    if (description.type != 'answer') {
+      return;
+    }
+    final String? codec = firstVideoCodecInSdp(description.sdp ?? '');
+    if (codec != null) {
+      logZenMessage('Call video codec: $codec both ways ($whose answer)');
+    }
   }
 
   /// Makes every video sender start again with a key frame (its encoding
@@ -2691,6 +2719,7 @@ final class WebRtcCallMediaSessionController
       'Call SDP remote ${original.type}: '
       '${describeCallSdp(original.sdp ?? '')}',
     );
+    _logNegotiatedVideoCodec(original, 'their');
     await _e2ee?.attachAll(connection);
     _remoteDescriptionSet = true;
     await _waitForRelayMetadata();

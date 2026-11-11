@@ -819,11 +819,19 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
         logZenError('Group media key offer failed', error, stackTrace);
         await _dropLegE2ee(leg);
       }
-      final RTCSessionDescription offer = _forceVideoSendRecv(
-        await connection.createOffer(_offerConstraints()),
+      final RTCSessionDescription made = _forceVideoSendRecv(
+        await createCallDescription(
+          connection,
+          offer: true,
+          constraints: _offerConstraints(),
+        ),
       );
       await leg.e2ee?.attachAll(connection);
-      await connection.setLocalDescription(offer);
+      // VP8 first (call_video_codecs.dart): what was set is what goes.
+      final RTCSessionDescription offer = await setCallLocalDescription(
+        connection,
+        made,
+      );
       _captureMids(leg, offer.sdp);
       leg.exchange = DateTime.now().microsecondsSinceEpoch;
       leg.lastOffer = <String, dynamic>{
@@ -882,11 +890,18 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       await _setRemote(leg, description);
       leg.lastRemoteOfferSdp = sdp;
       await _bindLocalTracks(leg);
-      final RTCSessionDescription answer = _forceVideoSendRecv(
-        await connection.createAnswer(_offerConstraints()),
+      final RTCSessionDescription made = _forceVideoSendRecv(
+        await createCallDescription(
+          connection,
+          offer: false,
+          constraints: _offerConstraints(),
+        ),
       );
       await leg.e2ee?.attachAll(connection);
-      await connection.setLocalDescription(answer);
+      final RTCSessionDescription answer = await setCallLocalDescription(
+        connection,
+        made,
+      );
       _captureMids(leg, answer.sdp);
       await _ensureRelayCandidate(leg);
       leg.lastAnswer = <String, dynamic>{
