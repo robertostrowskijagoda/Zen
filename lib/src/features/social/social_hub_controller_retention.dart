@@ -274,16 +274,16 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     required String preview,
     String? displayName,
   }) {
-    final int timestamp = DateTime.now().millisecondsSinceEpoch;
     // Only the line of someone already in the book: writing to someone
-    // never makes them a friend (the book has no way to).
+    // never makes them a friend (the book has no way to). Their presence
+    // stays as it is: writing to a friend says nothing of whether they are
+    // there (an offline friend would show as just seen, and lose the
+    // "w sieci … temu" warning and the posts pushed to their mailboxes).
     state = state.copyWith(
       book: state.book.edit(
         peerAddress,
         (FriendProfile base) => base.copyWith(
           displayName: displayName ?? base.displayName,
-          isOnline: true,
-          lastPresenceAtMillis: timestamp,
           lastMessagePreview: preview,
           lastActivityLabel: activityStamp(
             DateTime.now().millisecondsSinceEpoch,

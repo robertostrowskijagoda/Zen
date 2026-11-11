@@ -164,6 +164,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   int _newestShownAt = 0;
   DateTime? _lastTypingSentAt;
 
+  /// Zen leaving the screen (another app, minimised): the friend is told
+  /// the typing stopped, though a draft stays in the field.
+  late final AppLifecycleListener _appLifecycle;
+
   /// The message the next one replies to (shown over the composer).
   ChatReply? _replyTo;
 
@@ -271,6 +275,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _socialHubController = ref.read(socialHubControllerProvider.notifier);
     _drafts = ref.read(composerDraftsProvider);
     _composerController.addListener(_onComposerChanged);
+    _appLifecycle = AppLifecycleListener(onHide: _stopTyping);
     _search.addListener(_onSearchChanged);
     final String? searchText = widget.searchText;
     if (searchText != null) {
@@ -331,13 +336,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           isTyping: true,
         );
       }
-    } else if (_lastTypingSentAt != null) {
-      _lastTypingSentAt = null;
+    } else {
+      _stopTyping();
+    }
+  }
+
+  /// "Stopped typing" to the friend, when "typing" was the last thing said.
+  void _stopTyping() {
+    if (_lastTypingSentAt == null) {
+      return;
+    }
+    _lastTypingSentAt = null;
+    unawaited(
       _socialHubController.sendTypingState(
         peerAddress: widget.peerAddress,
         isTyping: false,
-      );
-    }
+      ),
+    );
   }
 
   @override
@@ -347,12 +362,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       ..removeListener(_onSearchChanged)
       ..dispose();
     _composerController.removeListener(_onComposerChanged);
-    if (_lastTypingSentAt != null) {
-      _socialHubController.sendTypingState(
-        peerAddress: widget.peerAddress,
-        isTyping: false,
-      );
-    }
+    _appLifecycle.dispose();
+    _stopTyping();
     _socialHubController.leaveConversation(widget.peerAddress);
     _recordingTicker?.cancel();
     final VoiceMessageRecorder? voiceRecorder = _voiceRecorder;
@@ -1209,6 +1220,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             .friendByAddress(widget.peerAddress)
             ?.displayLabel ??
         widget.title;
+    final int startedAt = DateTime.now().millisecondsSinceEpoch;
     _composerController.clear();
     // Down to the newest message, where this one is about to appear.
     _scrollController.showLatest(reason: 'send');
@@ -1228,19 +1240,52 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       }
     } on StrangerMessageRefused catch (refused) {
       // Over the limits for someone who is not a friend: the text stays.
-      _composerController.text = text;
+      _restoreComposer(text, replyTo);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(refused.message)));
       }
     } catch (error) {
+      // Not stored (a full disk, a locked store): what was typed and the
+      // quote come back. A message that is in the chat already failed on
+      // its way out and has its own way to be sent again.
+      if (!await _sentSince(startedAt, text)) {
+        _restoreComposer(text, replyTo);
+      }
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(t('Nie udało się wysłać wiadomości.'))),
       );
+    }
+  }
+
+  /// Whether an own message with [text] was stored in this chat from
+  /// [startedAt] on (the send failed only after that).
+  Future<bool> _sentSince(int startedAt, String text) async {
+    try {
+      final List<ChatMessage> messages = await ref
+          .read(messageTimelineStoreProvider)
+          .load(widget.peerAddress);
+      return messages.any(
+        (ChatMessage m) =>
+            m.isOutgoing && m.sentAtMillis >= startedAt && m.text == text,
+      );
+    } on Object {
+      return false;
+    }
+  }
+
+  /// Puts [text] and [replyTo] back into an empty composer.
+  void _restoreComposer(String text, ChatReply? replyTo) {
+    if (!mounted || _composerController.text.trim().isNotEmpty) {
+      return;
+    }
+    _composerController.text = text;
+    if (replyTo != null && _replyTo == null) {
+      setState(() => _replyTo = replyTo);
     }
   }
 

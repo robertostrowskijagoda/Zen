@@ -10,6 +10,7 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
+import 'package:zen/src/features/social/mentions.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 Widget _app(Widget child) => MaterialApp(
@@ -113,6 +114,26 @@ void main() {
       ),
     );
     expect(find.text('Wiadomość niedostępna'), findsOneWidget);
+  });
+
+  test('a quote of a message with a mention shows the name, not the '
+      'token', () {
+    const ChatMessage original = ChatMessage(
+      id: 'grp-msg-1',
+      sender: '200::a1',
+      text: '<@0> przyjdziesz jutro?',
+      sentAtMillis: 1000,
+      direction: ChatMessageDirection.incoming,
+      mentions: <Mention>[Mention(address: '200::b2', name: 'Ania')],
+    );
+    const ChatReply reply = ChatReply(
+      messageId: 'grp-msg-1',
+      sender: '200::a1',
+      text: '@Ania przyjdziesz jutro?',
+    );
+    final String shown = replyQuoteText(reply, original);
+    expect(shown, isNot(contains('<@0>')));
+    expect(shown, original.plainText);
   });
 
   testWidgets('the reply bar over the composer can be cancelled', (

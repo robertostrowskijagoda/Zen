@@ -58,7 +58,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
-    show kGroupJoinedAck, kMaxSignalIdChars;
+    show kGroupJoinedAck, kMaxGroupMessageChars, kMaxSignalIdChars;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';

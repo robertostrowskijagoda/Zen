@@ -178,25 +178,36 @@ SocialHubState _applySignal(
             openConversationAddress ?? '',
           ) &&
           current.lifecycle.isInteractive;
+      // Written a moment before it came: straight from them, who are there
+      // now. A copy that waited in a mailbox (or a retry from long ago)
+      // says nothing of whether they are there, and leaves their presence.
+      final bool heardNow = _messageHeardNow(signal, receivedAtMillis);
+      // An older message than one of theirs already here (a late copy from
+      // a mailbox): counted, but the chat list keeps the newer line.
+      final bool late = signal.chatExtras?[_kLateCopyKey] == true;
       return current.copyWith(
         book: book.edit(
           signal.sender,
           (FriendProfile currentFriend) => currentFriend.copyWith(
-            isOnline: true,
+            isOnline: heardNow ? true : null,
             isTyping: false,
-            lastPresenceAtMillis: receivedAtMillis,
-            lastMessagePreview: _clipText(
-              chatPreviewLine(
-                signal.content ?? t('Nowa wiadomość'),
-                type: signal.messageType,
-                fileName: signal.fileName,
-                mimeType: signal.mimeType,
-              ),
-              kMaxStoredPreviewChars,
-            ),
-            lastActivityLabel: activityStamp(
-              DateTime.now().millisecondsSinceEpoch,
-            ),
+            lastPresenceAtMillis: heardNow
+                ? max(currentFriend.lastPresenceAtMillis, receivedAtMillis)
+                : null,
+            lastMessagePreview: late
+                ? null
+                : _clipText(
+                    chatPreviewLine(
+                      signal.content ?? t('Nowa wiadomość'),
+                      type: signal.messageType,
+                      fileName: signal.fileName,
+                      mimeType: signal.mimeType,
+                    ),
+                    kMaxStoredPreviewChars,
+                  ),
+            lastActivityLabel: late
+                ? null
+                : activityStamp(DateTime.now().millisecondsSinceEpoch),
             unreadCount: isConversationOpen ? 0 : currentFriend.unreadCount + 1,
           ),
         ),
@@ -2661,4 +2672,24 @@ List<QueuedSignal> _withoutOldestQueuedInvitations(
     kept.add(entry);
   }
   return kept;
+}
+
+/// How long before its arrival a message may have been written for it to
+/// count as a sign that its sender is there (a direct one takes moments;
+/// one written longer ago waited in a mailbox or in its sender's queue, and
+/// says nothing of now).
+const Duration _kMessageAsPresence = Duration(minutes: 2);
+
+/// Set by the hub on a message older than one of its sender's already in
+/// the chat ([ZenSignal.chatExtras], never sent): see `_applySignal`.
+const String _kLateCopyKey = 'zLateCopy';
+
+/// Whether [signal] (a chat message that came at [receivedAtMillis]) was
+/// written so shortly before that its sender is there now. One without its
+/// time counts as heard now, as before, and so does one dated after its
+/// arrival (the sender's clock runs ahead).
+bool _messageHeardNow(ZenSignal signal, int receivedAtMillis) {
+  final int? sentAt = signal.sentAtMillis;
+  return sentAt == null ||
+      receivedAtMillis - sentAt <= _kMessageAsPresence.inMilliseconds;
 }

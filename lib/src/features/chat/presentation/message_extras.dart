@@ -36,8 +36,9 @@ String replyQuoteText(ChatReply reply, ChatMessage? original) {
   if (original.isDeleted) {
     return deletedMessageLabel();
   }
+  // Mentions as the names they stand for, never their `<@n>` tokens.
   final String text = original.type == ChatMessageType.text
-      ? original.text
+      ? original.plainText
       : chatMessageLabelForType(
           original.type,
           fileName: original.fileName,

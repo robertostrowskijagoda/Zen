@@ -167,6 +167,7 @@ final class RelayConfig {
     this.maxSplitPayloadBytes = 1536 * 1024,
     this.splitPartChars = 30000,
     this.goneDeviceAfter = const Duration(days: 7),
+    this.appKeepWait = const Duration(minutes: 1),
   });
 
   /// How many friends hold this device's mail.
@@ -367,6 +368,13 @@ final class RelayConfig {
   /// is away. A friend who is away with all their devices is never
   /// affected.
   final Duration goneDeviceAfter;
+
+  /// How long a chat message handed to the app (see [reportReliableKept])
+  /// keeps its further copies away while the app has not said whether it
+  /// kept it. Past it the next copy is handed over again: an app that never
+  /// answers (stuck, or gone without a word) holds nothing back for long, and
+  /// whatever it says late still counts.
+  final Duration appKeepWait;
 }
 
 /// Snapshot for the settings screen.
@@ -820,6 +828,73 @@ const String _chatMessageType = 'message';
 /// chat message, and reported once every member confirmed it or it expired.
 const String _groupMessageType = 'group_message';
 
+/// Payloads the app keeps on its disk itself (the chats): with
+/// [RelayEngine.appConfirmsKeeping] on, one of them is acknowledged to its
+/// sender, remembered as seen and taken out of the mailboxes only once the
+/// app said it has it ([reportReliableKept]). Acknowledged on arrival, a
+/// message the app then failed to write (the app killed in between, a full
+/// disk) was gone for good while its sender showed it delivered: the sender
+/// stopped trying and every later copy was dropped as seen.
+const Set<String> _keptByAppTypes = <String>{
+  _chatMessageType,
+  _groupMessageType,
+};
+
+/// A payload of [_keptByAppTypes] handed to the app, waiting for its word.
+final class _AppTake {
+  _AppTake({
+    required this.engine,
+    required this.sender,
+    required this.rid,
+    required this.seenUntil,
+    required this.contact,
+    this.relay,
+  });
+
+  final RelayEngine engine;
+  final String sender;
+  final String rid;
+
+  /// Until when it is remembered as seen once kept.
+  final int seenUntil;
+
+  /// Remembered in the stored state (a contact) or in memory only (anyone
+  /// else, as every reliable id from a stranger is).
+  final bool contact;
+
+  /// The mailbox it came from (`null`: straight from its sender): told to
+  /// drop it, with the sender's other mailboxes, once it is kept.
+  final String? relay;
+
+  bool answered = false;
+
+  String get key => '$sender|$rid';
+}
+
+/// The take each payload handed to the app stands for (by identity: the
+/// account routing hands the same payload on, under another sender).
+final Expando<_AppTake> _appTakes = Expando<_AppTake>('relay app take');
+
+/// The app's word on a frame the relay layer handed it: [kept] when what
+/// it carries is on the disk (or was refused for good: a blocked sender, a
+/// copy already there), false when keeping it failed. Only then is a chat
+/// message acknowledged to its sender and remembered as seen; after a
+/// failure nothing is said, the sender (or its mailbox) brings it again and
+/// that copy is handed over again. A no-op for any other payload, and for a
+/// second word on the same one.
+Future<void> reportReliableKept(
+  Map<String, dynamic> payload, {
+  required bool kept,
+}) {
+  final _AppTake? take = _appTakes[payload];
+  if (take == null || take.answered) {
+    return Future<void>.value();
+  }
+  take.answered = true;
+  _appTakes[payload] = null;
+  return take.engine._settleTake(take, kept: kept);
+}
+
 /// Delivery reports kept for the chat layer; the oldest go first.
 const int _maxDeliveryReports = 200;
 
@@ -994,6 +1069,18 @@ final class RelayEngine {
   /// grow the stored state nor push friends' receipts out of it.
   final Map<String, int> _strangerSeen = <String, int>{};
 
+  /// Whether the app says when it kept a chat message ([reportReliableKept]);
+  /// set by the part of the app that takes the frames. Off, every reliable
+  /// payload is acknowledged as it arrives.
+  bool appConfirmsKeeping = false;
+
+  /// `sender|rid` -> the chat message handed to the app and not answered
+  /// yet, and until when its further copies wait for that answer
+  /// ([RelayConfig.appKeepWait]). Memory only: after a restart nothing
+  /// was acknowledged, and the next copy is handed over.
+  final Map<String, ({_AppTake take, int until})> _beingKept =
+      <String, ({_AppTake take, int until})>{};
+
   /// Relayed envelopes this device cannot attribute -> first offered.
   final Map<String, int> _unattributableSince = <String, int>{};
 
@@ -1092,6 +1179,9 @@ final class RelayEngine {
   void deactivate() {
     _active = false;
     _state = null;
+    // Whatever the app still says about them goes unsaid: the node is not
+    // this isolate's any more, and the copies come again.
+    _beingKept.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -2087,10 +2177,30 @@ final class RelayEngine {
     if (rid.isEmpty || rid.length > _maxReliableIdLength) {
       return false; // nothing this app sends
     }
-    await _sendQuietly(from, <String, dynamic>{'type': 'rly_ack', 'rid': rid});
     final String key = '$from|$rid';
     final int now = _now();
-    if (state.seen.containsKey(key) || (_strangerSeen[key] ?? 0) > now) {
+    final bool known =
+        state.seen.containsKey(key) || (_strangerSeen[key] ?? 0) > now;
+    if (!known && _keptByApp(frame.payload)) {
+      // Acknowledged and remembered once the app has it on its disk.
+      if (!_awaitsApp(key, now)) {
+        _handToApp(
+          frame,
+          _AppTake(
+            engine: this,
+            sender: from,
+            rid: rid,
+            seenUntil: now + config.messageTtl.inMilliseconds,
+            contact: !_peers.isReady || _isContact(from),
+          ),
+          now,
+        );
+        forward.add(frame);
+      }
+      return false;
+    }
+    await _sendQuietly(from, <String, dynamic>{'type': 'rly_ack', 'rid': rid});
+    if (known) {
       if (frame.payload['type'] == kBlobManifestType) {
         // The sender is still retrying a blob that was collected long ago.
         await _remindBlobCollected(state, from, frame.payload['b']);
@@ -2109,6 +2219,86 @@ final class RelayEngine {
     }
     state.seen[key] = now + config.messageTtl.inMilliseconds;
     return true;
+  }
+
+  /// Whether [payload] is acknowledged only once the app kept it.
+  bool _keptByApp(Map<String, dynamic> payload) =>
+      appConfirmsKeeping && _keptByAppTypes.contains(payload['type']);
+
+  /// Whether a copy of `sender|rid` [key] is with the app right now: a
+  /// further copy is then dropped without a word (the app's answer settles
+  /// both), until [RelayConfig.appKeepWait] is over.
+  bool _awaitsApp(String key, int now) {
+    final ({_AppTake take, int until})? waiting = _beingKept[key];
+    return waiting != null && waiting.until > now;
+  }
+
+  /// [frame] goes to the app as [take]: answered by [reportReliableKept].
+  void _handToApp(SignalTransportFrame frame, _AppTake take, int now) {
+    _beingKept[take.key] = (
+      take: take,
+      until: now + config.appKeepWait.inMilliseconds,
+    );
+    _appTakes[frame.payload] = take;
+    // Answers that never come leave no trace for longer than they matter.
+    _beingKept.removeWhere(
+      (String _, ({_AppTake take, int until}) w) => w.until <= now,
+    );
+  }
+
+  /// The app's answer on [take] ([reportReliableKept]). Kept: remembered as
+  /// seen, acknowledged to its sender (and its mailboxes told to drop it, a
+  /// receipt queued for a sender who does not answer, as for any mail).
+  /// Not kept: nothing is said; the sender retries, a mailbox keeps it for
+  /// the next poll, and that copy is handed over again.
+  Future<void> _settleTake(_AppTake take, {required bool kept}) {
+    return _locked(() async {
+      final ({_AppTake take, int until})? waiting = _beingKept[take.key];
+      if (waiting != null && identical(waiting.take, take)) {
+        _beingKept.remove(take.key);
+      }
+      if (!kept || !_active) {
+        // Not active: the node is another isolate's now; the next copy
+        // brings it to whichever app is there (it finds it on file).
+        return;
+      }
+      final RelayState state = await _load();
+      final int now = _now();
+      if (take.contact) {
+        state.seen[take.key] = max(state.seen[take.key] ?? 0, take.seenUntil);
+      } else {
+        _strangerSeen.remove(take.key);
+        _strangerSeen[take.key] = take.seenUntil;
+        while (_strangerSeen.length > config.maxStrangerSeenEntries) {
+          _strangerSeen.remove(_strangerSeen.keys.first);
+        }
+      }
+      await _save(state);
+      await _sendQuietly(take.sender, <String, dynamic>{
+        'type': 'rly_ack',
+        'rid': take.rid,
+      });
+      final String? relay = take.relay;
+      if (relay == null) {
+        return;
+      }
+      await _sendQuietly(relay, <String, dynamic>{
+        'type': 'rly_mail_ack',
+        'ids': <String>[take.rid],
+      });
+      for (final String other in state.currentRelays) {
+        if (other != relay) {
+          await _sendQuietly(other, <String, dynamic>{
+            'type': 'rly_purge',
+            'ids': <String>[take.rid],
+          });
+        }
+      }
+      if (take.sender != relay && !_answering(take.sender, now)) {
+        await _oweReceipt(state, take.sender, <String>[take.rid], now);
+        await _save(state);
+      }
+    });
   }
 
   Future<bool> _handleProtocolFrame(
@@ -3248,6 +3438,32 @@ final class RelayEngine {
       if (inner == null || inner[kReliableIdKey] != envelope.id) {
         // Forged, tampered or mis-addressed: drop it everywhere.
         handled.add(envelope.id);
+        continue;
+      }
+      if (_keptByApp(inner)) {
+        // Left with the mailboxes, unacknowledged and not remembered, until
+        // the app has it on its disk (see _settleTake); a copy from another
+        // mailbox meanwhile waits for that answer.
+        if (!_awaitsApp(seenKey, now)) {
+          final SignalTransportFrame frame = SignalTransportFrame(
+            from: sender,
+            payload: inner,
+            receivedAtMillis: _now(),
+          );
+          _handToApp(
+            frame,
+            _AppTake(
+              engine: this,
+              sender: sender,
+              rid: envelope.id,
+              seenUntil: envelope.expiresAtMillis,
+              contact: true,
+              relay: relay,
+            ),
+            now,
+          );
+          forward.add(frame);
+        }
         continue;
       }
       handled.add(envelope.id);

@@ -11,6 +11,7 @@ import 'package:zen/src/features/runtime/notification_privacy.dart'
     show kMaxMentionAlertsPerSender;
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -313,5 +314,39 @@ void main() {
     // Karol is not in the group: a plain name.
     expect(sent.last.text, 'A ty @Karol?');
     expect(sent.last.mentions, isEmpty);
+  });
+
+  test('a group message longer than the members keep is refused, not '
+      'sent to be cut', () async {
+    final MemoryMessageTimelineStore timelines = MemoryMessageTimelineStore();
+    final (:container, shade: _) = await _boot(timelines: timelines);
+    final SocialHubController hub = container.read(
+      socialHubControllerProvider.notifier,
+    );
+    await expectLater(
+      hub.sendGroupMessage(
+        groupId: _groupId,
+        text: 'a' * (kMaxGroupMessageChars + 1),
+      ),
+      throwsStateError,
+    );
+    expect(await timelines.load('group:$_groupId'), isEmpty);
+
+    // The longest one allowed reaches the members whole.
+    final String longest = 'b' * kMaxGroupMessageChars;
+    await hub.sendGroupMessage(groupId: _groupId, text: longest);
+    expect((await timelines.load('group:$_groupId')).single.text, longest);
+    final ZenSignal? received = zenSignalFromTransportPayload(
+      sender: _ada,
+      payload: <String, dynamic>{
+        'type': 'group_message',
+        'groupId': _groupId,
+        'groupName': 'Ekipa',
+        'msgId': 'grp-msg-1-$_groupId-x',
+        'text': longest,
+        'timestamp': 1000,
+      },
+    );
+    expect(received?.content, longest);
   });
 }

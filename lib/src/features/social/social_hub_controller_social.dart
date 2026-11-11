@@ -2621,6 +2621,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final String trimmed =
         (members ? text : mentionsAsPlainText(text, mentions)).trim();
     final List<Mention> named = members ? mentions : const <Mention>[];
+    if (trimmed.length > kMaxGroupMessageChars) {
+      // The members keep no more of it than this (runtime_signal_parser):
+      // refused here rather than shown whole only to its sender.
+      throw StateError(
+        t('Za długie: najwyżej {n} znaków.', <String, Object?>{
+          'n': kMaxGroupMessageChars,
+        }),
+      );
+    }
     final String said = mentionsAsPlainText(trimmed, named);
 
     await _messageTimelineStore.append(

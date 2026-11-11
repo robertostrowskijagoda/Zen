@@ -11,11 +11,26 @@ final class QueuedSignal {
     required this.id,
     required this.signal,
     required this.receivedAtMillis,
+    this.count = 1,
   });
 
   final String id;
   final ZenSignal signal;
   final int receivedAtMillis;
+
+  /// How many messages of one chat this copy stands for: past the queue's
+  /// cap the older copies of a chat are folded into its newer one, and only
+  /// their number stays (they are in the chat already; what they add once
+  /// Zen is back on the screen is their count as unread).
+  final int count;
+
+  /// This copy standing for [more] messages more.
+  QueuedSignal folding(int more) => QueuedSignal(
+    id: id,
+    signal: signal,
+    receivedAtMillis: receivedAtMillis,
+    count: count + more,
+  );
 
   void writeTo(BinaryWriter writer) {
     writer
@@ -46,7 +61,7 @@ final class QueuedSignal {
       )
       // Everything newer travels as one JSON blob, so adding a field never
       // needs another layout change.
-      ..writeNullableString(_encodeExtras(signal))
+      ..writeNullableString(_encodeExtras(signal, count: count))
       ..writeInt64(receivedAtMillis);
   }
 
@@ -77,16 +92,20 @@ final class QueuedSignal {
     final Map<String, dynamic>? extras = _readNullableJsonMap(
       reader.readNullableString(),
     );
+    final Object? count = extras?['qn'];
     return QueuedSignal(
       id: id,
       signal: extras == null ? base : _withExtras(base, extras),
       receivedAtMillis: reader.readInt64(),
+      count: count is num && count > 1 ? count.toInt() : 1,
     );
   }
 }
 
-String? _encodeExtras(ZenSignal signal) {
+String? _encodeExtras(ZenSignal signal, {int count = 1}) {
   final Map<String, dynamic> extras = <String, dynamic>{
+    // The queued copy's own (see [QueuedSignal.count]), not the signal's.
+    if (count > 1) 'qn': count,
     'groupId': ?signal.groupId,
     'groupName': ?signal.groupName,
     'memberAddresses': ?signal.memberAddresses,

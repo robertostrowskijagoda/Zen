@@ -17,6 +17,8 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_handoff.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
@@ -439,6 +441,9 @@ final class RuntimeSignalModule extends ZenModule {
     _heard.clear();
     _told.clear();
     _cadence.begin(DateTime.now().millisecondsSinceEpoch);
+    // A chat message is acknowledged to its sender only once the hub has
+    // it on the disk: this module says so for each frame ([_handleFrame]).
+    _ref.read(relayEngineProvider)?.appConfirmsKeeping = true;
     // Subscribe before starting. `frames` is a broadcast stream, so anything
     // emitted between start() and listen() is gone for good.
     _subscription = transport.frames.listen(
@@ -771,7 +776,29 @@ final class RuntimeSignalModule extends ZenModule {
   /// switch) ends at its next step instead of reading what is gone.
   bool get _live => _running && _ref.mounted;
 
+  /// One frame, then the word to the relay layer on whether what it
+  /// carries is kept ([reportReliableKept]): a chat message is acknowledged
+  /// to its sender only after the hub stored it, and one the hub failed to
+  /// store (or that came while this module was stopping) comes again.
   Future<void> _handleFrame(SignalTransportFrame frame) async {
+    bool kept = false;
+    try {
+      if (_live) {
+        await _handleFrameOnce(frame);
+        // Still running: the hub did the work. Gone meanwhile (Zen closing,
+        // another account), its work may have been skipped: said not kept,
+        // and a copy that comes again is found on file if it was.
+        kept = _live;
+      }
+    } finally {
+      unawaitedLogged(
+        reportReliableKept(frame.payload, kept: kept),
+        context: 'Telling the relay layer a message is kept failed',
+      );
+    }
+  }
+
+  Future<void> _handleFrameOnce(SignalTransportFrame frame) async {
     if (!_live) {
       return;
     }

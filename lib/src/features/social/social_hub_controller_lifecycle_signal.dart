@@ -283,6 +283,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       ),
       _appSettings,
     );
+    // "pisze…" is this isolate's own and never comes from a stored copy:
+    // a friend who stopped meanwhile is not shown typing again.
+    _showTypingStopped(<String>{
+      for (final FriendProfile f in state.friends.values)
+        if (f.isTyping && !(known.profileOf(f.address)?.isTyping ?? false))
+          PeerShareCodec.normalizeAddress(f.address),
+    });
     _dismissedOrRejectedGroupIds.addAll(state.rejectedGroupIds);
     _syncCallRingingTimeout();
   }
@@ -562,6 +569,105 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   /// When each member still writing into a group this device left was
   /// last told so, by `groupId|address` ([_answerTrafficOfLeftGroup]).
   final Map<String, int> _leftGroupToldAt = <String, int>{};
+
+  /// When each friend shown typing last said so ("pisze…" refreshed every
+  /// 2.2 s while they type), by normalised address.
+  final Map<String, int> _typingSaidAt = <String, int>{};
+
+  /// The one timer that takes "pisze…" off friends whose word went stale
+  /// ([typingShownForProvider]); armed only while someone is shown typing,
+  /// never after the controller is gone.
+  Timer? _typingExpiry;
+
+  /// [signal] (a message that waited somewhere before it came, now in the
+  /// chat) marked as late when the chat has a newer one from its sender
+  /// (by their own clock): the chat list keeps naming that newer one
+  /// instead of going back to older words with the time of now.
+  Future<ZenSignal> _markedIfLateCopy(ZenSignal signal) async {
+    try {
+      final List<ChatMessage> thread = await _messageTimelineStore.load(
+        signal.sender,
+      );
+      final String id = _incomingMessageIdOf(signal);
+      final ChatMessage? self = thread
+          .where((ChatMessage m) => m.id == id)
+          .firstOrNull;
+      if (self == null ||
+          !thread.any(
+            (ChatMessage m) =>
+                m.direction == ChatMessageDirection.incoming &&
+                m.id != id &&
+                m.sentAtMillis > self.sentAtMillis,
+          )) {
+        return signal;
+      }
+      return signal.withChatExtras(<String, dynamic>{
+        ...?signal.chatExtras,
+        _kLateCopyKey: true,
+      });
+    } on Object catch (error) {
+      logZenWarning('Looking for a newer message failed: $error');
+      return signal;
+    }
+  }
+
+  /// [peer] says it is [typing] (or stopped).
+  void _noteTyping(String peer, {required bool typing}) {
+    final String key = PeerShareCodec.normalizeAddress(peer);
+    if (!typing) {
+      _typingSaidAt.remove(key);
+      return;
+    }
+    _typingSaidAt[key] = DateTime.now().millisecondsSinceEpoch;
+    _typingExpiry ??= Timer(ref.read(typingShownForProvider), _expireTyping);
+  }
+
+  /// "pisze…" goes from every friend whose last word is older than
+  /// [typingShownForProvider] (a "stopped" that never came: the friend's
+  /// app went away, the datagram was lost); the timer runs again for the
+  /// others.
+  void _expireTyping() {
+    _typingExpiry = null;
+    if (_controllerDisposed || !ref.mounted) {
+      _typingSaidAt.clear();
+      return;
+    }
+    final int shownFor = ref.read(typingShownForProvider).inMilliseconds;
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    _typingSaidAt.removeWhere((String _, int at) => now - at >= shownFor);
+    _showTypingStopped(<String>{
+      for (final FriendProfile f in state.friends.values)
+        if (f.isTyping &&
+            !_typingSaidAt.containsKey(
+              PeerShareCodec.normalizeAddress(f.address),
+            ))
+          PeerShareCodec.normalizeAddress(f.address),
+    });
+    if (_typingSaidAt.isNotEmpty) {
+      final int oldest = _typingSaidAt.values.reduce(min);
+      _typingExpiry = Timer(
+        Duration(milliseconds: max(0, oldest + shownFor - now) + 1),
+        _expireTyping,
+      );
+    }
+  }
+
+  /// [peers] are no longer shown typing (memory only: "pisze…" is never
+  /// stored).
+  void _showTypingStopped(Set<String> peers) {
+    final List<String> shown = <String>[
+      for (final String peer in peers)
+        if (state.friendByAddress(peer)?.isTyping ?? false) peer,
+    ];
+    if (shown.isEmpty) {
+      return;
+    }
+    FriendshipBook book = state.book;
+    for (final String peer in shown) {
+      book = book.edit(peer, (FriendProfile f) => f.copyWith(isTyping: false));
+    }
+    state = state.copyWith(book: book);
+  }
 
   /// A message of a group this device left or declined, from someone who
   /// still counts it as a member: their phone never got the leave (it was
@@ -940,6 +1046,10 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             signal.type == ZenSignalType.callBusy) &&
         _isCallAlreadyTornDown(signal.callId);
     await _persistSignalArtifacts(signal, timestamp);
+    if (signal.type == ZenSignalType.message &&
+        !_messageHeardNow(signal, timestamp)) {
+      signal = await _markedIfLateCopy(signal);
+    }
     if (signal.type == ZenSignalType.friendRemove) {
       // They ended it: nothing we still have queued for them should keep
       // being retried or parked in their mailboxes.
@@ -950,9 +1060,22 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       signal: signal,
       lifecycle: routingLifecycle,
     );
+    if (signal.type == ZenSignalType.typing) {
+      _noteTyping(signal.sender, typing: signal.isTyping);
+      if (!plan.deliverToUi) {
+        // Away from the screen "pisze…" is not shown, but its end is taken
+        // in every state: shown on the return it would stay for ever.
+        if (!signal.isTyping) {
+          _showTypingStopped(<String>{
+            PeerShareCodec.normalizeAddress(signal.sender),
+          });
+        }
+        return;
+      }
+    }
     final QueuedSignal queued = QueuedSignal(
       id: '$timestamp-${signal.type.index}-${signal.sender}',
-      signal: signal,
+      signal: _signalForQueue(signal),
       receivedAtMillis: timestamp,
     );
     List<QueuedSignal> queue = plan.persist
@@ -970,7 +1093,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             ));
 
     if (plan.persist && !isDuplicateInQueue) {
-      queue = <QueuedSignal>[
+      queue = _withinQueueCap(<QueuedSignal>[
         // Invitations are applied to the state the moment they arrive (see
         // `_isSocialLifecycleSignalType`); their queue copies only replay
         // what is already there. Anyone can send them, so past a cap the
@@ -982,7 +1105,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
               )
             : queue),
         queued,
-      ];
+      ]);
       await _queueStore.save(queue);
     }
 
@@ -1380,6 +1503,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         _refuseStaleCode(queued.signal);
         continue;
       }
+      final SocialHubState before = next;
       next = _applySignal(
         next,
         queued.signal,
@@ -1390,6 +1514,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         openGroupId: _openGroupId,
         dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,
       );
+      if (queued.count > 1) {
+        next = _withFoldedUnread(before, next, queued);
+      }
     }
 
     if (!ref.mounted) {
@@ -1437,3 +1564,134 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         : null;
   }
 }
+
+/// Most copies the queue of signals kept while Zen is away holds (see
+/// [_withinQueueCap]).
+const int kMaxQueuedSignals = 400;
+
+/// [signal] as the queue keeps it: without the file of a message (it is in
+/// the chat already; the copy only tells the chat list and the unread
+/// count once Zen is back on the screen) and without a chunk, so a photo
+/// is never written into the queue again with every signal after it.
+ZenSignal _signalForQueue(ZenSignal signal) {
+  if (signal.attachmentData == null && signal.chunkData == null) {
+    return signal;
+  }
+  return ZenSignal(
+    type: signal.type,
+    sender: signal.sender,
+    callId: signal.callId,
+    messageId: signal.messageId,
+    routeKey: signal.routeKey,
+    displayName: signal.displayName,
+    content: signal.content,
+    messageType: signal.messageType,
+    attachmentEncoding: signal.attachmentEncoding,
+    fileName: signal.fileName,
+    mimeType: signal.mimeType,
+    attachmentSizeBytes: signal.attachmentSizeBytes,
+    durationMs: signal.durationMs,
+    isPlaceholder: signal.isPlaceholder,
+    attachmentTransferBytes: signal.attachmentTransferBytes,
+    chunkIndex: signal.chunkIndex,
+    chunkCount: signal.chunkCount,
+    sessionDescription: signal.sessionDescription,
+    groupId: signal.groupId,
+    groupName: signal.groupName,
+    memberAddresses: signal.memberAddresses,
+    memberNames: signal.memberNames,
+    avatarPreset: signal.avatarPreset,
+    bio: signal.bio,
+    isTyping: signal.isTyping,
+    sentAtMillis: signal.sentAtMillis,
+    inviteId: signal.inviteId,
+    cameraOn: signal.cameraOn,
+    disappearSeconds: signal.disappearSeconds,
+    miniProfile: signal.miniProfile,
+    chatExtras: signal.chatExtras,
+  );
+}
+
+/// The chat a queued message belongs to (`null`: not a chat message).
+String? _queuedChatOf(QueuedSignal entry) => switch (entry.signal.type) {
+  ZenSignalType.message => PeerShareCodec.normalizeAddress(entry.signal.sender),
+  ZenSignalType.groupMessage => 'group:${entry.signal.groupId ?? ''}',
+  _ => null,
+};
+
+/// [queue] with at most [kMaxQueuedSignals] copies. Past it, the oldest
+/// message of a chat with a newer one queued is folded into that newer
+/// copy, which then counts both ([QueuedSignal.count]): the chat list still
+/// names the newest and the unread count stays right. Only when no chat has
+/// two copies does the oldest copy go.
+List<QueuedSignal> _withinQueueCap(List<QueuedSignal> queue) {
+  if (queue.length <= kMaxQueuedSignals) {
+    return queue;
+  }
+  final List<QueuedSignal> kept = List<QueuedSignal>.of(queue);
+  while (kept.length > kMaxQueuedSignals) {
+    int folded = -1;
+    for (int i = 0; i < kept.length && folded < 0; i++) {
+      final String? chat = _queuedChatOf(kept[i]);
+      if (chat == null) {
+        continue;
+      }
+      for (int j = i + 1; j < kept.length; j++) {
+        if (_queuedChatOf(kept[j]) == chat &&
+            kept[j].signal.type == kept[i].signal.type) {
+          kept[j] = kept[j].folding(kept[i].count);
+          folded = i;
+          break;
+        }
+      }
+    }
+    kept.removeAt(folded < 0 ? 0 : folded);
+  }
+  return kept;
+}
+
+/// [after] (the state with [queued] replayed over [before]) counting the
+/// further messages [queued] stands for as unread too, when the replay
+/// counted it as unread.
+SocialHubState _withFoldedUnread(
+  SocialHubState before,
+  SocialHubState after,
+  QueuedSignal queued,
+) {
+  final int more = queued.count - 1;
+  final ZenSignal signal = queued.signal;
+  if (signal.type == ZenSignalType.groupMessage) {
+    final String groupId = signal.groupId ?? '';
+    final GroupProfile? was = before.groups[groupId];
+    final GroupProfile? now = after.groups[groupId];
+    if (was == null || now == null || now.unreadCount <= was.unreadCount) {
+      return after;
+    }
+    return after.copyWith(
+      groups: <String, GroupProfile>{
+        ...after.groups,
+        groupId: now.copyWith(unreadCount: now.unreadCount + more),
+      },
+    );
+  }
+  final FriendProfile? was = before.friendByAddress(signal.sender);
+  final FriendProfile? now = after.friendByAddress(signal.sender);
+  if (signal.type != ZenSignalType.message ||
+      was == null ||
+      now == null ||
+      now.unreadCount <= was.unreadCount) {
+    return after;
+  }
+  return after.copyWith(
+    book: after.book.edit(
+      signal.sender,
+      (FriendProfile f) => f.copyWith(unreadCount: f.unreadCount + more),
+    ),
+  );
+}
+
+/// How long a friend shows "pisze…" after their last word that they type
+/// (their app says it again every 2.2 s while they do).
+final Provider<Duration> typingShownForProvider = Provider<Duration>(
+  (Ref ref) => const Duration(seconds: 6),
+);
