@@ -11,6 +11,12 @@
 # resolved the name changes nothing about what is installed: apt checks
 # the archive's signatures.
 #
+# `apt-get update` ends well even when it reached no archive, and the
+# install after it then waits for every package in turn (the Linux build's
+# list did not end within its job's 45 minutes). So what the update says
+# is read too: an archive it could not name is a failed try, and nothing
+# is installed in that try.
+#
 # For the test (tool/ci/test_ci_checks.py): APT_INSTALL_RESOLV_CONF names
 # another file than /etc/resolv.conf, APT_INSTALL_PAUSE another pause.
 set -u
@@ -31,9 +37,19 @@ as_root() {
   fi
 }
 
+said=$(mktemp)
+trap 'rm -f "$said"' EXIT
+
+update() {
+  as_root apt-get update > "$said" 2>&1
+  status=$?
+  cat "$said"
+  [ "$status" -eq 0 ] &&
+    ! grep -Eq 'Temporary failure resolving|Could not resolve' "$said"
+}
+
 update_and_install() {
-  as_root apt-get update &&
-    as_root apt-get install -y --no-install-recommends "$@"
+  update && as_root apt-get install -y --no-install-recommends "$@"
 }
 
 update_and_install "$@" && exit 0

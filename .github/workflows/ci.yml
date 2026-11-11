@@ -914,9 +914,12 @@ jobs:
           IMAGE: ${{ matrix.image }}
         run: |
           # As tool/ci/apt_install.sh (these containers have no checkout):
-          # when the archive cannot be named, public resolvers are tried.
+          # when the archive cannot be named, public resolvers are tried,
+          # and nothing is installed after an update that could not name it.
           install_deb() {
-            apt-get update &&
+            apt-get update > /tmp/apt-update.txt 2>&1 || { cat /tmp/apt-update.txt; return 1; }
+            cat /tmp/apt-update.txt
+            ! grep -Eq 'Temporary failure resolving|Could not resolve' /tmp/apt-update.txt &&
               apt-get install -y --no-install-recommends ./deb/zen.deb
           }
           if ! install_deb; then

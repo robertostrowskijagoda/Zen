@@ -32,8 +32,9 @@
   missing picture or a wrong reading.
 - apt_install.sh (where sh exists): an install that works changes
   nothing; one that fails is tried again with public resolvers put before
-  the runner's own, and a third time; every job of ci.yml that installs
-  packages goes through it.
+  the runner's own, and a third time; an update that could not name the
+  archive is such a failure, with no install after it; every job of
+  ci.yml that installs packages goes through it.
 
 Standard library only.
 """
@@ -749,8 +750,10 @@ class QrStickersTest(unittest.TestCase):
 class AptInstallTest(unittest.TestCase):
     """apt_install.sh, with a made-up apt-get and sudo first on the PATH."""
 
-    def install(self, failures):
-        """Runs the script while `apt-get install` fails [failures] times.
+    def install(self, failures, unnamed=0):
+        """Runs the script while `apt-get install` fails [failures] times
+        and `apt-get update` cannot name the archive [unnamed] times (it
+        says so and still ends well, as the real one does).
 
         Returns (exit code, the apt-get calls, the resolver file's lines).
         """
@@ -760,11 +763,20 @@ class AptInstallTest(unittest.TestCase):
         os.mkdir(tools)
         log = os.path.join(folder, "calls.txt")
         left = os.path.join(folder, "failures.txt")
+        deaf = os.path.join(folder, "unnamed.txt")
         resolv = os.path.join(folder, "resolv.conf")
         scripts = {
             "apt-get": '#!/bin/sh\n'
                        'echo "$*" >> "$FAKE_LOG"\n'
-                       '[ "$1" = install ] || exit 0\n'
+                       'if [ "$1" = update ]; then\n'
+                       '  unnamed=$(cat "$FAKE_UNNAMED")\n'
+                       '  [ "$unnamed" -gt 0 ] || exit 0\n'
+                       '  echo $((unnamed - 1)) > "$FAKE_UNNAMED"\n'
+                       '  echo "W: Failed to fetch http://azure.archive.ubuntu.com/"'
+                       '"ubuntu/dists/noble/InRelease  Temporary failure resolving"'
+                       '" \'azure.archive.ubuntu.com\'" >&2\n'
+                       '  exit 0\n'
+                       'fi\n'
                        'left=$(cat "$FAKE_LEFT")\n'
                        '[ "$left" -gt 0 ] || exit 0\n'
                        'echo $((left - 1)) > "$FAKE_LEFT"\n'
@@ -776,11 +788,11 @@ class AptInstallTest(unittest.TestCase):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
             os.chmod(path, 0o755)
-        for path, text in ((left, "%d\n" % failures), (log, ""),
+        for path, text in ((left, "%d\n" % failures), (deaf, "%d\n" % unnamed), (log, ""),
                            (resolv, "# the runner's own\nnameserver 127.0.0.53\n")):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
-        env = dict(os.environ, FAKE_LOG=log, FAKE_LEFT=left,
+        env = dict(os.environ, FAKE_LOG=log, FAKE_LEFT=left, FAKE_UNNAMED=deaf,
                    APT_INSTALL_RESOLV_CONF=resolv, APT_INSTALL_PAUSE="0",
                    PATH=tools + os.pathsep + os.environ["PATH"])
         done = subprocess.run(
@@ -814,6 +826,18 @@ class AptInstallTest(unittest.TestCase):
         self.assertEqual(code, 100)
         self.assertEqual(calls, self.ATTEMPT * 3)
 
+    def test_nothing_is_installed_after_an_update_that_named_no_archive(self):
+        # The install would wait for every package in turn: the Linux
+        # build's list did not end within its job's 45 minutes.
+        code, calls, resolv = self.install(failures=0, unnamed=1)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, ["update"] + self.ATTEMPT)
+        self.assertEqual(resolv, ["nameserver 1.1.1.1", "nameserver 8.8.8.8",
+                                  "nameserver 127.0.0.53"])
+        code, calls, _ = self.install(failures=0, unnamed=3)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(calls, ["update"] * 3)
+
     def test_nothing_to_install_is_an_error(self):
         done = subprocess.run(["sh", os.path.join(ROOT, "tool", "ci", "apt_install.sh")],
                               capture_output=True)
@@ -827,6 +851,7 @@ class AptInstallTest(unittest.TestCase):
                 # Bare containers without a checkout: the same steps, written out.
                 self.assertIn("install_deb || { sleep 30; install_deb; }", job)
                 self.assertIn("nameserver 1.1.1.1", job)
+                self.assertIn("! grep -Eq 'Temporary failure resolving|Could not resolve'", job)
                 continue
             self.assertNotIn("apt-get install", job, name)
             self.assertNotIn("apt-get update", job, name)
