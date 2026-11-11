@@ -22,13 +22,11 @@ String banKindLabel(String kind) => switch (kind) {
   _ => kind,
 };
 
-/// Who judges at [path] ('' = the top cell), in words.
+/// Which court judges at [path] ('' = the top cell), in words: its level,
+/// never the name of anybody sitting there — a decision is the court's.
 String pyrJudgeName(PyramidState s, String path) => path.isEmpty
     ? t('szczyt (2 z 3)')
-    : t('{name} (poziom {level})', <String, Object?>{
-        'name': s.members[s.occupant[path]]?.name ?? '?',
-        'level': path.length + 1,
-      });
+    : t('sąd poziomu {level}', <String, Object?>{'level': path.length + 1});
 
 /// The decisions about [me] worth showing: bans in force or appealed, a
 /// removal, verdicts in force or appealed, and their own complaints.

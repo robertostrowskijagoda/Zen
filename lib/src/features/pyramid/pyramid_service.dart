@@ -157,14 +157,19 @@ const int kPyrEarlyCardsPerVote = 8;
 /// stop the others from asking.
 const int kPyrRosterGraceMs = 12 * 3600 * 1000;
 
-/// What one-time cards are made for: a cell vote ([election]) or a cell's
-/// requests for a vote (its head and voters, [PyramidState.rosterScope]).
+/// What one-time cards are made for: a cell vote ([election]), a cell's
+/// requests for a vote (its head and voters, [PyramidState.rosterScope]),
+/// or the court in one matter ([of]: a complaint or an appeal, its judges,
+/// [PyramidState.benchScope]). A list of fewer cards than the ring holds
+/// needs at least [least] of them.
 typedef _CardScope = ({
   String id,
   String cell,
   String head,
   List<String> ring,
   PyrElection? election,
+  String? of,
+  int least,
 });
 
 /// How long the device at an address is taken to hold the pyramid key it
@@ -744,6 +749,12 @@ final class PyramidService extends ChangeNotifier {
   /// When this phone first took part in a card scope (the wait before a
   /// list of fewer cards is signed, [kPyrRosterGraceMs]).
   final Map<String, int> _scopeSeen = <String, int>{};
+
+  /// This person's decisions as a judge waiting for the court's cards
+  /// (complaint or appeal → the decision's fields): each goes out by
+  /// itself, signed by this phone's card, once the bench lists it.
+  final Map<String, Map<String, dynamic>> _pendingRulings =
+      <String, Map<String, dynamic>>{};
 
   /// Registrations that came before their vote request (election id →
   /// messages), looked at again when it comes.
@@ -1335,6 +1346,7 @@ final class PyramidService extends ChangeNotifier {
     'voted': _votedIn.toList(),
     'req': _pendingRequests.toList(),
     'rc': _rosterCells,
+    'rule': _pendingRulings,
   };
 
   void _loadCardState(Object? json) {
@@ -1348,10 +1360,23 @@ final class PyramidService extends ChangeNotifier {
     _pendingRequests.clear();
     _rosterCells.clear();
     _scopeSeen.clear();
+    _pendingRulings.clear();
     if (json is! Map) {
       return;
     }
     _cardSeeds.addAll(_strs(json['seed']));
+    final Object? rulings = json['rule'];
+    if (rulings is Map) {
+      for (final MapEntry<dynamic, dynamic> e in rulings.entries) {
+        if (e.key is String &&
+            e.value is Map &&
+            PyrT.ruled.contains((e.value as Map)['t'])) {
+          _pendingRulings[e.key as String] = Map<String, dynamic>.from(
+            e.value as Map,
+          );
+        }
+      }
+    }
     final Object? cards = json['cards'];
     if (cards is Map) {
       for (final MapEntry<dynamic, dynamic> e in cards.entries) {
@@ -1611,10 +1636,13 @@ final class PyramidService extends ChangeNotifier {
     }
 
     // Records that publish keys first: a batch may bring an admission
-    // together with what the newcomer signed since.
+    // together with what the newcomer signed since. The court's decisions
+    // last: they are kept only after the bench of cards they are signed by.
+    bool ruled(PyramidRecord x) => PyrT.ruled.contains(x.type);
     for (final PyramidRecord r in <PyramidRecord>[
-      ...rs.where((PyramidRecord x) => x.signsWithKeys),
-      ...rs.where((PyramidRecord x) => !x.signsWithKeys),
+      ...rs.where((PyramidRecord x) => x.signsWithKeys && !ruled(x)),
+      ...rs.where((PyramidRecord x) => !x.signsWithKeys && !ruled(x)),
+      ...rs.where(ruled),
     ]) {
       if (r.lacksKeys) {
         _awaitKeys(r);
@@ -1773,6 +1801,10 @@ final class PyramidService extends ChangeNotifier {
       // Not signed by a request card of the cell: nobody's to keep.
       return null;
     }
+    if (PyrT.ruled.contains(r.type) && !_onBench(r)) {
+      // Not signed by the cards of a court kept here: nobody's to keep.
+      return null;
+    }
     final Map<String, String> ok = await PyramidRecord(
       body: r.body,
       sigs: <String, String>{
@@ -1781,15 +1813,45 @@ final class PyramidService extends ChangeNotifier {
       },
     ).validSigs();
     if (had == null) {
-      return ok.isEmpty ? null : PyramidRecord(body: r.body, sigs: ok);
+      return ok.isEmpty ? null : _fewest(PyramidRecord(body: r.body, sigs: ok));
     }
     if (ok.isEmpty) {
       return null;
     }
-    return PyramidRecord(
-      body: had.body,
-      sigs: <String, String>{...had.sigs, ...ok},
+    // A decision of the court keeps as many signatures as it needs, the
+    // same ones on every phone: one more never shows how many agreed.
+    final PyramidRecord merged = _fewest(
+      PyramidRecord(body: had.body, sigs: <String, String>{...had.sigs, ...ok}),
     );
+    if (PyrT.ruled.contains(r.type) &&
+        listEquals(merged.signers, had.signers)) {
+      return null;
+    }
+    return merged;
+  }
+
+  /// Whether every card the court's decision [r] lists is on a bench of
+  /// its matter kept here ([PyrT.bench]; the fold checks the rest).
+  bool _onBench(PyramidRecord r) {
+    final List<String> by = r.candidates;
+    final String of = _rulingOf(r);
+    if (by.isEmpty || of.isEmpty) {
+      return false;
+    }
+    for (final PyramidRecord x in _records.values) {
+      final Object? toks = x.body['toks'];
+      if (x.type == PyrT.bench &&
+          x.pyramid == r.pyramid &&
+          x.str('of') == of &&
+          toks is List &&
+          by.every(
+            (String card) =>
+                toks.any((Object? t) => t is String && t.startsWith('$card.')),
+          )) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Whether the anonymous request [r] names a card some roster of its
@@ -2328,6 +2390,21 @@ final class PyramidService extends ChangeNotifier {
       // Stays waiting: the level can still be raised.
       return;
     }
+    if (waiting != null && PyrT.ruled.contains(waiting.record.type)) {
+      // A decision of the court: signed with this judge's card, nothing
+      // goes back to whoever sent it.
+      proposals.remove(id);
+      await _save();
+      final PyramidState? s = state;
+      final Object? of = waiting.extra['of'];
+      final _CardScope? scope = s == null || of is! String
+          ? null
+          : _benchScopeOf(s, of);
+      if (s != null && scope != null && _signer != null) {
+        await _signRuling(s, scope, waiting.record);
+      }
+      return;
+    }
     final PyrProposal? p = proposals.remove(id);
     final LedgerKeyPair? me = _signer;
     if (p == null || me == null) {
@@ -2556,6 +2633,8 @@ final class PyramidService extends ChangeNotifier {
       head: head,
       ring: ring,
       election: null,
+      of: null,
+      least: 2,
     );
   }
 
@@ -2565,7 +2644,29 @@ final class PyramidService extends ChangeNotifier {
     head: e.head,
     ring: List<String>.of(e.ring)..sort(),
     election: e,
+    of: null,
+    least: 2,
   );
+
+  /// The court's cards [of] needs now (a complaint or an appeal open now):
+  /// for the judges who may decide it.
+  _CardScope? _benchScopeOf(PyramidState s, String of) {
+    final int t = _now();
+    final List<String> ring = s.courtRing(of, at: t);
+    final int need = s.courtNeed(of, at: t);
+    if (ring.isEmpty || need < 1) {
+      return null;
+    }
+    return (
+      id: PyramidState.benchScope(s.id, of, ring),
+      cell: '',
+      head: '',
+      ring: ring,
+      election: null,
+      of: of,
+      least: need,
+    );
+  }
 
   /// Signs the request waiting for [scope]'s cell with this person's card,
   /// once the cell's roster holds it, and publishes it through a friend.
@@ -2705,7 +2806,23 @@ final class PyramidService extends ChangeNotifier {
     final List<_CardScope> scopes = <_CardScope>[
       for (final PyrElection e in s.elections.values)
         if (!e.closed && e.ring.contains(me.id)) _electionScope(e),
+      // The court: every open complaint and appeal this person may judge,
+      // whether or not anybody decides it — the cards say nothing then.
+      for (final String of in <String>[...s.cases.keys, ...s.appeals.keys])
+        if (_benchScopeOf(s, of) case final _CardScope b
+            when b.ring.contains(me.id))
+          b,
     ];
+    // A decision waits only while its matter is open and this person
+    // still judges it.
+    if (_pendingRulings.keys.any(
+      (String of) => !scopes.any((_CardScope x) => x.of == of),
+    )) {
+      _pendingRulings.removeWhere(
+        (String of, Object? _) => !scopes.any((_CardScope x) => x.of == of),
+      );
+      await _save();
+    }
     // Request cards: of a cell where this person asks, or of the very scope
     // (head and voters) another member started.
     final Set<String> rosterIds = <String>{};
@@ -2735,7 +2852,9 @@ final class PyramidService extends ChangeNotifier {
       ..._rosterCells.keys,
     }) {
       if (!active.contains(id) &&
-          (s.elections.containsKey(id) || id.startsWith('roster:'))) {
+          (s.elections.containsKey(id) ||
+              id.startsWith('roster:') ||
+              id.startsWith('bench:'))) {
         _cardSeeds.remove(id);
         _cards.remove(id);
         _pendingVotes.remove(id);
@@ -2763,7 +2882,16 @@ final class PyramidService extends ChangeNotifier {
         }
         continue;
       }
-      if (e == null && await _listedInRoster(s, scope)) {
+      if (scope.of != null && await _listedOnBench(s, scope)) {
+        final Map<String, dynamic>? ruling = _pendingRulings.remove(scope.of);
+        if (ruling != null) {
+          await _save();
+          await _proposeRuling(s, scope, ruling);
+        }
+        await _signCards(s, scope, me);
+        continue;
+      }
+      if (e == null && scope.of == null && await _listedInRoster(s, scope)) {
         if (_pendingRequests.contains(scope.cell)) {
           await _sendRequest(s, scope);
         }
@@ -2801,6 +2929,19 @@ final class PyramidService extends ChangeNotifier {
     return roster.tokens[card.id] == card.pqId;
   }
 
+  /// Whether the court's bench for [scope] (its matter, its judges now)
+  /// lists this phone's card.
+  Future<bool> _listedOnBench(PyramidState s, _CardScope scope) async {
+    final PyrBench? bench = s.benches[scope.of];
+    if (bench == null ||
+        !listEquals(bench.ring, scope.ring) ||
+        !_cardSeeds.containsKey(scope.id)) {
+      return false;
+    }
+    final LedgerKeyPair card = await _cardKey(scope.id);
+    return bench.tokens[card.id] == card.pqId;
+  }
+
   /// This phone's registration of its card for [scope], ring-signed by the
   /// cell (made once per run; the key image stays the same).
   Future<Map<String, dynamic>> _cardMessage(
@@ -2823,7 +2964,10 @@ final class PyramidService extends ChangeNotifier {
       'type': PyramidTypes.card,
       'py': s.id,
       'e': scope.id,
-      if (scope.election == null) 'cell': scope.cell,
+      if (scope.of != null)
+        'of': scope.of
+      else if (scope.election == null)
+        'cell': scope.cell,
       'tok': card,
       'r': sig.toJson(),
       'i': sig.keyImage,
@@ -2837,10 +2981,31 @@ final class PyramidService extends ChangeNotifier {
     PyramidState s,
     _CardScope scope,
     Map<String, dynamic> message,
-  ) async {
+  ) => _sendToRing(
+    s,
+    scope.ring,
+    <String, dynamic>{...message}..remove('i'),
+    alsoAvoid: _partiesOf(s, scope),
+  );
+
+  /// The people [scope]'s matter is about, when it is the court's.
+  static Set<String> _partiesOf(PyramidState s, _CardScope scope) =>
+      scope.of == null ? const <String>{} : s.courtParties(scope.of!);
+
+  /// Sends [plain] to the members of [ring] but this person through a
+  /// friend outside the ring and outside [alsoAvoid] (straight to them
+  /// when there is none): the friend learns that this person writes to
+  /// the ring, the ring learns only that one of them did. The court's
+  /// frames never pass through the people its matter is about.
+  Future<void> _sendToRing(
+    PyramidState s,
+    List<String> ring,
+    Map<String, dynamic> plain, {
+    Set<String> alsoAvoid = const <String>{},
+  }) async {
     final String me = myKey ?? '';
     final List<String> to = <String>[
-      for (final String k in scope.ring)
+      for (final String k in ring)
         if (k != me && (s.members[k]?.addr ?? '').isNotEmpty)
           _n(s.members[k]!.addr),
     ];
@@ -2848,14 +3013,14 @@ final class PyramidService extends ChangeNotifier {
       return;
     }
     final Set<String> avoid = <String>{
-      for (final String k in scope.ring)
+      for (final String k in <String>{...ring, ...alsoAvoid})
+        for (final String a in s.addressesOf(k)) _n(a),
+      for (final String k in <String>{...ring, ...alsoAvoid})
         if ((s.members[k]?.addr ?? '').isNotEmpty) _n(s.members[k]!.addr),
     };
     final List<String> relays = _pyramidFriends(
       s.id,
     ).where((String a) => !avoid.contains(a)).toList();
-    final Map<String, dynamic> plain = <String, dynamic>{...message}
-      ..remove('i');
     if (relays.isEmpty) {
       for (final String a in to) {
         await _send(a, plain);
@@ -2879,6 +3044,7 @@ final class PyramidService extends ChangeNotifier {
     final Object? id = p['e'];
     final Object? card = p['tok'];
     final Object? cell = p['cell'];
+    final Object? of = p['of'];
     final RingSignature? sig = RingSignature.fromJson(p['r']);
     if (s == null ||
         p['py'] != s.id ||
@@ -2892,6 +3058,9 @@ final class PyramidService extends ChangeNotifier {
     _CardScope? scope;
     if (e != null) {
       scope = _electionScope(e);
+    } else if (of is String) {
+      final _CardScope? bench = _benchScopeOf(s, of);
+      scope = bench?.id == id ? bench : null;
     } else if (cell is String) {
       final _CardScope? roster = _rosterScopeOf(s, cell);
       scope = roster?.id == id ? roster : null;
@@ -2961,6 +3130,12 @@ final class PyramidService extends ChangeNotifier {
     }
     heard[sig.keyImage] = card;
     await _save();
+    if (scope.of != null) {
+      // The court: this phone makes its own card in its duties (it may not
+      // have one yet) and signs the list there.
+      await _cardDuties(s, identity);
+      return;
+    }
     if (e == null && !_rosterCells.containsKey(id)) {
       // Someone in the cell asks: this phone makes its request card too.
       _rosterCells[id] = scope.cell;
@@ -2996,12 +3171,14 @@ final class PyramidService extends ChangeNotifier {
 
   /// Signs the list of every card heard of for [scope] — only when this
   /// phone's own card is among them, all the cell's cards are in (or, a
-  /// while later, at least two are: a third of a vote's time, or
-  /// [kPyrRosterGraceMs] for request cards), and not signed before. Every
-  /// member who heard the same cards signs the same record: a vote's
-  /// ballot is dated by the vote itself; a cell's roster is the one a
-  /// member made first, which the others sign too
-  /// ([PyramidState.ballotTokens]).
+  /// while later, at least two are — or as many as the court needs: a
+  /// third of a vote's time, or [kPyrRosterGraceMs] for request cards and
+  /// the court's), and not signed before. Every member who heard the same
+  /// cards signs the same record: a vote's ballot is dated by the vote
+  /// itself; a cell's roster or a court's bench is the one a member made
+  /// first, which the others sign too ([PyramidState.ballotTokens]). The
+  /// court waits for every judge's card as long as for request cards: a
+  /// bench of fewer cards than judges tells who was not there.
   Future<void> _signCards(
     PyramidState s,
     _CardScope scope,
@@ -3015,7 +3192,7 @@ final class PyramidService extends ChangeNotifier {
         (_cards[id]?.values.toSet().toList() ?? <String>[])..sort();
     if (mine == null ||
         !cards.contains(mine) ||
-        cards.length < 2 ||
+        cards.length < scope.least ||
         cards.length > scope.ring.length) {
       return;
     }
@@ -3049,16 +3226,22 @@ final class PyramidService extends ChangeNotifier {
       await ingest(ballot);
       return;
     }
-    // A roster: every one listing exactly these cards gets this phone's
-    // signature (two members may have made one at once).
+    // A roster or a bench: every one listing exactly these cards gets this
+    // phone's signature (two members may have made one at once).
+    final String? of = scope.of;
+    final String ring = scope.ring.join(',');
     final List<PyramidRecord> made = <PyramidRecord>[
       for (final PyramidRecord r in _records.values)
-        if (r.type == PyrT.roster &&
-            r.pyramid == s.id &&
-            r.str('cell') == scope.cell &&
-            r.str('head') == scope.head &&
+        if (r.pyramid == s.id &&
             r.body['toks'] is List &&
-            (r.body['toks'] as List).join(',') == joined)
+            (r.body['toks'] as List).join(',') == joined &&
+            (of == null
+                ? r.type == PyrT.roster &&
+                      r.str('cell') == scope.cell &&
+                      r.str('head') == scope.head
+                : r.type == PyrT.bench &&
+                      r.str('of') == of &&
+                      r.candidates.join(',') == ring))
           r,
     ];
     final bool madeHere = (_ballotsSigned[id] ?? const <String>{}).contains(
@@ -3070,12 +3253,21 @@ final class PyramidService extends ChangeNotifier {
       made.add(
         PyramidRecord(
           body: <String, dynamic>{
-            't': PyrT.roster,
+            't': of == null ? PyrT.roster : PyrT.bench,
             'py': s.id,
-            'at': _now(),
+            // A bench comes after its matter, also within one millisecond.
+            'at': of == null
+                ? _now()
+                : max(
+                    _now(),
+                    (s.cases[of]?.signedAt ?? s.appeals[of]?.signedAt ?? 0) + 1,
+                  ),
             'by': scope.ring,
-            'cell': scope.cell,
-            'head': scope.head,
+            if (of == null) ...<String, dynamic>{
+              'cell': scope.cell,
+              'head': scope.head,
+            } else
+              'of': of,
             'toks': cards,
           },
         ),
@@ -5956,8 +6148,12 @@ final class PyramidService extends ChangeNotifier {
 
   /// The first instance decides complaint [caseId]: [guilty] gives a
   /// verdict of [kind] with [text] (until [until], or for good); otherwise
-  /// it is dismissed ([why]). At the top it needs 2 of the top cell.
-  Future<PyramidRecord?> decideCase(
+  /// it is dismissed ([why]). At the top it needs 2 of the top cell. The
+  /// decision is signed by this judge's card for the case, never by their
+  /// own key ([PyrT.ruled]); before the court's cards are in it waits here
+  /// and goes out by itself ([rulingWaiting]). False when this person
+  /// cannot judge it.
+  Future<bool> decideCase(
     String caseId, {
     required bool guilty,
     String kind = 'other',
@@ -5967,29 +6163,256 @@ final class PyramidService extends ChangeNotifier {
   }) async {
     final PyramidState? s = state;
     final PyrCase? c = s?.cases[caseId];
-    final String? me = myKey;
-    if (s == null || c == null || me == null) {
-      return null;
+    if (s == null || c == null) {
+      return false;
     }
-    final List<String> judges = s.judgesAt(c.judge, <String>{
-      c.plaintiff,
-      c.accused,
+    return _rule(caseId, <String, dynamic>{
+      't': PyrT.verdict,
+      'case': caseId,
+      'guilty': guilty,
+      if (guilty)
+        ..._verdictFields(s, c.accused, kind, text, until)
+      else
+        'why': _cut(why.trim(), kPyrCourtTextChars),
     });
-    if (!judges.contains(me)) {
-      return null;
+  }
+
+  /// Whether this person's decision in [of] (a complaint or an appeal)
+  /// waits for the court's cards.
+  bool rulingWaiting(String of) => _pendingRulings.containsKey(of);
+
+  /// This judge's decision [fields] in matter [of]: signed by this phone's
+  /// card for it once the bench lists that card, else kept until it does.
+  Future<bool> _rule(String of, Map<String, dynamic> fields) async {
+    final PyramidState? s = state;
+    final LedgerKeyPair? me = _signer;
+    final _CardScope? scope = s == null ? null : _benchScopeOf(s, of);
+    if (s == null ||
+        me == null ||
+        scope == null ||
+        !scope.ring.contains(me.id) ||
+        _pendingRulings.containsKey(of)) {
+      return false;
     }
-    return propose(
-      <String, dynamic>{
-        't': PyrT.verdict,
-        'case': caseId,
-        'guilty': guilty,
-        if (guilty)
-          ..._verdictFields(s, c.accused, kind, text, until)
-        else
-          'why': _cut(why.trim(), kPyrCourtTextChars),
+    if (await _listedOnBench(s, scope)) {
+      await _proposeRuling(s, scope, fields);
+      return true;
+    }
+    _pendingRulings[of] = fields;
+    await _save();
+    await _cardDuties(s, me);
+    return true;
+  }
+
+  /// The decision [fields] signed by this judge's card on the bench of
+  /// [scope], with no time but the time now: published when that is
+  /// enough, otherwise sent to the other judges for their cards.
+  Future<void> _proposeRuling(
+    PyramidState s,
+    _CardScope scope,
+    Map<String, dynamic> fields,
+  ) async {
+    final PyrBench? bench = s.benches[scope.of];
+    if (bench == null || !_cardSeeds.containsKey(scope.id)) {
+      return;
+    }
+    final LedgerKeyPair card = await _cardKey(scope.id);
+    if (bench.tokens[card.id] != card.pqId) {
+      return;
+    }
+    final PyramidRecord r = await PyramidRecord(
+      body: <String, dynamic>{
+        ...fields,
+        'py': s.id,
+        'at': _rulingTime(bench),
+        // The bench's cards: the record names no member, and says how many
+        // of the cards it takes (it carries no more signatures).
+        'by': bench.tokens.keys.toList()..sort(),
+        'q': bench.need,
+        'pn': _newId(16),
       },
-      candidates: judges,
-      need: PyramidState.judgesNeeded(c.judge, judges.length),
+    ).signedBy(card);
+    _agree(r);
+    await _save();
+    await _rulingOut(s, scope, r);
+  }
+
+  /// Now, but after the bench record (a decision folds after its cards,
+  /// also within one millisecond).
+  int _rulingTime(PyrBench bench) =>
+      max(_now(), (_records[bench.id]?.at ?? 0) + 1);
+
+  /// A decision this judge signed: published through a friend outside the
+  /// court once it carries as many cards as the court needs, otherwise
+  /// sent (through a friend too) to the other judges.
+  Future<void> _rulingOut(
+    PyramidState s,
+    _CardScope scope,
+    PyramidRecord r,
+  ) async {
+    final int need = r.integer('q');
+    final PyramidRecord few = _fewest(r);
+    final Set<String> parties = _partiesOf(s, scope);
+    if (_ready(few, need)) {
+      await _publishAnonymously(
+        few,
+        avoid: <String>[...scope.ring, ...parties],
+      );
+      return;
+    }
+    await _sendToRing(s, scope.ring, <String, dynamic>{
+      'type': PyramidTypes.proposal,
+      'r': few.toJson(),
+      'need': need,
+      'of': scope.of,
+    }, alsoAvoid: parties);
+  }
+
+  /// [r] with the signatures in the order of their keys, and for a
+  /// decision of the court ([PyrT.ruled]) no more of them than it says it
+  /// needs (`q`, the cards with the lowest keys): neither who signed first
+  /// nor how many agreed travels on.
+  static PyramidRecord _fewest(PyramidRecord r) {
+    final int q = r.integer('q');
+    if (!PyrT.ruled.contains(r.type)) {
+      return r;
+    }
+    final List<String> keys = r.sigs.keys.toList()..sort();
+    return PyramidRecord(
+      body: r.body,
+      sigs: <String, String>{
+        for (final String k in q >= 1 ? keys.take(q) : keys) k: r.sigs[k]!,
+      },
+      tsigs: r.tsigs,
+    );
+  }
+
+  /// The matter a decision of the court is about.
+  static String _rulingOf(PyramidRecord r) =>
+      r.type == PyrT.verdict ? r.str('case') : r.str('appeal');
+
+  /// Signs the decision [r] with this judge's card for [scope] — a fresh
+  /// copy dated now when it is older than [kPyrMaxSkewMs] (the others who
+  /// agreed sign that again by themselves) — and sends it on.
+  Future<void> _signRuling(
+    PyramidState s,
+    _CardScope scope,
+    PyramidRecord r,
+  ) async {
+    final PyrBench? bench = s.benches[scope.of];
+    if (bench == null ||
+        !_cardSeeds.containsKey(scope.id) ||
+        r.at > _now() + kPyrMaxSkewMs) {
+      return;
+    }
+    final LedgerKeyPair card = await _cardKey(scope.id);
+    if (bench.tokens[card.id] != card.pqId ||
+        !r.candidates.contains(card.id) ||
+        !r.candidates.every(bench.tokens.containsKey)) {
+      return;
+    }
+    final PyramidRecord signed = _now() - r.at > kPyrMaxSkewMs
+        ? await PyramidRecord(
+            body: <String, dynamic>{...r.body, 'at': _rulingTime(bench)},
+          ).signedBy(card)
+        : await r.signedBy(card);
+    _agree(signed);
+    await _save();
+    await _rulingOut(s, scope, signed);
+  }
+
+  /// A decision of the court on its way between judges ([_rulingOut]):
+  /// passed on for a friend (with `to`: only to the judges of that matter),
+  /// or, for a judge of it holding a card on its bench, signed again by
+  /// itself when this person already agreed to it, else kept to be signed
+  /// ("Do podpisania"). The frame names no judge; nor does the record.
+  Future<void> _onRuling(String from, Map<String, dynamic> p) async {
+    final PyramidState? s = state;
+    final PyramidRecord? r = PyramidRecord.fromJson(p['r']);
+    final Object? of = p['of'];
+    if (s == null ||
+        r == null ||
+        of is! String ||
+        r.pyramid != s.id ||
+        !PyrT.ruled.contains(r.type) ||
+        _rulingOf(r) != of) {
+      return;
+    }
+    final _CardScope? scope = _benchScopeOf(s, of);
+    final Object? to = p['to'];
+    if (to != null) {
+      if (from.isEmpty ||
+          !host.isFriend(from) ||
+          scope == null ||
+          to is! List ||
+          to.length > RingSignature.maxRing) {
+        return;
+      }
+      final Set<String> allowed = <String>{
+        for (final String k in scope.ring)
+          if ((s.members[k]?.addr ?? '').isNotEmpty) _n(s.members[k]!.addr),
+      };
+      final Map<String, dynamic> plain = <String, dynamic>{...p}..remove('to');
+      for (final String a in to.whereType<String>().map(_n).toSet()) {
+        if (allowed.contains(a) && a != _n(from)) {
+          await _send(a, plain);
+        }
+      }
+      return;
+    }
+    final LedgerKeyPair? me = _signer;
+    final int nowMs = _now();
+    final int need = r.integer('q');
+    if (scope == null ||
+        me == null ||
+        !scope.ring.contains(me.id) ||
+        !_cardSeeds.containsKey(scope.id) ||
+        need < 1 ||
+        r.at > nowMs + kPyrMaxSkewMs ||
+        _records.containsKey(r.id)) {
+      return;
+    }
+    final LedgerKeyPair card = await _cardKey(scope.id);
+    if (!r.candidates.contains(card.id) ||
+        r.sigs.containsKey(card.id) ||
+        !await r.verifySigners()) {
+      return;
+    }
+    final int? agreed = _consent[_contentKey(r)];
+    if (agreed != null && agreed > nowMs && nowMs - r.at <= kPyrMaxSkewMs) {
+      await _signRuling(s, scope, r);
+      return;
+    }
+    final PyrProposal? had = proposals[r.id];
+    proposals[r.id] = PyrProposal(
+      record: had == null
+          ? r
+          : PyramidRecord(
+              body: r.body,
+              sigs: <String, String>{...had.record.sigs, ...r.sigs},
+            ),
+      from: _n(from),
+      need: need,
+      at: had?.at ?? nowMs,
+      extra: <String, dynamic>{'of': of},
+    );
+    _trimProposals();
+    if (!proposals.containsKey(r.id)) {
+      return;
+    }
+    await _save();
+    if (had != null) {
+      return;
+    }
+    await host.notify(
+      RuntimeSystemNotification(
+        id: 'pyr-prop-${r.id}',
+        title: t('Piramida: do podpisania'),
+        body: describeRecord(r),
+        createdAtMillis: nowMs,
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'pyr-prop',
+      ),
     );
   }
 
@@ -6021,8 +6444,9 @@ final class PyramidService extends ChangeNotifier {
   /// The answer to appeal [appealId] by the level it went to: [ok]
   /// overturns the decision (a dismissed complaint then gets the verdict
   /// [kind], [text], [until]); otherwise the person may go one level
-  /// higher. At the top it needs 2 of the top cell.
-  Future<PyramidRecord?> answerAppeal(
+  /// higher. At the top it needs 2 of the top cell. Signed by this
+  /// judge's card for the appeal, as [decideCase].
+  Future<bool> answerAppeal(
     String appealId, {
     required bool ok,
     String why = '',
@@ -6033,26 +6457,17 @@ final class PyramidService extends ChangeNotifier {
     final PyramidState? s = state;
     final PyrAppeal? a = s?.appeals[appealId];
     final PyrMatter? m = a == null ? null : s!.matters[a.matter];
-    final String? me = myKey;
-    if (s == null || a == null || m == null || me == null) {
-      return null;
-    }
-    final List<String> judges = s.judgesAt(a.judge, m.parties);
-    if (!judges.contains(me)) {
-      return null;
+    if (s == null || a == null || m == null) {
+      return false;
     }
     final PyrCase? c = m.kind == PyrMatterKind.complaint ? s.cases[m.id] : null;
-    return propose(
-      <String, dynamic>{
-        't': PyrT.appealAnswer,
-        'appeal': appealId,
-        'ok': ok,
-        'why': _cut(why.trim(), kPyrCourtTextChars),
-        if (ok && c != null) ..._verdictFields(s, c.accused, kind, text, until),
-      },
-      candidates: judges,
-      need: PyramidState.judgesNeeded(a.judge, judges.length),
-    );
+    return _rule(appealId, <String, dynamic>{
+      't': PyrT.appealAnswer,
+      'appeal': appealId,
+      'ok': ok,
+      'why': _cut(why.trim(), kPyrCourtTextChars),
+      if (ok && c != null) ..._verdictFields(s, c.accused, kind, text, until),
+    });
   }
 
   /// The decisions about this person that can be (or were) appealed, the
@@ -6265,7 +6680,7 @@ final class PyramidService extends ChangeNotifier {
   }
 
   /// Verdicts a friend who is a member passed on (this person is not one):
-  /// kept when the judge's signature holds; an address only from a record
+  /// kept when the court's signatures hold; an address only from a record
   /// the accused signed; overturned only with the accused's appeal and an
   /// answer accepting it signed by somebody else — once overturned it
   /// stays so, and a verdict once here is never taken back by a friend's
@@ -6781,6 +7196,11 @@ final class PyramidService extends ChangeNotifier {
   }
 
   Future<void> _onProposal(String from, Map<String, dynamic> p) async {
+    if (p['of'] != null) {
+      // A decision of the court, signed by cards: its own way.
+      await _onRuling(from, p);
+      return;
+    }
     final PyramidRecord? r = PyramidRecord.fromJson(p['r']);
     final Object? need = p['need'];
     final String? me = myKey;
@@ -7023,6 +7443,7 @@ final class PyramidService extends ChangeNotifier {
         r.body['ok'] == true
             ? t('Przyjęcie odwołania (decyzja uchylona)')
             : t('Odrzucenie odwołania'),
+      PyrT.bench => t('Karty sądu w sprawie (orzeczenie bez nazwisk)'),
       _ => r.type,
     };
   }

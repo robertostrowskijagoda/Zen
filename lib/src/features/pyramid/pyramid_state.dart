@@ -887,6 +887,10 @@ final class PyramidState {
   final Map<String, PyrCase> cases = <String, PyrCase>{};
   final Map<String, PyrVerdict> verdicts = <String, PyrVerdict>{};
 
+  /// The court's cards in each open matter, by the complaint or appeal
+  /// they judge ([PyrT.bench]).
+  final Map<String, PyrBench> benches = <String, PyrBench>{};
+
   /// Reports whose decision was overturned on appeal.
   final Set<String> overturnedReports = <String>{};
 
@@ -3358,6 +3362,8 @@ final class PyramidState {
         return _appeal(r);
       case PyrT.appealAnswer:
         return _appealAnswer(r);
+      case PyrT.bench:
+        return _bench(r);
       case PyrT.seal:
         return _seal(r);
       case PyrT.voteClose:
@@ -3588,9 +3594,10 @@ final class PyramidState {
     return topJudges(parties).isEmpty ? null : '';
   }
 
-  /// Who signs for the judge at [judge] now: the head there, or at the
-  /// top 2 of the top cell (all of it when fewer are left), never one of
-  /// [parties].
+  /// Who judges at [judge] now — the court's ring: the head there, or at
+  /// the top the top cell (2 of it decide, all of it when fewer are left),
+  /// never one of [parties]. They decide by their cards ([PyrT.bench]),
+  /// never by their own keys.
   List<String> judgesAt(String judge, Set<String> parties) {
     if (judge.isEmpty) {
       return topJudges(parties);
@@ -3599,13 +3606,141 @@ final class PyramidState {
     return k == null || parties.contains(k) ? const <String>[] : <String>[k];
   }
 
-  /// How many of [judgesAt] must sign.
+  /// How many of [judgesAt] must agree.
   static int judgesNeeded(String judge, int judges) =>
       judge.isEmpty ? min(2, judges) : 1;
 
-  bool _judgeSigned(String judge, Set<String> parties, List<String> by) {
-    final List<String> j = judgesAt(judge, parties);
-    return j.isNotEmpty && _countOf(by, j) >= judgesNeeded(judge, j.length);
+  /// Who may judge [of] now — an open complaint's first instance or an
+  /// appeal waiting for its answer — sorted; empty when it is not open at
+  /// [at] (by default the fold's time) or nobody may judge it.
+  List<String> courtRing(String of, {int? at}) {
+    final int t = at ?? _clock;
+    final PyrCase? c = cases[of];
+    if (c != null) {
+      return c.status == PyrCaseStatus.open && t >= c.signedAt && t < c.deadline
+          ? (judgesAt(c.judge, <String>{c.plaintiff, c.accused})..sort())
+          : <String>[];
+    }
+    final PyrAppeal? a = appeals[of];
+    final PyrMatter? m = a == null ? null : matters[a.matter];
+    if (a == null ||
+        m == null ||
+        m.overturned ||
+        a.ok != null ||
+        t < a.signedAt ||
+        t >= a.deadline) {
+      return <String>[];
+    }
+    return judgesAt(a.judge, m.parties)..sort();
+  }
+
+  /// Whom matter [of] is about (a complaint's two sides, an appeal's
+  /// parties): they never judge it, and nothing of its court passes
+  /// through their phones.
+  Set<String> courtParties(String of) {
+    final PyrCase? c = cases[of];
+    if (c != null) {
+      return <String>{c.plaintiff, c.accused};
+    }
+    final PyrAppeal? a = appeals[of];
+    return a == null
+        ? const <String>{}
+        : matters[a.matter]?.parties ?? const <String>{};
+  }
+
+  /// How many cards of [of]'s court a decision needs (0: not open at
+  /// [at]).
+  int courtNeed(String of, {int? at}) {
+    final PyrCase? c = cases[of];
+    final String? judge = c?.judge ?? appeals[of]?.judge;
+    final List<String> ring = courtRing(of, at: at);
+    if (judge == null || ring.isEmpty) {
+      return 0;
+    }
+    return judgesNeeded(judge, ring.length);
+  }
+
+  /// What a judge's one-time card for [of] is made for: the pyramid, the
+  /// matter and who judges it — another ring needs new cards.
+  static String benchScope(String pyramid, String of, List<String> ring) =>
+      'bench:${sha256Hex(utf8.encode('$pyramid|$of|${(List<String>.of(ring)..sort()).join(',')}')).substring(0, 32)}';
+
+  /// The court's cards in matter [r.of]: every judge of its ring now is
+  /// listed as a signer, at least as many of them signed as there are
+  /// cards, and there are at least as many cards as a decision needs —
+  /// as a cell's ballot, so no judge holds two cards and nobody outside
+  /// the ring holds one. A later bench of the same ring counts only with
+  /// more cards, holding every earlier one (a judge who was away); a
+  /// changed ring needs a new one, and the old one counts no more.
+  String? _bench(PyramidRecord r) {
+    final String of = r.str('of');
+    final List<String> ring = courtRing(of);
+    if (ring.isEmpty) {
+      return 'nie ma takiej sprawy w toku';
+    }
+    final List<String> listed = List<String>.of(r.candidates)..sort();
+    if (!listEquals(listed, ring)) {
+      return 'karty sądu podpisuje jego skład';
+    }
+    final int need = courtNeed(of);
+    final Map<String, String>? cards = ballotTokens(r.body['toks']);
+    if (cards == null || cards.length < need || cards.length > ring.length) {
+      return 'złe karty sądu';
+    }
+    final List<String> by = r.signers;
+    if (!by.every(ring.contains)) {
+      return 'karty sądu podpisuje jego skład';
+    }
+    if (by.length < cards.length) {
+      return 'za mało podpisów pod kartami sądu';
+    }
+    final PyrBench? had = benches[of];
+    if (had != null &&
+        listEquals(had.ring, ring) &&
+        (cards.length <= had.tokens.length ||
+            !had.tokens.keys.every(cards.containsKey))) {
+      return 'karty sądu już są';
+    }
+    benches[of] = PyrBench(
+      id: r.id,
+      of: of,
+      ring: ring,
+      tokens: cards,
+      need: need,
+    );
+    return null;
+  }
+
+  /// Why [r] is not a decision of the court in [of], or null: signed by at
+  /// least as many cards of the matter's bench as the court needs (each
+  /// card once, with the ML-DSA key it was registered with), while the
+  /// bench's ring is still who judges it; it lists only that bench's cards
+  /// and says how many it needs (`q`), so a phone keeps no more signatures
+  /// than that and the record shows neither who agreed nor how many.
+  String? _rulingProblem(String of, PyramidRecord r) {
+    final PyrBench? bench = benches[of];
+    if (bench == null) {
+      return 'rozstrzyga sąd: brak kart jego składu';
+    }
+    if (!listEquals(bench.ring, courtRing(of))) {
+      return 'skład sądu się zmienił';
+    }
+    final List<String> listed = r.candidates;
+    if (listed.isEmpty ||
+        !listed.every(bench.tokens.containsKey) ||
+        r.integer('q') != bench.need) {
+      return 'rozstrzyga sąd: karty spoza jego składu';
+    }
+    int counted = 0;
+    for (final String card in r.signers) {
+      if (listed.contains(card) && r.pqIdOf(card) == bench.tokens[card]) {
+        counted++;
+      }
+    }
+    if (counted < bench.need) {
+      return 'rozstrzyga sąd: za mało kart jego składu';
+    }
+    return null;
   }
 
   /// The last appeal of [m], if any.
@@ -3685,14 +3820,15 @@ final class PyramidState {
       deadline: since + pyrStepTimeMs(step),
     );
     m.appeals.add(r.id);
+    // The court of a level, never the name of who sits there.
     history.add(
       PyrHistory(
         r.at,
         judge.isEmpty
             ? t('{name} odwołuje się do szczytu', {'name': _name(k)})
-            : t('{name} odwołuje się do {judge}', {
+            : t('{name} odwołuje się do sądu poziomu {level}', {
                 'name': _name(k),
-                'judge': _name(occupant[judge] ?? ''),
+                'level': judge.length + 1,
               }),
         r.id,
       ),
@@ -3715,8 +3851,9 @@ final class PyramidState {
     if (r.at < a.signedAt || r.at >= a.deadline) {
       return 'odpowiedź poza czasem na nią';
     }
-    if (!_judgeSigned(a.judge, m.parties, r.signers)) {
-      return 'odpowiada szef poziom wyżej (szczyt: 2 z 3)';
+    final String? unsigned = _rulingProblem(a.id, r);
+    if (unsigned != null) {
+      return unsigned;
     }
     final bool ok = r.body['ok'] == true;
     if (ok && m.kind == PyrMatterKind.complaint) {
@@ -3906,8 +4043,9 @@ final class PyramidState {
     if (r.at < c.signedAt || r.at >= c.deadline) {
       return 'decyzja poza czasem na nią';
     }
-    if (!_judgeSigned(c.judge, <String>{c.plaintiff, c.accused}, r.signers)) {
-      return 'rozstrzyga szef komórki pozwanego';
+    final String? unsigned = _rulingProblem(c.id, r);
+    if (unsigned != null) {
+      return unsigned;
     }
     if (r.body['guilty'] != true) {
       c

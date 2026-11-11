@@ -112,7 +112,7 @@ abstract final class PyrT {
   static const String emitCancel = 'emitcancel';
 
   /// A member's complaint against another member ("Sąd"), judged first by
-  /// the head of the accused's cell ([verdict]).
+  /// the court of the accused's cell ([verdict]).
   static const String suit = 'suit';
   static const String verdict = 'verdict';
 
@@ -121,6 +121,17 @@ abstract final class PyrT {
   /// as long to answer ([appealAnswer]), up to the top.
   static const String appeal = 'appeal';
   static const String appealAnswer = 'appans';
+
+  /// The one-time cards of the judges of one complaint or one appeal
+  /// ([PyrBench]): one hybrid key per judge who registered one, signed by
+  /// the judges themselves like a cell's ballot. The court's decision in
+  /// that matter is signed by these cards only, so it says that enough of
+  /// the court agreed, never which of its members.
+  static const String bench = 'bench';
+
+  /// The court's decisions, signed by the cards of their matter's bench
+  /// ([bench]) and never by a member's own key.
+  static const Set<String> ruled = <String>{verdict, appealAnswer};
 
   /// The seal of a treasurers' era ([PyrSeal]): signed by most of the
   /// treasurers who came after it, it fixes who the era's treasurers were,
@@ -135,10 +146,11 @@ abstract final class PyrT {
   /// counts nowhere, whenever and however it comes.
   static const String voteClose = 'vclose';
 
-  /// Kinds published through a friend outside the cell, so the first phone
-  /// to show them is not the author's: the anonymous request and the vote
-  /// (signed by a one-time key on the cell's ballot).
-  static const Set<String> relayed = <String>{voteRequest, vote};
+  /// Kinds published through a friend outside the cell (or the court), so
+  /// the first phone to show them is not the author's: the anonymous
+  /// request and the vote (signed by a one-time key on the cell's ballot),
+  /// and the court's decisions (signed by the cards of its bench).
+  static const Set<String> relayed = <String>{voteRequest, vote, ...ruled};
 
   /// Private kinds most treasurers sign before they count; never public.
   static const Set<String> treasured = <String>{transfer, settle};
