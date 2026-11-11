@@ -45,6 +45,7 @@
     <content_attribute id="social-location">intense</content_attribute>
   </content_rating>
   <releases>
+    <release version="1.16.5" date="2026-11-11"/>
     <release version="1.16.4" date="2026-11-10"/>
     <release version="1.16.3" date="2026-11-09"/>
     <release version="1.16.2" date="2026-11-09"/>

@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.16.5 — 11.11.2026
+
 ### What's new
 - [en] New: Hasła, a password manager with a generator and import from browsers. On Android it can fill your logins into other apps.
 - [en] Calls: a fix for black video between two phones, busy for a second caller, missed calls after being offline. Messages and statuses arrive more reliably.
