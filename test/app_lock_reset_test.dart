@@ -125,7 +125,10 @@ void main() {
     expect(find.textContaining('z drugiego urządzenia'), findsOneWidget);
     expect(find.textContaining('kopii całego konta'), findsOneWidget);
     expect(find.textContaining('z kopii klucza'), findsOneWidget);
-    expect(find.textContaining('kręgu odzyskiwania'), findsOneWidget);
+    expect(
+      find.textContaining('pomocą bliskich znajomych i hasła konta'),
+      findsOneWidget,
+    );
     expect(find.textContaining('nie da się cofnąć'), findsOneWidget);
     // Nothing here tells whether a panic password exists.
     expect(find.textContaining('panic', findRichText: true), findsNothing);

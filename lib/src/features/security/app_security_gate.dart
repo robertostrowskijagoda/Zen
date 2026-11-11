@@ -912,8 +912,8 @@ class _ForgotPasswordPanel extends StatelessWidget {
             Text(
               t(
                 'Konto wróci z drugiego urządzenia z tym kontem, z pliku '
-                'kopii całego konta, z kopii klucza albo z kręgu '
-                'odzyskiwania. Tego nie da się cofnąć.',
+                'kopii całego konta, z kopii klucza albo z pomocą bliskich '
+                'znajomych i hasła konta. Tego nie da się cofnąć.',
               ),
               textAlign: TextAlign.center,
               style: TextStyle(

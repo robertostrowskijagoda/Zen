@@ -859,14 +859,15 @@ class _SecurityPage extends StatelessWidget {
         ZenInfo(
           icon: Icons.group_rounded,
           tone: zen.success,
-          title: t('Odzyskiwanie przez 6 zaufanych osób'),
+          title: t('Odzyskiwanie z pomocą bliskich znajomych'),
           text: t(
             'Skoro nie ma serwera, nie ma też „zapomniałem hasła” przez e-mail. '
-            'Zamiast tego wybierasz krąg do 6 zaufanych znajomych i każdy dostaje '
-            'zaszyfrowany kawałek klucza. Po zgubieniu telefonu odzyskujesz konto '
-            'hasłem i pomocą 2 z nich (po 24 godzinach), a gdy nie pamiętasz '
-            'hasła — pomocą 4 z nich (po 7 dniach; stare urządzenia dostają '
-            'ostrzeżenie). Jedna osoba sama nic nie zobaczy.',
+            'Zamiast tego każdy znajomy oznaczony jako bliski dostaje '
+            'zaszyfrowany kawałek klucza. Po zgubieniu telefonu odzyskujesz '
+            'konto hasłem konta i pomocą kilku z nich (dwóch, trzech albo '
+            'czterech, zależnie od tego, ilu ich jest) po 24 godzinach; stare '
+            'urządzenia dostają ostrzeżenie. Jedna osoba sama nic nie zobaczy, '
+            'a bez hasła konta ta droga nie działa.',
           ),
         ),
         ZenSection(t('Jak sprawdzić, że to nie wirus')),

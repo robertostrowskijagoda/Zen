@@ -1191,7 +1191,12 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           ),
                           if (a.override)
                             Padding(
-                              padding: const EdgeInsets.fromLTRB(34, 6, 0, 8),
+                              padding: const EdgeInsetsDirectional.fromSTEB(
+                                34,
+                                6,
+                                0,
+                                8,
+                              ),
                               child: Text(
                                 t(
                                   'Ta osoba wydaje klucz mimo wcześniejszego '

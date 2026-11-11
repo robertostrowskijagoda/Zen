@@ -1054,15 +1054,16 @@ class _SettingsScreenState extends ConsumerState<_SettingsScreen> {
                       subtitle: ref.watch(accountSecureReminderProvider)
                           ? t(
                               'Zabezpiecz konto na wypadek zgubionego telefonu: '
-                              'kopia klucza albo krąg odzyskiwania',
+                              'kopia klucza albo hasło konta i bliscy znajomi',
                             )
                           : ref.watch(circleReminderProvider)
                           ? t(
-                              'Masz już dość znajomych — ustaw krąg '
-                              'odzyskiwania',
+                              'Masz już znajomych — ustaw hasło konta, żeby '
+                              'bliscy znajomi mogli pomóc odzyskać konto',
                             )
                           : t(
-                              'Hasło konta, krąg odzyskiwania, nowe urządzenie',
+                              'Hasło konta, klucz u bliskich znajomych, nowe '
+                              'urządzenie',
                             ),
                       onTap: () =>
                           unawaited(AccountRecoveryScreen.open(context)),
@@ -4469,7 +4470,8 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
                   tone: zen.danger,
                   title: t('To konto nie ma kopii'),
                   text: t(
-                    'Nie ma kopii klucza ani kręgu odzyskiwania. Jeśli nie '
+                    'Nie ma kopii klucza ani części klucza u bliskich '
+                    'znajomych. Jeśli nie '
                     'masz tego konta na innym urządzeniu ani w pliku kopii, '
                     'po usunięciu nie da się go odzyskać: znajomi zobaczą '
                     'Cię jako nową osobę, a miejsce w piramidzie przepadnie.',

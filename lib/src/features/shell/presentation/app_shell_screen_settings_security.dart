@@ -245,9 +245,9 @@ class _SettingsSecuritySection extends ConsumerWidget {
                   icon: Icons.report_gmailerrorred_rounded,
                   tone: zen.danger,
                   text: t(
-                    'To konto nie ma kopii klucza ani kręgu odzyskiwania. Po '
-                    'skasowaniu nie dałoby się go odzyskać. Najpierw zrób '
-                    'kopię: Ustawienia → Konto i odzyskiwanie.',
+                    'To konto nie ma kopii klucza ani części klucza u bliskich '
+                    'znajomych. Po skasowaniu nie dałoby się go odzyskać. '
+                    'Najpierw zrób kopię: Ustawienia → Konto i odzyskiwanie.',
                   ),
                 ),
               ],
