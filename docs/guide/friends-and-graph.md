@@ -28,7 +28,10 @@ friends, or close friends only.
 Once you set an account password, every close friend also holds an
 encrypted piece of your account's key, and someone who stops being a
 close friend is asked to delete theirs (see
-[Getting started](getting-started.md#getting-your-account-back)).
+[Getting started](getting-started.md#getting-your-account-back)). Zen
+never shows a friend their level, but a friend who holds a piece (like one
+who gets a post for close friends only, or your alarm) can tell from it
+that you count them as close.
 
 Profile fields (status, About me, photo, nationality, counts…) each have
 their own audience: public, all friends, friends and close friends, close
