@@ -159,6 +159,16 @@ Future<Uint8List> ratchetMediaKey(
 /// The ring slot of [epoch].
 int mediaKeyIndex(int epoch) => epoch % kMediaKeyRingSize;
 
+/// [state] as the technical log writes it: `decryptionFailed` for
+/// `FrameCryptorStateDecryptionFailed`.
+String mediaCryptorStateName(FrameCryptorState state) {
+  const String prefix = 'FrameCryptorState';
+  final String name = state.name.startsWith(prefix)
+      ? state.name.substring(prefix.length)
+      : state.name;
+  return name.isEmpty ? name : name[0].toLowerCase() + name.substring(1);
+}
+
 /// One end's frame transformer on a sender or receiver.
 abstract interface class MediaFrameCryptor {
   Future<void> setKeyIndex(int index);
@@ -166,20 +176,29 @@ abstract interface class MediaFrameCryptor {
   Future<void> dispose();
 }
 
+/// What a transformer reports about the frames it handles: `ok`,
+/// `missingKey`, `decryptionFailed`, `encryptionFailed`, `internalError`,
+/// `keyRatcheted` (WebRTC's own names, without the `FrameCryptorState`
+/// prefix). It reports a change, not every frame.
+typedef MediaCryptorStateListener = void Function(String state);
+
 /// The key ring of one peer connection, keyed by participant id.
 abstract interface class MediaKeyRing {
   Future<void> setKey(String participantId, int index, Uint8List key);
 
   Future<MediaFrameCryptor> attachSender(
     RTCRtpSender sender,
-    String participantId,
-  );
+    String participantId, {
+    MediaCryptorStateListener? onState,
+  });
 
-  /// [onMissingKey] runs when a frame names a slot the ring has no key in.
+  /// [onMissingKey] runs when a frame names a slot the ring has no key in,
+  /// or a frame did not open with the key in its slot.
   Future<MediaFrameCryptor> attachReceiver(
     RTCRtpReceiver receiver,
     String participantId, {
     void Function()? onMissingKey,
+    MediaCryptorStateListener? onState,
   });
 
   Future<void> dispose();
@@ -716,6 +735,8 @@ final class MediaE2eeChannel {
     final List<RTCRtpTransceiver> transceivers;
     final Set<String> senders;
     final Set<String> receivers;
+    final Map<String, String> senderKinds = <String, String>{};
+    final Map<String, String> receiverKinds = <String, String>{};
     try {
       transceivers = await connection.getTransceivers();
       // Only what the connection really has, and only senders with a
@@ -728,14 +749,25 @@ final class MediaE2eeChannel {
       // audio call no track). A sender is sealed as soon as it gets one:
       // the call runs this again right after (CallMediaSession), before
       // the frames the other side would not open add up.
-      senders = <String>{
-        for (final RTCRtpSender s in await connection.getSenders())
-          if (s.track != null) s.senderId,
-      };
-      receivers = <String>{
-        for (final RTCRtpReceiver r in await connection.getReceivers())
-          r.receiverId,
-      };
+      senders = <String>{};
+      for (final RTCRtpSender s in await connection.getSenders()) {
+        final MediaStreamTrack? track = s.track;
+        if (track != null) {
+          senders.add(s.senderId);
+          final String? kind = track.kind;
+          if (kind != null) {
+            senderKinds[s.senderId] = kind;
+          }
+        }
+      }
+      receivers = <String>{};
+      for (final RTCRtpReceiver r in await connection.getReceivers()) {
+        receivers.add(r.receiverId);
+        final String? kind = r.track?.kind;
+        if (kind != null) {
+          receiverKinds[r.receiverId] = kind;
+        }
+      }
     } on Object catch (error) {
       logZenWarning('Reading transceivers for media keys failed: $error');
       return;
@@ -747,10 +779,20 @@ final class MediaE2eeChannel {
       final RTCRtpSender sender = transceiver.sender;
       if (senders.contains(sender.senderId) &&
           _attachedSenders.add(sender.senderId)) {
+        final String kind = _kindOf(sender.track, senderKinds[sender.senderId]);
         try {
-          await link.addSender(await _ring.attachSender(sender, localId));
+          await link.addSender(
+            await _ring.attachSender(
+              sender,
+              localId,
+              onState: (String state) => _noteState('$kind sender', state),
+            ),
+          );
+          _count(_sealedSenders, kind);
+          logZenMessage('Call media keys: $kind sender sealed');
         } on Object catch (error, stackTrace) {
           logZenError('Sealing a media sender failed', error, stackTrace);
+          logZenWarning('Call media keys: $kind sender NOT sealed');
           if (!_plainSender) {
             _plainSender = true;
             onChanged?.call();
@@ -763,17 +805,65 @@ final class MediaE2eeChannel {
       }
       if (receivers.contains(receiver.receiverId) &&
           _attachedReceivers.add(receiver.receiverId)) {
+        final String kind = _kindOf(
+          receiver.track,
+          receiverKinds[receiver.receiverId],
+        );
         try {
           await link.addReceiver(
             await _ring.attachReceiver(
               receiver,
               remoteId,
               onMissingKey: () => unawaited(link.missingKey()),
+              onState: (String state) => _noteState('$kind receiver', state),
             ),
           );
+          _count(_openedReceivers, kind);
+          logZenMessage('Call media keys: $kind receiver opened');
         } on Object catch (error, stackTrace) {
           logZenError('Opening a media receiver failed', error, stackTrace);
+          logZenWarning('Call media keys: $kind receiver NOT opened');
         }
+      }
+    }
+  }
+
+  /// The kind of a sender's or receiver's track: from the transceiver's
+  /// own copy, else from the list the connection gave ([fallback]).
+  static String _kindOf(MediaStreamTrack? track, String? fallback) {
+    final String? kind = track?.kind ?? fallback;
+    return kind == null || kind.isEmpty ? 'unknown' : kind;
+  }
+
+  static void _count(Map<String, int> counts, String kind) {
+    counts[kind] = (counts[kind] ?? 0) + 1;
+  }
+
+  final Map<String, int> _sealedSenders = <String, int>{};
+  final Map<String, int> _openedReceivers = <String, int>{};
+  final Set<String> _statesSeen = <String>{};
+  final Map<String, String> _lastStates = <String, String>{};
+
+  /// Senders sealed so far, by kind (`audio`, `video`).
+  Map<String, int> get sealedSenders => Map<String, int>.of(_sealedSenders);
+
+  /// Receivers opened so far, by kind.
+  Map<String, int> get openedReceivers => Map<String, int>.of(_openedReceivers);
+
+  /// The last state each transformer reported, by role (`video receiver`).
+  Map<String, String> get cryptorStates => Map<String, String>.of(_lastStates);
+
+  /// One line in the technical log for each state a sender or receiver of
+  /// a kind reaches the first time: a picture that never comes says here
+  /// whether its frames did not open (`decryptionFailed`) or had no key.
+  void _noteState(String role, String state) {
+    _lastStates[role] = state;
+    if (_statesSeen.add('$role|$state')) {
+      final String line = 'Call media keys: $role $state';
+      if (state == 'ok' || state == 'new' || state == 'keyRatcheted') {
+        logZenMessage(line);
+      } else {
+        logZenWarning(line);
       }
     }
   }
@@ -861,21 +951,28 @@ final class _WebRtcKeyRing implements MediaKeyRing {
   @override
   Future<MediaFrameCryptor> attachSender(
     RTCRtpSender sender,
-    String participantId,
-  ) async => _WebRtcFrameCryptor(
-    await frameCryptorFactory.createFrameCryptorForRtpSender(
-      participantId: participantId,
-      sender: sender,
-      algorithm: Algorithm.kAesGcm,
-      keyProvider: _provider,
-    ),
-  );
+    String participantId, {
+    MediaCryptorStateListener? onState,
+  }) async {
+    final FrameCryptor cryptor = await frameCryptorFactory
+        .createFrameCryptorForRtpSender(
+          participantId: participantId,
+          sender: sender,
+          algorithm: Algorithm.kAesGcm,
+          keyProvider: _provider,
+        );
+    cryptor.onFrameCryptorStateChanged = (String _, FrameCryptorState state) {
+      onState?.call(mediaCryptorStateName(state));
+    };
+    return _WebRtcFrameCryptor(cryptor);
+  }
 
   @override
   Future<MediaFrameCryptor> attachReceiver(
     RTCRtpReceiver receiver,
     String participantId, {
     void Function()? onMissingKey,
+    MediaCryptorStateListener? onState,
   }) async {
     final FrameCryptor cryptor = await frameCryptorFactory
         .createFrameCryptorForRtpReceiver(
@@ -885,7 +982,13 @@ final class _WebRtcKeyRing implements MediaKeyRing {
           keyProvider: _provider,
         );
     cryptor.onFrameCryptorStateChanged = (String _, FrameCryptorState state) {
-      if (state == FrameCryptorState.FrameCryptorStateMissingKey) {
+      onState?.call(mediaCryptorStateName(state));
+      if (state == FrameCryptorState.FrameCryptorStateMissingKey ||
+          state == FrameCryptorState.FrameCryptorStateDecryptionFailed) {
+        // A frame sealed with a key this side does not hold where the
+        // frame says (a rotation notice lost or late): more of the
+        // sender's chain goes in. Reported on a change only, and the ring
+        // holds at most a ring's worth ahead, so this cannot run away.
         onMissingKey?.call();
       }
     };

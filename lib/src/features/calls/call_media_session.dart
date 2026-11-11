@@ -14,6 +14,7 @@ import 'package:zen/src/features/calls/call_recorder.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
+import 'package:zen/src/features/calls/call_video_trace.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
@@ -866,6 +867,11 @@ final class WebRtcCallMediaSessionController
   int? _relayPort;
   Completer<void>? _relayMetadataReady;
   Timer? _disconnectGraceTimer;
+
+  /// Pending looks at the media's statistics ([_scheduleCallStats]) and
+  /// how many this call has written.
+  final List<Timer> _statsTimers = <Timer>[];
+  int _statsTaken = 0;
   RTCPeerConnectionState? _lastConnectionState;
   Map<String, dynamic>? _lastSentOfferDescription;
   Map<String, dynamic>? _lastSentAnswerDescription;
@@ -1192,6 +1198,10 @@ final class WebRtcCallMediaSessionController
       );
       _syncRemoteRenderer();
       _notify();
+      if (isConnected) {
+        // Their camera or screen on or off: what it changed here.
+        _scheduleCallStats('offer');
+      }
     } catch (error) {
       _emitError(error);
       rethrow;
@@ -1217,6 +1227,10 @@ final class WebRtcCallMediaSessionController
       _awaitingRemoteAnswer = false;
       _syncRemoteRenderer();
       _notify();
+      if (isConnected) {
+        // An answer to a camera or screen offer: what it changed.
+        _scheduleCallStats('answer');
+      }
       final CallInviteKind? pending = _pendingRenegotiationKind;
       _pendingRenegotiationKind = null;
       if (pending != null) {
@@ -1907,6 +1921,10 @@ final class WebRtcCallMediaSessionController
         return;
       }
       final MediaStreamTrack track = event.track;
+      logZenMessage(
+        'Call remote track: ${track.kind ?? '?'}, '
+        '${event.streams.length} stream(s)',
+      );
       if (track.kind == 'video') {
         await _ensureRenderers();
         if (_isRemoteScreenTrack(event)) {
@@ -1995,6 +2013,14 @@ final class WebRtcCallMediaSessionController
       }
 
       _syncRemoteRenderer();
+      if (track.kind == 'video') {
+        final MediaStream? shown = _remoteRenderer.srcObject;
+        logZenMessage(
+          'Call video: remote track handed to the renderer: '
+          '${_renderersInitialized && _remoteRenderer.textureId != null ? 'renderer ready' : 'NO renderer'}, '
+          '${shown == null ? 'NO stream bound' : '${shown.getVideoTracks().length} video track(s) bound'}',
+        );
+      }
       _notify();
     };
     connection.onAddStream = (MediaStream stream) {
@@ -2043,6 +2069,7 @@ final class WebRtcCallMediaSessionController
             activeCallId,
             CallMediaSessionLifecycle.active,
           );
+          _scheduleCallStats('connected');
           return;
         case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
           _disconnectGraceTimer?.cancel();
@@ -2206,6 +2233,17 @@ final class WebRtcCallMediaSessionController
       await _localRenderer.initialize();
       await _remoteRenderer.initialize();
       await _remoteScreenRenderer.initialize();
+      // The last step of a picture: a frame the platform drew. With these
+      // two lines missing from the log while the statistics count frames
+      // decoded, the picture is lost between the decoder and the screen.
+      _remoteRenderer.onFirstFrameRendered = () =>
+          logZenMessage('Call video: first remote frame on the screen');
+      _remoteRenderer.onResize = () => logZenMessage(
+        'Call video: remote picture '
+        '${_remoteRenderer.videoWidth}x${_remoteRenderer.videoHeight}',
+      );
+      _localRenderer.onFirstFrameRendered = () =>
+          logZenMessage('Call video: first camera frame in the preview');
       _renderersInitialized = true;
       _syncRemoteRenderer();
     } catch (error, stackTrace) {
@@ -2420,6 +2458,9 @@ final class WebRtcCallMediaSessionController
     // description that lets media flow on it.
     await _e2ee?.attachAll(connection);
     await connection.setLocalDescription(desc);
+    logZenMessage(
+      'Call SDP local ${desc.type}: ${describeCallSdp(desc.sdp ?? '')}',
+    );
     await _tuneCameraSenders(connection);
     _captureRelayMetadata(desc.sdp);
     _screenMid ??= screenShareSlotInSdp(desc.sdp ?? '')?.mid;
@@ -2435,28 +2476,152 @@ final class WebRtcCallMediaSessionController
     if (_e2ee == null) {
       return;
     }
+    final List<RTCRtpSender> senders;
     try {
-      for (final RTCRtpSender sender in await connection.getSenders()) {
-        if (sender.track?.kind != 'video') {
-          continue;
-        }
-        final RTCRtpParameters parameters = sender.parameters;
-        final List<RTCRtpEncoding> encodings =
-            parameters.encodings ?? const <RTCRtpEncoding>[];
-        if (encodings.isEmpty) {
-          continue;
-        }
+      senders = await connection.getSenders();
+    } on Object catch (error) {
+      logZenWarning('Asking for a fresh key frame failed: $error');
+      return;
+    }
+    for (final RTCRtpSender sender in senders) {
+      if (sender.track?.kind != 'video') {
+        continue;
+      }
+      final RTCRtpParameters parameters = sender.parameters;
+      final List<RTCRtpEncoding> encodings =
+          parameters.encodings ?? const <RTCRtpEncoding>[];
+      if (encodings.isEmpty) {
+        continue;
+      }
+      try {
         for (final RTCRtpEncoding e in encodings) {
           e.active = false;
         }
         await sender.setParameters(parameters);
-        for (final RTCRtpEncoding e in encodings) {
-          e.active = true;
-        }
-        await sender.setParameters(parameters);
+      } on Object catch (error) {
+        logZenWarning('Asking for a fresh key frame failed: $error');
       }
+      // Whatever the step before did, the sender ends up sending: a
+      // camera left switched off here sends nothing for the rest of the
+      // call, and nothing else would ever switch it on again.
+      await _activateSender(sender, parameters);
+    }
+  }
+
+  /// Sets every encoding of [sender] active, once more when the platform
+  /// refuses (it answers false rather than throwing), and says so in the
+  /// technical log when it never takes.
+  Future<void> _activateSender(
+    RTCRtpSender sender,
+    RTCRtpParameters parameters,
+  ) async {
+    for (final RTCRtpEncoding e in parameters.encodings ?? <RTCRtpEncoding>[]) {
+      e.active = true;
+    }
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (await sender.setParameters(parameters)) {
+          return;
+        }
+      } on Object catch (error) {
+        logZenWarning('Switching the camera sender on failed: $error');
+      }
+    }
+    logZenWarning('Call video: the camera sender stays switched off');
+  }
+
+  /// When the statistics of a call's media go into the technical log, after
+  /// the media connect and after each offer or answer of a running call.
+  static const List<Duration> _callStatsDelays = <Duration>[
+    Duration(seconds: 4),
+    Duration(seconds: 15),
+  ];
+
+  /// At most this many looks a call, so a long call with cameras switched
+  /// often does not fill the log.
+  static const int _callStatsPerCall = 10;
+
+  void _scheduleCallStats(String reason) {
+    final RTCPeerConnection? connection = _peerConnection;
+    final String? callId = _activeCallId;
+    if (connection == null || callId == null) {
+      return;
+    }
+    _statsTimers.removeWhere((Timer timer) => !timer.isActive);
+    for (final Duration delay in _callStatsDelays) {
+      _statsTimers.add(
+        Timer(delay, () {
+          if (!identical(_peerConnection, connection) ||
+              _activeCallId != callId) {
+            return;
+          }
+          unawaitedLogged(
+            _logCallStats(connection, '$reason +${delay.inSeconds} s'),
+            context: 'Reading the call statistics failed',
+          );
+        }),
+      );
+    }
+  }
+
+  /// One look at the media: the transceivers (kind, direction asked and
+  /// negotiated), what went out and came in for audio and video
+  /// ([describeCallStats]), the frame keys on each sender and receiver,
+  /// and what the screen has. Kinds, counts, codec names and states only.
+  Future<void> _logCallStats(RTCPeerConnection connection, String label) async {
+    if (_statsTaken >= _callStatsPerCall) {
+      return;
+    }
+    _statsTaken += 1;
+    final List<String> lines = <String>[];
+    try {
+      final List<String> slots = <String>[];
+      for (final RTCRtpTransceiver t in await connection.getTransceivers()) {
+        String direction = '?';
+        String current = '-';
+        try {
+          direction = (await t.getDirection()).name;
+          current = (await t.getCurrentDirection())?.name ?? '-';
+        } on Object {
+          // Read what can be read.
+        }
+        final String kind =
+            t.receiver.track?.kind ?? t.sender.track?.kind ?? '?';
+        slots.add(
+          '${t.mid.isEmpty ? '?' : t.mid} $kind $direction/$current'
+          '${t.sender.track == null ? ' no track' : ' track'}',
+        );
+      }
+      lines.add('transceivers ${slots.join(', ')}');
     } on Object catch (error) {
-      logZenWarning('Asking for a fresh key frame failed: $error');
+      lines.add('transceivers unreadable ($error)');
+    }
+    try {
+      lines.addAll(describeCallStats(await connection.getStats()));
+    } on Object catch (error) {
+      lines.add('statistics unreadable ($error)');
+    }
+    final MediaE2eeChannel? e2ee = _e2ee;
+    String counts(Map<String, int> byKind) => byKind.isEmpty
+        ? 'none'
+        : byKind.entries
+              .map((MapEntry<String, int> e) => '${e.key} ${e.value}')
+              .join(' ');
+    lines.add(
+      e2ee == null
+          ? 'frame keys none (${_mediaSecurity.name})'
+          : 'frame keys ${_mediaSecurity.name}, sealed senders '
+                '${counts(e2ee.sealedSenders)}, opened receivers '
+                '${counts(e2ee.openedReceivers)}'
+                '${e2ee.cryptorStates.isEmpty ? '' : ', states ${e2ee.cryptorStates.entries.map((MapEntry<String, String> e) => '${e.key} ${e.value}').join(', ')}'}',
+    );
+    lines.add(
+      'screen: their video ${hasRemoteVideo ? 'yes' : 'no'}, '
+      '${_remoteRenderer.srcObject?.getVideoTracks().length ?? 0} bound, '
+      'own camera tracks ${_localStream?.getVideoTracks().length ?? 0}',
+    );
+    for (final String line in lines) {
+      logZenMessage('Call stats $label: $line');
     }
   }
 
@@ -2485,7 +2650,9 @@ final class WebRtcCallMediaSessionController
         }
         parameters.degradationPreference =
             RTCDegradationPreference.MAINTAIN_FRAMERATE;
-        await sender.setParameters(parameters);
+        if (!await sender.setParameters(parameters)) {
+          logZenWarning('Call video: the camera sender refused its cap');
+        }
       }
     } on Object catch (error) {
       logZenWarning('Tuning the call camera failed: $error');
@@ -2517,6 +2684,12 @@ final class WebRtcCallMediaSessionController
       relayPort: _relayPort ?? 0,
       apply: (String value, String kind) =>
           connection.setRemoteDescription(RTCSessionDescription(value, kind)),
+    );
+    // What the other side offers or answers, as kinds, directions and
+    // codecs (never the SDP itself, which carries its addresses).
+    logZenMessage(
+      'Call SDP remote ${original.type}: '
+      '${describeCallSdp(original.sdp ?? '')}',
     );
     await _e2ee?.attachAll(connection);
     _remoteDescriptionSet = true;
@@ -2590,6 +2763,11 @@ final class WebRtcCallMediaSessionController
     await _disposeStream(screen);
     _disconnectGraceTimer?.cancel();
     _disconnectGraceTimer = null;
+    for (final Timer timer in _statsTimers) {
+      timer.cancel();
+    }
+    _statsTimers.clear();
+    _statsTaken = 0;
     final MediaE2eeChannel? e2ee = _e2ee;
     _e2ee = null;
     _e2eeAnswer = null;
