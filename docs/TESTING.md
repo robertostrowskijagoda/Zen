@@ -829,9 +829,12 @@ The core files of `tool/mutation_targets.json` changed in one small place
 at a time, as a slip would change them (`==`/`!=`, `<`/`>=`, `&&`/`||`,
 `true`/`false`, a `!` dropped, `+ 1`/`- 1`), each change run against the
 file's tests; a change no test notices is named in the summary, a line to
-pin down. On every pull request to `main` (its own runner, about 20
-minutes, 10 changes per file), weekly and by hand; each run tries other changes (the seed is the
-run's number). A change that makes a test hang (after `--timeout`, 240 s)
+pin down. On every pull request to `main` (six runners beside CI, about
+15 files and under half an hour each, 10 changes per file), weekly and by
+hand; each run tries other changes (the seed is the run's number). The
+list grows with every release: `tool/ci/test_ci_checks.py` fails when a
+runner would get more than 20 files, and the workflow's matrix then gets
+another runner. A change that makes a test hang (after `--timeout`, 240 s)
 or eat memory (a `flutter_tester` past 2 GB, as an endless loop that writes
 on every turn does within seconds) counts as noticed; the test is stopped
 before it takes the machine down. Locally:
