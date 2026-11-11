@@ -68,16 +68,25 @@ void main() {
     ZenStartTrace.debugReset();
   });
 
-  test(
-    'R5-#8: the app starts after an update on the data the old version left',
-    () async {
-      final List<Directory> fixtures =
-          Directory(
-              'test/fixtures/upgrade',
-            ).listSync().whereType<Directory>().toList()
-            ..sort((Directory a, Directory b) => a.path.compareTo(b.path));
-      expect(fixtures, isNotEmpty);
-      for (final Directory fixture in fixtures) {
+  final List<Directory> fixtures =
+      Directory(
+          'test/fixtures/upgrade',
+        ).listSync().whereType<Directory>().toList()
+        ..sort((Directory a, Directory b) => a.path.compareTo(b.path));
+
+  test('R5-#8: there is data of old versions to start on', () {
+    expect(fixtures, isNotEmpty);
+  });
+
+  // A test for each version: every release adds one, and all of them in
+  // one test no longer fit in a test's 30 seconds on a busy computer.
+  for (final Directory fixture in fixtures) {
+    final String version = fixture.uri.pathSegments.lastWhere(
+      (String segment) => segment.isNotEmpty,
+    );
+    test(
+      'R5-#8: the app starts after an update on the data Zen $version left',
+      () async {
         final Map<String, dynamic> manifest =
             jsonDecode(File('${fixture.path}/fixture.json').readAsStringSync())
                 as Map<String, dynamic>;
@@ -86,7 +95,6 @@ void main() {
           'zen-r5-08-upgrade-',
         );
         addTearDown(() => deleteQuietly(folder));
-        ZenStartTrace.debugReset();
         final HarnessStart start = await startZenOn(
           folder,
           secrets: MapSecrets(readSecrets(fixture)),
@@ -97,17 +105,16 @@ void main() {
             manifest['password'] as String,
           ),
           isTrue,
-          reason: fixture.path,
         );
         final (ProviderContainer container, SocialHubState hub) =
             await hydrateHub(start.result);
         container.dispose();
-        expect(hub.snapshotUnreadable, isFalse, reason: fixture.path);
-        expect(hub.friends, isNotEmpty, reason: fixture.path);
-      }
-    },
-    skip: _fixturesWrittenElsewhere,
-  );
+        expect(hub.snapshotUnreadable, isFalse);
+        expect(hub.friends, isNotEmpty);
+      },
+      skip: _fixturesWrittenElsewhere,
+    );
+  }
 
   test('R5-#8: secure storage that does not answer after the update never '
       'holds the start on the logo', () {
