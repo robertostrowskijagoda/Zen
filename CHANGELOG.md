@@ -61,6 +61,7 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 - **Documents**: the security model, the protocol, the user guide (a new page on Hasła; recovery and both tables of what comes back rewritten) and the README say what this version does, with the narrower promise on hidden accounts.
 - **Release**: preparing a release runs the tests of the CI checks and the link check, so a test missing from the docs job's list stops the work before the release and not its CI; the upgrade fixture of 1.16.4 is tested at start.
 - **Tests**: each change above first as a test that failed where it could; simulations of locked friends' presence rounds, of what a phone shows at open, of two weeks of a small circle's mailboxes, and a model of Android's alarm windows for the shared wake. Mutation targets: the password manager, the call video codecs and trace, the contacts copy in parts, the platform picture decoder, the locked receiver, the wake beat, the relay engine, the account state sync, the copy with friends, the recovery service and key pieces, the pyramid treasury, state and court, and the other files this release changed.
+- **Built with Go 1.27.4**: the security release of Go that came out on the day of this release; it fixes flaws in Go's own libraries (reported by govulncheck as reachable from the network bridge), which 1.27.3 still had.
 
 ## 1.16.4 — 10.11.2026
 

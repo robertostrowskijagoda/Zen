@@ -8,7 +8,7 @@ it. The full licence texts: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md),
 
 Versions: Flutter **3.47.9** (Dart 3.13; `pubspec.yaml` asks for Dart 3.11.4 or newer), Go from
 [`native/yggdrasil_bridge/go.mod`](../native/yggdrasil_bridge/go.mod)
-(language **1.26**, built with the `toolchain` **go1.27.3**), Yggdrasil
+(language **1.26**, built with the `toolchain` **go1.27.4**), Yggdrasil
 **0.5.15**. Exact package versions are in `pubspec.lock` (every build uses
 it with `--enforce-lockfile`) and `go.sum`. The prebuilt libwebrtc of
 `flutter_webrtc` 1.6.2+hotfix.4 (`m150.7871.03` on Windows and Linux) is

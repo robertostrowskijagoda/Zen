@@ -618,7 +618,7 @@ SideStore does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Ma
   `release.dart prepare` refuses while native pins are missing
   (`--allow-unpinned-native` only for a test release). Tests:
   `tool/ci/test_check_webrtc_sdk.py`.
-- **Go.** `go.mod` has a `toolchain` line (go1.27.3, the latest 1.27
+- **Go.** `go.mod` has a `toolchain` line (go1.27.4, the latest 1.27
   security fix); `actions/setup-go` with `go-version-file` takes it, and
   `ios.yml` reads it too. Dependabot does not raise `toolchain`: bump it by
   hand with every Go 1.27.x release. The CI job `govulncheck`
