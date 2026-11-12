@@ -1546,6 +1546,42 @@ void main() {
       expect(await engine.takeDeliveryReports(), isEmpty);
     });
 
+    test('a message to someone without mailboxes is reported as direct-only '
+        'once they would have had a copy, and still arrives', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await mesh.nodes[bob]!.engine.setManualRelays(<String>[]);
+      await mesh.settle();
+      await mesh.goOffline(bob);
+      await engine.submit(bob, _text('tylko wprost'));
+      await mesh.advance(const Duration(seconds: 1));
+      expect(await engine.takeDeliveryReports(), isEmpty);
+
+      await mesh.advance(const Duration(seconds: 5));
+      final List<RelayDeliveryReport> reports = await engine
+          .takeDeliveryReports();
+      expect(reports, hasLength(1));
+      expect(reports.single.status, RelayDeliveryStatus.directOnly);
+      expect(reports.single.messageId, 'm-tylko wprost');
+      await mesh.advance(const Duration(minutes: 1));
+      expect(await engine.takeDeliveryReports(), isEmpty, reason: 'said once');
+
+      await mesh.goOnline(bob);
+      await mesh.advance(const Duration(minutes: 3));
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['tylko wprost']);
+      expect((await mesh.nodes[alice]!.state()).outbox, isEmpty);
+    });
+
+    test('a message to someone with mailboxes is not reported as '
+        'direct-only', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await mesh.goOffline(bob);
+      await engine.submit(bob, _text('do skrzynek'));
+      await mesh.advance(const Duration(minutes: 1));
+      expect(await engine.takeDeliveryReports(), isEmpty);
+    });
+
     test('a message too large for one envelope waits in the mailboxes in '
         'parts and arrives whole, once', () async {
       final _SimMesh mesh = await _meshWithRelays();

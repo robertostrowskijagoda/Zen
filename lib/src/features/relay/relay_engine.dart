@@ -660,13 +660,18 @@ const Set<String> kFirstContactTypes = <String>{
 /// The kind of [payload] when it is one where only the newest to a device
 /// matters, `null` otherwise. Each of these carries the whole of what it
 /// says (the sender's profile, friend list, nearby keys, status, "open to
-/// meet", the newest message read in a conversation, the receipts owed to
-/// a sender), so an older one still on its way says nothing the newer one
-/// does not: it is dropped from the queue when a newer one is queued, and
-/// the recipient's mailboxes drop their copy when the newer one is handed
-/// in ([RelayEnvelope.replace]). Without this a friend who was away for
-/// two weeks had one of each per day waiting for them, here and in every
+/// meet", the newest message read in a conversation), so an older one
+/// still on its way says nothing the newer one does not: it is dropped
+/// from the queue when a newer one is queued, and the recipient's mailboxes
+/// drop their copy when the newer one is handed in
+/// ([RelayEnvelope.replace]). Without this a friend who was away for two
+/// weeks had one of each per day waiting for them, here and in every
 /// mailbox of theirs.
+///
+/// Not a mailbox receipt ([kRelayReceiptType]): a newer one names only the
+/// ids taken since, and one that already left the queue for a mailbox is
+/// not in it, so replacing it there lost the older ids (see
+/// `RelayEngine._oweReceipt`, which merges the ones still queued).
 String? relayReplaceKeyOf(Map<String, dynamic> payload) {
   final Object? type = payload['type'];
   switch (type) {
@@ -677,7 +682,6 @@ String? relayReplaceKeyOf(Map<String, dynamic> payload) {
     case 'graph_open':
     // A friend's terms at this person's gates: each send carries them all.
     case 'intro_gate':
-    case kRelayReceiptType:
     // The caller's newest missed call: what the callee acts on is that this
     // friend tried to reach them and when last (one call back answers every
     // ring before it), so one waits per caller, however often they rang
@@ -695,33 +699,58 @@ String? relayReplaceKeyOf(Map<String, dynamic> payload) {
   return null;
 }
 
-/// Whether [payload] is something a person sent to a person: a message,
-/// an attachment, an invitation, a call notice ([kRelayNoticeTypes]), a
-/// missed call, a reaction, edit or deletion of a message, the disappearing
-/// timer, or the sender's profile (only the newest waits, and nothing sends
-/// it again by itself). A friend's device taken for gone still gets these, as any
-/// device that is away does: it may be a laptop opened every other week,
-/// and the copy between an account's own devices is a single datagram.
-/// Everything else is the app talking to itself (posts pushed ahead of the
-/// ledger's sync, "open to meet", friend lists, nearby keys, statuses,
-/// receipts, pyramid records), and each of those catches up when the
-/// device is back: the ledger syncs, the hello digests ask for the friend
-/// list, keys and status again, "open to meet" goes daily.
-bool relayIsPersonalPayload(Map<String, dynamic> payload) {
-  final Object? type = payload['type'];
-  return kRelayNoticeTypes.contains(type) ||
-      _personalPayloadTypes.contains(type) ||
-      (type == kBlobManifestType &&
-          payload['k'] == RelayBlobKind.attachment.wire);
-}
+/// Whether [payload] is something a person did that nothing brings to the
+/// recipient again: everything but the kinds the app sends by itself that
+/// catch up by themselves or are worth nothing late
+/// ([_automaticPayloadTypes]). A friend's device taken for gone still gets
+/// these, as any device that is away does: it may be a laptop opened every
+/// other week, the copy between an account's own devices is a single
+/// datagram, and a group leave, a friend removal or a group's new member
+/// missed there stays missed. A kind added later is personal until it is
+/// put on that list, so it is never lost by default.
+///
+/// The manifest of a payload blob takes the kind of the payload it carries,
+/// which only the sender's queue knows (`RelayEngine._isPersonal`); on its
+/// own it counts as personal.
+bool relayIsPersonalPayload(Map<String, dynamic> payload) =>
+    !_automaticPayloadTypes.contains(payload['type']);
 
-const Set<String> _personalPayloadTypes = <String>{
-  'msg_react',
-  'msg_edit',
-  'msg_delete',
-  'disappear_timer',
-  'profile_update',
-  'call_missed',
+/// What the app sends by itself and a device taken for gone does without
+/// ([relayIsPersonalPayload]): each comes again, or is covered by something
+/// that does, once the device is back, or is worth nothing a week late.
+const Set<String> _automaticPayloadTypes = <String>{
+  // The hello digests (`MeetService.helloFor`) carry what each friend
+  // should hold of the sender's friend list, nearby keys and status; a
+  // device that holds something else asks for it again (`meet_req`).
+  'friend_list',
+  'nearby_key',
+  'intent',
+  // "Open to meet" goes to every friend again each day.
+  'graph_open',
+  // Posts, comments and likes come with the ledger's own sync; a mention
+  // older than three days is never told of (`kMentionNoticeMaxAge`), and
+  // its post or comment comes with the sync too.
+  'lg_push',
+  'lg_mention',
+  // A device's own messages are settled by its own queue (the next direct
+  // try is acknowledged as a copy already taken); the read receipt of a
+  // conversation names the newest message read and covers every earlier
+  // one, so the next one brings the device's view up to date.
+  'message_ack',
+  'message_read',
+  // The relay layer's own receipt to the device that sent the mail: it is
+  // retrying that mail itself and gets `rly_ack` for it directly.
+  kRelayReceiptType,
+  // Pyramid records come with the pyramid's own sync (`pyr_hello`), and the
+  // posts and verdicts passed on to friends outside it with the catch-up
+  // on that hello.
+  'pyr_rec',
+  'pyr_recs',
+  'pyr_nat',
+  // The dating lantern and key go to every friend again each week
+  // (`kDatingPublishEvery`).
+  'date_lantern',
+  'date_key',
 };
 
 /// Payload kinds that are worth less after a while than the general
@@ -1245,7 +1274,12 @@ final class RelayEngine {
         expiresAtMillis: now + config.messageTtl.inMilliseconds,
         relayable: true,
       );
-      final RelayEnvelope envelope = await _seal(identity, recipientKey, entry);
+      final RelayEnvelope envelope = await _seal(
+        state,
+        identity,
+        recipientKey,
+        entry,
+      );
       final Map<String, dynamic> wire = <String, dynamic>{
         ...envelope.toJson(),
         if (info.depositToken != null) 'tk': info.depositToken,
@@ -1272,7 +1306,7 @@ final class RelayEngine {
     final String rid = (payload[kReliableIdKey] as String?) ?? _newReliableId();
     if (state.goneDevices.containsKey(to) &&
         payload['type'] != kRelayPartType &&
-        !relayIsPersonalPayload(payload)) {
+        !_isPersonal(state, payload)) {
       // A friend's device taken for gone gets only what a person sent (see
       // [relayIsPersonalPayload]): the rest would wait two weeks here and
       // in its mailboxes, and catches up by itself once it is back.
@@ -1330,6 +1364,21 @@ final class RelayEngine {
 
   static bool _isPart(RelayOutboxEntry entry) =>
       entry.payload['type'] == kRelayPartType;
+
+  /// [relayIsPersonalPayload], with the manifest of a payload blob taking
+  /// the kind of the payload it carries (its `ref`, still queued here): a
+  /// voice message, inline photo or long text goes to the mailboxes as such
+  /// a blob, and must reach a device taken for gone like any message. One
+  /// whose payload is not queued any more counts as personal.
+  static bool _isPersonal(RelayState state, Map<String, dynamic> payload) {
+    if (payload['type'] == kBlobManifestType &&
+        payload['k'] == RelayBlobKind.payload.wire) {
+      final Object? ref = payload['ref'];
+      final RelayOutboxEntry? whole = ref is String ? state.outbox[ref] : null;
+      return whole == null || relayIsPersonalPayload(whole.payload);
+    }
+    return relayIsPersonalPayload(payload);
+  }
 
   /// How long a payload of [type] is kept for delivery at most.
   int _lifeOf(Object? type) => min(
@@ -1601,6 +1650,7 @@ final class RelayEngine {
           continue;
         }
         final Map<String, dynamic> envelope = await _sealedEnvelope(
+          state,
           identity,
           keys,
           entry,
@@ -2499,9 +2549,8 @@ final class RelayEngine {
   /// answer: their `rly_ack`s are likely lost. One receipt
   /// ([kRelayReceiptType]) carries them to [sender]'s mailboxes; it is
   /// done as soon as one mailbox holds it (or [sender] confirms it), and a
-  /// receipt still waiting takes the new ids in (it replaces the older one
-  /// here and in the mailboxes). Only for a sender whose key and mailboxes
-  /// are known.
+  /// receipt still waiting here takes the new ids in (and goes instead of
+  /// the older one). Only for a sender whose key and mailboxes are known.
   Future<void> _oweReceipt(
     RelayState state,
     String sender,
@@ -2516,11 +2565,15 @@ final class RelayEngine {
         !_isContact(sender)) {
       return;
     }
+    // A receipt still queued here is taken into the new one. One that left
+    // the queue is with a mailbox already and stays there: the new one only
+    // adds (a receipt replaces nothing, see [relayReplaceKeyOf]).
     final List<String> all = <String>[];
     for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
       if (entry.recipient == sender &&
           entry.payload['type'] == kRelayReceiptType) {
         all.addAll(_stringList(entry.payload['ids']));
+        await _dropEntry(state, entry);
       }
     }
     for (final String id in ids) {
@@ -2945,6 +2998,15 @@ final class RelayEngine {
   /// replaces. Only the sender itself replaces ([fromSender]): a fellow
   /// mailbox catching up only ever adds, so it cannot make this one drop
   /// anybody's mail.
+  ///
+  /// The times are the sender's clock. The sender hands in only the newest
+  /// of a kind (an older one leaves its queue when a newer one comes), so
+  /// what it hands in now replaces one held that claims to be later by
+  /// more than [_replaceClockSlack]: its clock went back (set by hand,
+  /// corrected after running ahead), and such a mailbox otherwise refused
+  /// every newer profile or list until the clock passed the old time again.
+  /// Within the slack the later one stays: two hand-ins a moment apart may
+  /// arrive the other way round.
   static List<String>? _replacedBy(
     Map<String, Map<String, dynamic>> held,
     RelayEnvelope envelope, {
@@ -2964,13 +3026,21 @@ final class RelayEngine {
         continue;
       }
       final int created = (e.value['c'] as num?)?.toInt() ?? 0;
-      if (created >= envelope.createdAtMillis) {
+      if (created >= envelope.createdAtMillis &&
+          !(fromSender &&
+              created - envelope.createdAtMillis >
+                  _replaceClockSlack.inMilliseconds)) {
         return null;
       }
       older.add(e.key);
     }
     return fromSender ? older : const <String>[];
   }
+
+  /// How much later a held envelope may claim to be than the one its
+  /// sender hands in now and still be taken for the newer (see
+  /// [_replacedBy]).
+  static const Duration _replaceClockSlack = Duration(minutes: 1);
 
   /// Whether [token] proves that [recipient] announced itself to [sender]
   /// (only checkable while the recipient has us as one of its relays).
@@ -4018,7 +4088,20 @@ final class RelayEngine {
       }
       final RelayPeerInfo? info = state.peers[entry.recipient];
       final RelayPublicKeys? recipientKey = info?.keys;
-      if (info == null || recipientKey == null) {
+      if (info == null ||
+          recipientKey == null ||
+          !_hasMailbox(state, info, entry.recipient)) {
+        // No mailbox of the recipient's is known (or not its key): it waits
+        // for both devices to be online together, and the chat should say
+        // so, as for one too large for the mailboxes, unless a copy for
+        // another device of the same person goes to its mailboxes (looked
+        // at once).
+        if (entry.payload['type'] == _chatMessageType &&
+            _reportedDirectOnly.add(entry.rid) &&
+            !_copyForMailboxes(state, entry) &&
+            _report(state, entry, RelayDeliveryStatus.directOnly, now)) {
+          changed = true;
+        }
         continue;
       }
       if (info.relays.contains(_self) &&
@@ -4034,7 +4117,7 @@ final class RelayEngine {
           entry.recipient,
           () => <String, Map<String, dynamic>>{},
         )[entry.rid] = <String, dynamic>{
-          ...await _sealedEnvelope(identity, recipientKey, entry),
+          ...await _sealedEnvelope(state, identity, recipientKey, entry),
           if (info.depositToken != null) 'tk': info.depositToken,
           'hv': true,
           'ha': now,
@@ -4069,7 +4152,7 @@ final class RelayEngine {
         continue;
       }
       final Map<String, dynamic> wire = <String, dynamic>{
-        ...await _sealedEnvelope(identity, recipientKey, entry),
+        ...await _sealedEnvelope(state, identity, recipientKey, entry),
         // Lets relays that do not know us see that the recipient does.
         if (info.depositToken != null) 'tk': info.depositToken,
       };
@@ -4090,6 +4173,35 @@ final class RelayEngine {
       changed = true;
     }
     return changed;
+  }
+
+  /// Whether a mailbox of [recipient] ([info]) can take a copy: another
+  /// device it chose, or this one while it holds mail for it.
+  bool _hasMailbox(RelayState state, RelayPeerInfo info, String recipient) =>
+      info.relays.any((String r) => r != _self && r != recipient) ||
+      (info.relays.contains(_self) && _servesRecipient(state, recipient));
+
+  /// Whether the same chat message as [entry] goes to the mailboxes of
+  /// another device of the same person: queued for one whose key and
+  /// mailboxes are known.
+  bool _copyForMailboxes(RelayState state, RelayOutboxEntry entry) {
+    final Object? id = entry.payload['msgId'];
+    final String person = _personOf(entry.recipient);
+    for (final RelayOutboxEntry other in state.outbox.values) {
+      if (other.rid == entry.rid ||
+          other.payload['type'] != entry.payload['type'] ||
+          other.payload['msgId'] != id ||
+          _personOf(other.recipient) != person) {
+        continue;
+      }
+      final RelayPeerInfo? info = state.peers[other.recipient];
+      if (info != null &&
+          info.keys != null &&
+          _hasMailbox(state, info, other.recipient)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Cuts [entry] — too large for one envelope, with no mailbox of its
@@ -4113,11 +4225,7 @@ final class RelayEngine {
     if (info == null || info.keys == null) {
       return false;
     }
-    final bool hasMailbox =
-        info.relays.any((String r) => r != _self && r != entry.recipient) ||
-        (info.relays.contains(_self) &&
-            _servesRecipient(state, entry.recipient));
-    if (!hasMailbox) {
+    if (!_hasMailbox(state, info, entry.recipient)) {
       return false;
     }
     if (_tooLargeToSplit.contains(entry.rid)) {
@@ -4321,6 +4429,7 @@ final class RelayEngine {
   /// recipient's key stays the same: a retry to a mailbox is the very same
   /// envelope again.
   Future<Map<String, dynamic>> _sealedEnvelope(
+    RelayState state,
     RelayIdentity identity,
     RelayPublicKeys recipientKey,
     RelayOutboxEntry entry,
@@ -4332,6 +4441,7 @@ final class RelayEngine {
       return cached.envelope;
     }
     final Map<String, dynamic> envelope = (await _seal(
+      state,
       identity,
       recipientKey,
       entry,
@@ -4345,6 +4455,7 @@ final class RelayEngine {
   }
 
   Future<RelayEnvelope> _seal(
+    RelayState state,
     RelayIdentity identity,
     RelayPublicKeys recipientKey,
     RelayOutboxEntry entry,
@@ -4369,8 +4480,8 @@ final class RelayEngine {
       createdAtMillis: entry.createdAtMillis,
       expiresAtMillis: entry.expiresAtMillis,
       box: box,
-      notice: kRelayNoticeTypes.contains(entry.payload['type']),
-      automatic: !_isPart(entry) && !relayIsPersonalPayload(entry.payload),
+      notice: relayIsNoticePayload(entry.payload),
+      automatic: !_isPart(entry) && !_isPersonal(state, entry.payload),
       replace: switch (relayReplaceKeyOf(entry.payload)) {
         final String key when !_isPart(entry) => _replaceTag(
           identity,
@@ -4562,7 +4673,8 @@ final class RelayEngine {
             "A friend's device has been silent for "
             '${(now - (last > 0 ? last : waiting)) ~/ Duration.millisecondsPerDay}'
             ' days while another device of theirs answers: taken for gone, '
-            'only messages and invitations wait or are held for it.',
+            "the app's own frames that catch up by themselves no longer "
+            'wait or are held for it.',
           );
         }
       }
@@ -4610,7 +4722,7 @@ final class RelayEngine {
       if (state.goneDevices.containsKey(entry.recipient) &&
           state.outbox.containsKey(entry.rid) &&
           !_isPart(entry) &&
-          !relayIsPersonalPayload(entry.payload)) {
+          !_isPersonal(state, entry.payload)) {
         await _dropEntry(state, entry);
         changed = true;
       }
@@ -4976,18 +5088,19 @@ final class RelayEngine {
 
   /// "Czeka na doręczenie": what the person sent that has not reached its
   /// recipient yet (chat and group messages, attachments, invitations, call
-  /// notices: [kRelayNoticeTypes]), once per message and person however
+  /// notices: [relayIsNoticePayload]), once per message and person however
   /// many devices of theirs it goes to and however many parts it was cut
   /// into, and not once the person has it on one of their devices. What
   /// the app sends by itself (receipts, profiles, statuses, posts pushed to
-  /// friends) is not counted: those are the relay layer's business, and the
-  /// log line tells about them ([relayBacklogSummary]).
+  /// friends, a group's member list) is not counted: those are the relay
+  /// layer's business, and the log line tells about them
+  /// ([relayBacklogSummary]).
   int _waitingCount(RelayState state) {
     final Set<String> waiting = <String>{};
     for (final RelayOutboxEntry entry in state.outbox.values) {
       final Object? type = entry.payload['type'];
       final bool counted =
-          kRelayNoticeTypes.contains(type) ||
+          relayIsNoticePayload(entry.payload) ||
           (type == kBlobManifestType &&
               entry.payload['k'] == RelayBlobKind.attachment.wire);
       if (!counted) {

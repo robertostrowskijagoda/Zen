@@ -302,6 +302,14 @@ extension _RelayEngineBlobs on RelayEngine {
           'h': base64Url.encode(crypto.sha256.convert(plain).bytes),
           'ref': entry.rid,
         }, now);
+    if (!state.outbox.containsKey(manifestRid)) {
+      // The manifest was not queued (for a device taken for gone that gets
+      // nothing of this kind): chunks without it are of no use to anyone,
+      // and the entry is no blob, so the chat is told if it can only go
+      // directly.
+      await _deleteChunks(count, (int i) => _outChunkKey(blobId, i));
+      return false;
+    }
     state.outBlobs[blobId] = RelayBlobOut(
       blobId: blobId,
       recipient: entry.recipient,
