@@ -1203,8 +1203,9 @@ void main() {
     expect(again.mySafeDate!.autoShare, isTrue);
   });
 
-  test('a report of a minor switches the profile off here at once; two '
-      'independent reports switch it off for the people around', () async {
+  test('a report of a minor switches the profile off here at once; reports '
+      'of two friends switch it off for their friend, others see a '
+      'warning', () async {
     final _Net net = _Net();
     final _Phone hub = _Phone(net, 'hub');
     final _Phone mia = _Phone(net, 'mia');
@@ -1215,6 +1216,10 @@ void main() {
     for (final _Phone p in <_Phone>[mia, ania, ewa, darek, fred]) {
       net.link(hub, p);
     }
+    // Ania and Ewa are Darek's friends; Fred knows neither.
+    net
+      ..link(darek, ania)
+      ..link(darek, ewa);
     await hub.service.load();
     await mia.date(name: 'Mia', gender: DatingGender.woman);
     await ania.date(name: 'Ania', gender: DatingGender.woman);
@@ -1241,13 +1246,15 @@ void main() {
     await ania.service.maybePublish(force: true);
     expect(sees(darek), isTrue);
 
-    // A second, independent reporter: the profile goes for everybody who
-    // sees the packages of both.
+    // A second friend of Darek's reports: the profile goes on his phone.
+    // Fred cannot tell two reporters he does not know from one person with
+    // two keys: he sees the profile with a warning.
     await ewa.service.reportMinor(miaKey);
     await ewa.service.maybePublish(force: true);
     expect(sees(ewa), isFalse);
     expect(sees(darek), isFalse);
-    expect(sees(fred), isFalse);
+    expect(sees(fred), isTrue);
+    expect(fred.service.minorWarning(miaKey), isTrue);
     expect(darek.service.isMinorOff(miaKey), isTrue);
     expect(darek.service.hiddenProfiles, isEmpty);
 
