@@ -1068,7 +1068,7 @@
   "Jak zaczynasz?": "З чого почнеш?",
   "Jak zainstalować Zen": "Як встановити Zen",
   "Jak zainstalować Zen na innym telefonie / komputerze": "Як встановити Zen на інший телефон / комп’ютер",
-  "Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.": "Як дію знайди «Перевірити повідомлення Zen» і підтверди.",
+  "Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.": "Як дію знайди «Sprawdź wiadomości Zen» і підтверди.",
   "Jamajka": "Ямайка",
   "Japonia": "Японія",
   "Jasny": "Світлий",
@@ -1901,7 +1901,7 @@
   "Najpierw ustaw tej osobie poziom co najmniej „Znajomy” — do piramidy przyjmuje się tylko bliższych znajomych.": "Спершу постав цій людині рівень не нижчий за «Друг» — до піраміди приймають лише ближчих друзів.",
   "Najpierw wpisz miasto.": "Спершу впиши місто.",
   "Najpierw wpisz napis.": "Спочатку введи напис.",
-  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Спершу увімкни «Отримувати у фоні» в розділі «Облікові записи та відновлення»: без цього закритий обліковий запис нічого не отримує.",
+  "Najpierw włącz „Odbieraj w tle” w Konta i odzyskiwanie: bez tego zamknięte konto nic nie odbiera.": "Спершу увімкни «Приймати у фоні» в розділі «Облікові записи та відновлення»: без цього закритий обліковий запис нічого не отримує.",
   "Najpierw włącz „Znajomi w tej samej sieci Wi-Fi”.": "Спершу ввімкни «Друзі в тій самій мережі Wi-Fi».",
   "Najpierw zacznij odzyskiwanie: dopiero wtedy to urządzenie przyjmuje klucze od osób z kręgu.": "Спершу почни відновлення: лише тоді цей пристрій приймає ключі від людей із кола.",
   "Najpierw załóż profil mieszkania.": "Спершу створи профіль квартири.",
@@ -3108,8 +3108,8 @@
   "Potwierdź hasło aplikacji, zanim usuniesz hasło awaryjne kasujące.": "Підтверди пароль застосунку, перш ніж видалити аварійний пароль стирання.",
   "Potwierdź je na drugim urządzeniu.": "Підтверди їх на іншому пристрої.",
   "Potwierdź obecne hasło, zanim je zmienisz.": "Підтверди поточний пароль, перш ніж його змінити.",
-  "Potwierdź tylko, jeśli stoicie obok siebie: Twoi znajomi zobaczą podpisane „spotkani osobiście”. Jak blisko się znacie, widzisz tylko Ty.": "Підтверджуй, лише якщо ви стоїте поруч: твої друзі побачать позначку «знайомі особисто». Наскільки близько ви знайомі, бачиш лише ти.",
-  "Potwierdź tylko, jeśli stoisz obok: {name}. Twoi znajomi zobaczą podpisane „spotkani osobiście”. Jak blisko się znacie, widzisz tylko Ty.": "Підтверджуй, лише якщо стоїш поруч: {name}. Твої друзі побачать позначку «знайомі особисто». Наскільки близько ви знайомі, бачиш лише ти.",
+  "Potwierdź tylko, jeśli stoicie obok siebie: Twoi znajomi zobaczą podpisane „spotkani osobiście”. Jak blisko się znacie, widzisz tylko Ty.": "Підтверджуй, лише якщо ви стоїте поруч: твої друзі побачать позначку «зустрічалися наживо». Наскільки близько ви знайомі, бачиш лише ти.",
+  "Potwierdź tylko, jeśli stoisz obok: {name}. Twoi znajomi zobaczą podpisane „spotkani osobiście”. Jak blisko się znacie, widzisz tylko Ty.": "Підтверджуй, лише якщо стоїш поруч: {name}. Твої друзі побачать позначку «зустрічалися наживо». Наскільки близько ви знайомі, бачиш лише ти.",
   "Potwierdź w aplikacji, że wszystko w porządku — inaczej za 15 minut przyjaciel dostanie alarm.": "Підтверди в застосунку, що все гаразд — інакше через 15 хвилин друг отримає тривогу.",
   "Potwierdź, że to Ty": "Підтверди, що це ти",
   "Powiadamiaj o": "Сповіщати про",
@@ -4527,7 +4527,7 @@
   "Wspólna kasa": "Спільна скарбничка",
   "Wspólna sprawa": "Спільна справа",
   "Wspólne wydarzenia ({n}): {names}": {
-    "one": "Спільна подія: {names}",
+    "one": "Спільна подія ({n}): {names}",
     "few": "Спільні події ({n}): {names}",
     "many": "Спільні події ({n}): {names}",
     "other": "Спільні події ({n}): {names}"
@@ -4729,7 +4729,7 @@
   "Wyłączono znikające wiadomości (na innym urządzeniu).": "Зникаючі повідомлення вимкнено (на іншому пристрої).",
   "Wyłączono znikające wiadomości.": "Зникаючі повідомлення вимкнено.",
   "Wyłączony profil randkowy": "Вимкнений профіль для побачень",
-  "Wyłączony rodzaj nie pokazuje powiadomienia i nie gra dźwięku. Wiadomości, połączenia, zaproszenia, wzmianki i reakcje nadal są na liście powiadomień w aplikacji (dzwonek na górze). „Treść” pod rodzajem mówi, co pokazuje jego powiadomienie; rozmowa może mieć jeszcze własny poziom. Alarm przyjaciela, prośba o pomoc w odzyskaniu konta i pytania o bezpieczeństwo na randce przychodzą zawsze.": "Вимкнений вид не показує сповіщень і не відтворює звуку. Повідомлення, дзвінки, запрошення, згадки й реакції лишаються у списку сповіщень у застосунку (дзвоник угорі). «Вміст» під видом каже, що показує його сповіщення; розмова може мати ще й власний рівень. Тривога друга, прохання про допомогу у відновленні акаунта й питання про безпеку на побаченні надходять завжди.",
+  "Wyłączony rodzaj nie pokazuje powiadomienia i nie gra dźwięku. Wiadomości, połączenia, zaproszenia, wzmianki i reakcje nadal są na liście powiadomień w aplikacji (dzwonek na górze). „Treść” pod rodzajem mówi, co pokazuje jego powiadomienie; rozmowa może mieć jeszcze własny poziom. Alarm przyjaciela, prośba o pomoc w odzyskaniu konta i pytania o bezpieczeństwo na randce przychodzą zawsze.": "Вимкнений вид не показує сповіщень і не відтворює звуку. Повідомлення, дзвінки, запрошення, згадки й реакції лишаються у списку сповіщень у застосунку (дзвоник угорі). «Текст» під видом каже, що показує його сповіщення; розмова може мати ще й власний рівень. Тривога друга, прохання про допомогу у відновленні акаунта й питання про безпеку на побаченні надходять завжди.",
   "Wyślesz klucz {name} → {address} {time}": "Надішлеш ключ {name} → {address} {time}",
   "Wyślij": "Надіслати",
   "Wyślij SMS z alarmem": "Надіслати SMS із тривогою",
@@ -6013,7 +6013,7 @@
   "{name} pyta o opinię": "{name} питає твоєї думки",
   "{name} skarży {other}. Zdecyduj do {date}.": "{name} скаржиться на {other}. Виріши до {date}.",
   "{name} skomentował(a) {post} ({n} komentarzy)": {
-    "one": "{name} прокоментував(ла) {post}",
+    "one": "{name} прокоментував(ла) {post} ({n} коментар)",
     "few": "{name} прокоментував(ла) {post} ({n} коментарі)",
     "many": "{name} прокоментував(ла) {post} ({n} коментарів)",
     "other": "{name} прокоментував(ла) {post} ({n} коментаря)"
@@ -6262,7 +6262,7 @@
     "other": "{n} спільного друга"
   },
   "{n} wyroków sądu piramidy": {
-    "one": "Вирок суду піраміди",
+    "one": "{n} вирок суду піраміди",
     "few": "{n} вироки суду піраміди",
     "many": "{n} вироків суду піраміди",
     "other": "{n} вироку суду піраміди"

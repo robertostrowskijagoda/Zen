@@ -609,7 +609,7 @@
   "Domownik zmienił telefon": "Un membre du foyer a changé de téléphone",
   "Domyślne": "Par défaut",
   "Domyślne wartości dla nowych rozmów. Każda rozmowa może je nadpisać lokalnie.": "Valeurs par défaut pour les nouvelles conversations. Chaque conversation peut les remplacer localement.",
-  "Domyślnie nie. Włączone: ludzie do 3 kroków znajomości (i za otwartymi bramami) zobaczą na grafie Twoje imię z „randki” albo „znajomości” — czyli że randkujesz. Nic więcej z profilu; osoby z „Ukryj przed” nie zobaczą nic.": "Non par défaut. Activé : les personnes jusqu’à 3 degrés (et derrière les portes ouvertes) verront sur le graphe votre prénom avec « rencontres » ou « amitié » — donc que vous cherchez. Rien d’autre du profil ; les personnes de « Masquer pour » ne verront rien.",
+  "Domyślnie nie. Włączone: ludzie do 3 kroków znajomości (i za otwartymi bramami) zobaczą na grafie Twoje imię z „randki” albo „znajomości” — czyli że randkujesz. Nic więcej z profilu; osoby z „Ukryj przed” nie zobaczą nic.": "Non par défaut. Activé : les personnes jusqu’à 3 degrés (et derrière les portes ouvertes) verront sur le graphe votre prénom avec « rencontres » ou « connaissances » — donc que vous cherchez. Rien d’autre du profil ; les personnes de « Masquer pour » ne verront rien.",
   "Domyślny klucz aplikacji": "Clé par défaut de l’application",
   "Dopasowania, wiadomości i poręczenia. Pytania o bezpieczeństwo na randce przychodzą zawsze.": "Correspondances, messages et parrainages. Les questions de sécurité pendant un rendez-vous arrivent toujours.",
   "Dopiero gdy ich wpuścisz, wymienicie się profilami.": "Ce n’est qu’après les avoir laissés entrer que vous échangerez vos profils.",
@@ -1044,7 +1044,7 @@
   "Jak zaczynasz?": "Comment commencez-vous ?",
   "Jak zainstalować Zen": "Installer Zen",
   "Jak zainstalować Zen na innym telefonie / komputerze": "Installer Zen sur un autre téléphone / ordinateur",
-  "Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.": "Comme action, cherchez « Vérifier les messages Zen » et validez.",
+  "Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.": "Comme action, cherchez « Sprawdź wiadomości Zen » et validez.",
   "Jamajka": "Jamaïque",
   "Japonia": "Japon",
   "Jasny": "Clair",
@@ -1196,7 +1196,7 @@
   "Każdy akt jest jawny i szczyt może go uchylić.": "Chaque acte est public et le sommet peut le révoquer.",
   "Każdy domownik może zmieniać profil, zapraszać i odpisywać sąsiadom. Żeby dodać kolejnego, niech zeskanuje kod domownika w „Sąsiedzi → Dołącz”.": "Chaque membre du foyer peut modifier le profil, inviter et répondre aux voisins. Pour en ajouter un autre, qu’il scanne le code du membre du foyer dans « Voisins → Rejoindre ».",
   "Każdy dostanie zaproszenie i odpowie. Adres poznają tylko ci, których przyjmiesz.": "Chacun recevra une invitation et répondra. Seules les personnes que vous acceptez connaîtront l’adresse.",
-  "Każdy dostanie zaproszenie i sam zdecyduje: „Dołączam” albo „Nie, dziękuję”.": "Chacun recevra une invitation et décidera : « Je viens » ou « Non merci ».",
+  "Każdy dostanie zaproszenie i sam zdecyduje: „Dołączam” albo „Nie, dziękuję”.": "Chacun recevra une invitation et décidera : « Je me joins » ou « Non, merci ».",
   "Każdy może przejrzeć, co Zen robi. Każda oficjalna wersja jest podpisana tym samym kluczem, więc telefon nie zainstaluje podróbki „na” prawdziwy Zen.": "Tout le monde peut examiner ce que fait Zen. Chaque version officielle est signée avec la même clé, donc le téléphone n’installera pas de contrefaçon « par-dessus » le vrai Zen.",
   "Każdy może raz w miesiącu przyprowadzić jedną osobę spoza kółka — tak poznajecie nowych ludzi.": "Chacun peut, une fois par mois, amener une personne extérieure au cercle — c’est ainsi que vous rencontrez de nouvelles personnes.",
   "Każdy z maks. {steps} pośredników dostaje {price} po akceptacji treści; płacisz z góry {total} warunkowo, a za niewykorzystane kroki pieniądze wracają. {who}": "Chacun des {steps} intermédiaires au maximum reçoit {price} après acceptation du contenu ; vous payez d’avance {total} sous condition, et l’argent des étapes non utilisées vous revient. {who}",
@@ -4036,7 +4036,7 @@
   "Tylko do czytania: komentują członkowie piramidy tej narodowości. Posty przekazują Ci znajomi z piramidy.": "Lecture seule : ce sont les membres de la pyramide de cette nationalité qui commentent. Les publications vous sont transmises par vos amis de la pyramide.",
   "Tylko do czytania: posty szczytu do całej piramidy. Przekazują Ci je znajomi z piramidy.": "Lecture seule : publications du sommet pour toute la pyramide. Vos amis de la pyramide vous les transmettent.",
   "Tylko gałąź tej osoby": "Seulement la branche de cette personne",
-  "Tylko gdy ten ekran jest otwarty. Włącz „Rozglądaj się też w tle”, żeby zapisywało się też z telefonem w kieszeni.": "Seulement quand cet écran est ouvert. Activez « Regarder aussi autour en arrière-plan » pour que ça s’enregistre aussi avec le téléphone dans la poche.",
+  "Tylko gdy ten ekran jest otwarty. Włącz „Rozglądaj się też w tle”, żeby zapisywało się też z telefonem w kieszeni.": "Seulement quand cet écran est ouvert. Activez « Chercher aussi en arrière-plan » pour que ça s’enregistre aussi avec le téléphone dans la poche.",
   "Tylko hasło": "Mot de passe seulement",
   "Tylko inicjały i kolory grup znajomych — bez imion, nazwisk i adresów.": "Seulement les initiales et les couleurs des groupes d’amis — sans prénoms, noms ni adresses.",
   "Tylko ja": "Moi seul",
@@ -6020,7 +6020,7 @@
     "other": "{n} publications du sommet"
   },
   "{n} razy": {
-    "one": "une fois",
+    "one": "{n} fois",
     "other": "{n} fois"
   },
   "{n} s": "{n} s",
@@ -6050,7 +6050,7 @@
     "other": "{n} amis en commun"
   },
   "{n} wyroków sądu piramidy": {
-    "one": "Verdict du tribunal de la pyramide",
+    "one": "{n} verdict du tribunal de la pyramide",
     "other": "{n} verdicts du tribunal de la pyramide"
   },
   "{n} wyświetleń": {

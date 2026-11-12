@@ -122,7 +122,11 @@ void _check(I18nScan scan, Directory project, {required bool verbose}) {
       problems = true;
       continue;
     }
-    final I18nFileReport report = checkI18nTranslations(scan, translations);
+    final I18nFileReport report = checkI18nTranslations(
+      scan,
+      translations,
+      languageCode: _baseName(file.path).replaceAll('.json', ''),
+    );
     if (report.isClean) {
       stdout.writeln('$name: OK (${translations.length} texts)');
       continue;

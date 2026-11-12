@@ -1044,7 +1044,7 @@
   "Jak zaczynasz?": "Como você quer começar?",
   "Jak zainstalować Zen": "Como instalar o Zen",
   "Jak zainstalować Zen na innym telefonie / komputerze": "Como instalar o Zen em outro telefone / computador",
-  "Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.": "Como ação, procure «Verificar mensagens do Zen» e confirme.",
+  "Jako czynność wyszukaj „Sprawdź wiadomości Zen” i zatwierdź.": "Como ação, procure «Sprawdź wiadomości Zen» e confirme.",
   "Jamajka": "Jamaica",
   "Japonia": "Japão",
   "Jasny": "Claro",
@@ -6020,7 +6020,7 @@
     "other": "{n} posts do topo"
   },
   "{n} razy": {
-    "one": "uma vez",
+    "one": "{n} vez",
     "other": "{n} vezes"
   },
   "{n} s": "{n} s",
@@ -6050,7 +6050,7 @@
     "other": "{n} amigos em comum"
   },
   "{n} wyroków sądu piramidy": {
-    "one": "Veredito do tribunal da pirâmide",
+    "one": "{n} veredito do tribunal da pirâmide",
     "other": "{n} vereditos do tribunal da pirâmide"
   },
   "{n} wyświetleń": {

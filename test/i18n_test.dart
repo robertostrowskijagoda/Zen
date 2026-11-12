@@ -306,7 +306,11 @@ void main() {
         if (decoded is! Map<String, Object?>) {
           fail('$path is not a JSON object');
         }
-        final I18nFileReport report = checkI18nTranslations(scan, decoded);
+        final I18nFileReport report = checkI18nTranslations(
+          scan,
+          decoded,
+          languageCode: language.code,
+        );
         expect(
           report.isClean,
           isTrue,
