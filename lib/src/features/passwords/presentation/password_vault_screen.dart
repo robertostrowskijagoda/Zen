@@ -12,6 +12,7 @@ import 'package:zen/src/features/passwords/presentation/password_autofill_screen
 import 'package:zen/src/features/passwords/presentation/password_entry_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_form_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_import.dart';
+import 'package:zen/src/features/passwords/presentation/password_setup_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_vault_widgets.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
@@ -267,6 +268,14 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
               icon: const Icon(Icons.upload_file_rounded),
               label: Text(t('Importuj z pliku')),
             ),
+            OutlinedButton.icon(
+              key: const Key('passwords-empty-setup'),
+              onPressed: () => unawaited(
+                PasswordSetupScreen.open(context, withImport: true),
+              ),
+              icon: const Icon(Icons.tune_rounded),
+              label: Text(t('Konfiguracja haseł')),
+            ),
           ],
         ),
       ),
@@ -419,6 +428,16 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
             appBar: AppBar(
               title: Text(t('Hasła')),
               actions: <Widget>[
+                // The setup in sight, not in the menu: on Android the
+                // phone and each browser need a switch before Zen fills.
+                IconButton(
+                  key: const Key('passwords-setup'),
+                  tooltip: t('Konfiguracja haseł'),
+                  icon: const Icon(Icons.tune_rounded),
+                  onPressed: () => unawaited(
+                    PasswordSetupScreen.open(context, withImport: writable),
+                  ),
+                ),
                 PopupMenuButton<String>(
                   key: const Key('passwords-menu'),
                   tooltip: t('Więcej'),

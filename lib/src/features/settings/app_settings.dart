@@ -15,7 +15,9 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// 3 (1.15.5): the notifications step has "W grupach tylko wzmianki" (new,
 /// on by default) and an additional account's "Powiadomienia z tego konta"
 /// (1.15.4, which did not bump this).
-const int kSetupRevision = 3;
+/// 4: the password manager's step (whether to use it, then its setup). Who
+/// went through 3 sees only that step (first_run_setup.dart).
+const int kSetupRevision = 4;
 
 /// Settings saved before this revision had "Znajomi w tej samej sieci
 /// Wi-Fi", Wi-Fi Direct and Bluetooth off from when they were off by

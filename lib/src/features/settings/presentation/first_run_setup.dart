@@ -13,6 +13,7 @@ import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/presentation/gate_widgets.dart';
+import 'package:zen/src/features/passwords/presentation/password_setup_screen.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
@@ -24,7 +25,7 @@ import 'package:zen/src/features/settings/presentation/lock_mode_choice.dart';
 import 'package:zen/src/features/settings/presentation/notification_privacy_choice.dart';
 
 /// Whether the first start shows the setup (the lock, notifications,
-/// gates, animations) once, right after the app password and before the
+/// gates, animations, passwords) once, right after the app password and before the
 /// permissions step. Off in tests and previews; the real app turns it on
 /// (like the permissions step).
 final Provider<bool> firstRunSetupRequiredProvider = Provider<bool>(
@@ -145,12 +146,26 @@ class FirstRunSetupScreen extends StatelessWidget {
   );
 }
 
-enum _SetupStep { lock, notifications, iphone, gates, animations, permissions }
+enum _SetupStep {
+  lock,
+  notifications,
+  iphone,
+  gates,
+  animations,
+  passwords,
+  permissions,
+}
+
+/// The steps added in [kSetupRevision]: someone who went through the
+/// revision before it sees only these after the update. A release that
+/// bumps the revision puts here what it added or changed.
+const Set<_SetupStep> _newInRevision = <_SetupStep>{_SetupStep.passwords};
 
 /// The steps one by one: when Zen locks, what notifications say, on an
-/// iPhone how iOS is to wake Zen, the gates, the animations and (from
-/// Ustawienia; on the first start the gate shows it next) the permissions. Every answer is saved at once, so
-/// skipping keeps what is set (the defaults on the first start).
+/// iPhone how iOS is to wake Zen, the gates, the animations, the password
+/// manager and (from Ustawienia; on the first start the gate shows it next)
+/// the permissions. Every answer is saved at once, so skipping keeps what
+/// is set (the defaults on the first start).
 class FirstRunSetupFlow extends ConsumerStatefulWidget {
   const FirstRunSetupFlow({this.firstStart = false, super.key});
 
@@ -176,6 +191,15 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
   /// answered). Decided once, when it opens: finishing changes the revision.
   late final bool _afterUpdate;
 
+  /// The setup shows because of an update, and the person went through the
+  /// revision just before it: only what it added ([_newInRevision]) is
+  /// asked. Anyone further behind sees every step.
+  late final bool _onlyNew;
+
+  /// The answer to "do you want Zen's password manager" (null: none yet).
+  /// Yes shows its setup in the same step; no changes nothing.
+  bool? _passwords;
+
   @override
   void initState() {
     super.initState();
@@ -185,6 +209,8 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
         (settings.setupRevision > 0 ||
             settings.permissionsSetupDone ||
             settings.accountSecureOffered);
+    _onlyNew =
+        widget.firstStart && settings.setupRevision == kSetupRevision - 1;
     if (widget.firstStart) {
       // The first start is no route (the gate shows it instead of the app),
       // so the system's Back reaches it only this way.
@@ -218,8 +244,13 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
       if (iphone) _SetupStep.iphone,
       _SetupStep.gates,
       _SetupStep.animations,
+      // Every platform: where Zen fills nothing, the step says so honestly.
+      _SetupStep.passwords,
       if (permissions && !widget.firstStart) _SetupStep.permissions,
     ];
+    if (_onlyNew) {
+      here.retainWhere(_newInRevision.contains);
+    }
     final bool permissionsFollow =
         widget.firstStart &&
         permissions &&
@@ -258,6 +289,18 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
           _failed = true;
         });
       }
+    }
+  }
+
+  /// "Dalej" from step [index]: the next step, or the end after the [last].
+  void _goOn(int index, bool last) {
+    if (_finishing) {
+      return;
+    }
+    if (last) {
+      unawaited(_finish());
+    } else {
+      setState(() => _index = index + 1);
     }
   }
 
@@ -318,7 +361,7 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
                         style: zen.label(color: zen.textMuted),
                       ),
                       const SizedBox(height: 6),
-                      ..._body(zen, step),
+                      ..._body(zen, step, () => _goOn(index, last)),
                       if (widget.firstStart) ...<Widget>[
                         const SizedBox(height: 16),
                         Text(
@@ -361,11 +404,7 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(140, 48),
                   ),
-                  onPressed: _finishing
-                      ? null
-                      : last
-                      ? () => unawaited(_finish())
-                      : () => setState(() => _index = index + 1),
+                  onPressed: _finishing ? null : () => _goOn(index, last),
                   child: Text(
                     last && !(widget.firstStart && total > steps.length)
                         ? t('Gotowe')
@@ -380,7 +419,12 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
     );
   }
 
-  List<Widget> _body(ZenColors zen, _SetupStep step) => switch (step) {
+  /// The widgets of [step]; [goOn] leaves it (as "Dalej" does).
+  List<Widget> _body(
+    ZenColors zen,
+    _SetupStep step,
+    VoidCallback goOn,
+  ) => switch (step) {
     _SetupStep.lock => <Widget>[
       ZenHero(
         title: t('Kiedy Zen ma się blokować?'),
@@ -448,6 +492,52 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
       ),
       const ZenCard(child: AnimationsSettingChoice()),
     ],
+    _SetupStep.passwords => <Widget>[
+      ZenHero(
+        title: t('Menedżer haseł'),
+        icon: Icons.key_rounded,
+        text: t(
+          'Zen może przechowywać Twoje loginy i hasła, zaszyfrowane na '
+          'Twoich urządzeniach. Chcesz z niego korzystać?',
+        ),
+      ),
+      if (_passwords != true)
+        ZenCard(
+          key: const Key('first-run-passwords-question'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              FilledButton.icon(
+                key: const Key('first-run-passwords-yes'),
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
+                onPressed: () => setState(() => _passwords = true),
+                icon: const Icon(Icons.key_rounded),
+                label: Text(t('Tak, ustaw')),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const Key('first-run-passwords-no'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                onPressed: () {
+                  setState(() => _passwords = false);
+                  goOn();
+                },
+                child: Text(t('Nie, dziękuję')),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t('Ustawisz to też później: Ustawienia → Hasła.'),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+              ),
+            ],
+          ),
+        )
+      else
+        // The same setup as in "Hasła" (without the import: the passwords
+        // are not open here).
+        const PasswordSetupPanel(),
+    ],
     _SetupStep.permissions => const <Widget>[],
   };
 
@@ -456,7 +546,9 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
   Widget _updateNote(ZenColors zen) => ZenInfo(
     key: const Key('first-run-update-note'),
     icon: Icons.update_rounded,
-    text: t('Po aktualizacji: sprawdź te ustawienia — niektóre są nowe.'),
+    text: _onlyNew
+        ? t('Nowość po aktualizacji. Reszta ustawień zostaje bez zmian.')
+        : t('Po aktualizacji: sprawdź te ustawienia — niektóre są nowe.'),
   );
 
   /// First start only: the welcome above the first step.

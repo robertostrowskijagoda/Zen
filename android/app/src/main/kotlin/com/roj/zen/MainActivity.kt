@@ -100,6 +100,8 @@ class MainActivity : FlutterFragmentActivity() {
         ZenPower.register(flutterEngine, this, background = false)
         // The autofill picker runs here, where the vault is unlocked.
         ZenAutofillBridge.register(flutterEngine, this)
+        // The password manager's setup: which browsers need a switch.
+        ZenAutofillSetupBridge.register(flutterEngine, this)
     }
 
     // Every bridge of configureFlutterEngine lets go of this engine: the
@@ -123,6 +125,7 @@ class MainActivity : FlutterFragmentActivity() {
         ZenVideoBridge.unregister(flutterEngine)
         ZenPower.unregister(flutterEngine)
         ZenAutofillBridge.unregister(flutterEngine)
+        ZenAutofillSetupBridge.unregister(flutterEngine)
         // The background service takes the node over now, not after its
         // watchdog misses the heartbeats.
         ZenPower.appEngineGone(this)

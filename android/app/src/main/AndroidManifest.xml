@@ -373,5 +373,30 @@
         <package android:name="de.robv.android.xposed.installer" />
         <package android:name="org.lsposed.manager" />
         <package android:name="io.github.lsposed.manager" />
+        <!-- The browsers the password manager's setup looks at
+             (ZenAutofillSetupBridge, password_setup.dart): whether each is
+             installed, the switch Chrome and its kin read through their
+             own provider, and their page with that switch. -->
+        <package android:name="com.android.chrome" />
+        <package android:name="com.chrome.beta" />
+        <package android:name="com.chrome.dev" />
+        <package android:name="com.chrome.canary" />
+        <package android:name="org.chromium.chrome" />
+        <package android:name="com.brave.browser" />
+        <package android:name="com.vivaldi.browser" />
+        <package android:name="com.microsoft.emmx" />
+        <package android:name="com.sec.android.app.sbrowser" />
+        <package android:name="com.opera.browser" />
+        <package android:name="com.kiwibrowser.browser" />
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="org.mozilla.firefox_beta" />
+        <package android:name="org.mozilla.fenix" />
+        <package android:name="org.mozilla.focus" />
+        <package android:name="org.mozilla.klar" />
+        <package android:name="org.torproject.torbrowser" />
+        <package android:name="us.spotco.fennec_dos" />
+        <package android:name="org.mozilla.fennec_fdroid" />
+        <package android:name="org.ironfoxoss.ironfox" />
+        <package android:name="com.duckduckgo.mobile.android" />
     </queries>
 </manifest>
