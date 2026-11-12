@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.service.autofill.Dataset
+import android.service.autofill.Field
+import android.service.autofill.Presentations
 import android.util.Log
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillManager
@@ -24,12 +26,14 @@ import java.util.UUID
  *
  * At most one request is open: a newer one cancels the older. It holds the
  * requesting app's package and name, the page's address when a known
- * browser reported it, and the two fields' ids; never a password. Dart is
- * told `changed` whenever a request opens or ends, and asks:
+ * browser reported it, and the ids of the login field, the password field
+ * or both; never a password. Dart is told `changed` whenever a request
+ * opens or ends, and asks:
  * * `pending` → {id, package, label, webDomain, webScheme, username} or null;
  * * `fill` {id, login, password}: fills the form of the open request [id]
- *   with exactly that login and password, ends it and goes back to the
- *   app; false when [id] is no longer open (nothing is filled then);
+ *   with exactly that login and password (each only where the form has its
+ *   field), ends it and goes back to the app; false when [id] is no longer
+ *   open or nothing would be filled;
  * * `cancel` {id, back}: ends the request with nothing filled (back: return
  *   to the app, when the person closed the picker);
  * * `guard` {on}: drops touches that come through another app's window
@@ -48,14 +52,17 @@ object ZenAutofillBridge {
     /** How long the person has to unlock Zen and pick an entry. */
     private const val TIMEOUT_MS = 60_000L
 
-    /** One open autofill request (no values). */
+    /**
+     * One open autofill request (no values). The form has the login field,
+     * the password field or both (a login in two steps: one per page).
+     */
     class Request(
         val packageName: String,
         val appLabel: String?,
         val webDomain: String?,
         val webScheme: String?,
         val usernameId: AutofillId?,
-        val passwordId: AutofillId,
+        val passwordId: AutofillId?,
     ) {
         val id: String = UUID.randomUUID().toString()
     }
@@ -213,22 +220,30 @@ object ZenAutofillBridge {
      * when nothing would be filled.
      */
     @RequiresApi(Build.VERSION_CODES.P)
-    @Suppress("DEPRECATION")
     private fun filled(activity: Activity, open: Request, login: String, password: String): Dataset? {
-        val usernameId = open.usernameId
-        val fillLogin = usernameId != null && login.isNotEmpty()
-        val fillPassword = password.isNotEmpty()
-        if (!fillLogin && !fillPassword) {
+        val values = buildList {
+            open.usernameId?.takeIf { login.isNotEmpty() }?.let { add(it to login) }
+            open.passwordId?.takeIf { password.isNotEmpty() }?.let { add(it to password) }
+        }
+        if (values.isEmpty()) {
             return null
         }
         // Never shown (the framework fills it at once), but a dataset needs one.
         val presentation = RemoteViews(activity.packageName, android.R.layout.simple_list_item_1)
-        val builder = Dataset.Builder(presentation)
-        if (fillLogin) {
-            builder.setValue(usernameId!!, AutofillValue.forText(login))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val builder = Dataset.Builder(
+                Presentations.Builder().setMenuPresentation(presentation).build(),
+            )
+            values.forEach { (id, text) ->
+                builder.setField(id, Field.Builder().setValue(AutofillValue.forText(text)).build())
+            }
+            return builder.build()
         }
-        if (fillPassword) {
-            builder.setValue(open.passwordId, AutofillValue.forText(password))
+        @Suppress("DEPRECATION")
+        val builder = Dataset.Builder(presentation)
+        values.forEach { (id, text) ->
+            @Suppress("DEPRECATION")
+            builder.setValue(id, AutofillValue.forText(text))
         }
         return builder.build()
     }

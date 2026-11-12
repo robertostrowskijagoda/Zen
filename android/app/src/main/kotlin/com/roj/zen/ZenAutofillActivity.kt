@@ -93,17 +93,25 @@ class ZenAutofillActivity : Activity() {
         finish()
     }
 
-    /** The request [ZenAutofillService] put in the intent; null when incomplete. */
+    /**
+     * The request [ZenAutofillService] put in the intent; null when
+     * incomplete. The login's id, the password's, or both: a login in two
+     * steps asks for one on each page.
+     */
     private fun requestOf(intent: Intent?): ZenAutofillBridge.Request? {
         intent ?: return null
         val pkg = intent.getStringExtra(EXTRA_PACKAGE)?.takeIf { it.isNotBlank() } ?: return null
-        val passwordId = autofillIdExtra(intent, EXTRA_PASSWORD_ID) ?: return null
+        val usernameId = autofillIdExtra(intent, EXTRA_USERNAME_ID)
+        val passwordId = autofillIdExtra(intent, EXTRA_PASSWORD_ID)
+        if (usernameId == null && passwordId == null) {
+            return null
+        }
         return ZenAutofillBridge.Request(
             packageName = pkg,
             appLabel = appLabel(pkg),
             webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN),
             webScheme = intent.getStringExtra(EXTRA_WEB_SCHEME),
-            usernameId = autofillIdExtra(intent, EXTRA_USERNAME_ID),
+            usernameId = usernameId,
             passwordId = passwordId,
         )
     }

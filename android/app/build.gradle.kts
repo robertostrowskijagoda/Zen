@@ -275,4 +275,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.1.2")
     // System biometric prompt with a Keystore key.
     implementation("androidx.biometric:biometric:1.1.0")
+    // The autofill suggestion inside the keyboard (Android 11+): the slice
+    // format keyboards render, built by InlineSuggestionUi.
+    implementation("androidx.autofill:autofill:1.3.0")
 }

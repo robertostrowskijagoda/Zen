@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Zen's autofill suggestion in the system's drop-down (ZenAutofillService.kt).
+     Shown through RemoteViews, so only LinearLayout, ImageView and TextView.
+     The row paints its own background: the system's theme decides neither
+     it nor the text. The colours here are the light ones; the code sets the
+     dark ones when the system is in night mode. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/zen_autofill_suggestion"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#FFFFFFFF"
+    android:gravity="center_vertical"
+    android:minHeight="56dp"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="8dp">
+
+    <ImageView
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter"
+        android:src="@mipmap/ic_launcher" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/zen_autofill_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/launcher_label"
+            android:textColor="#FF1F1F1F"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/zen_autofill_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/biometric_unlock_reason"
+            android:textColor="#FF5F6368"
+            android:textSize="14sp" />
+    </LinearLayout>
+</LinearLayout>
