@@ -440,4 +440,125 @@ void main() {
       ]);
     });
   });
+
+  group('the video path line after "connected"', () {
+    StatsReport report(String id, String type, Map<String, dynamic> values) =>
+        StatsReport(id, type, 0, <String, dynamic>{'id': id, ...values});
+
+    /// The statistics of the answering phone at 04:58:29 on 12 November:
+    /// VP8 in, decoded in software, and H.264 out of the hardware encoder.
+    List<StatsReport> answeringPhone() => <StatsReport>[
+      report('C1', 'codec', <String, dynamic>{'mimeType': 'video/VP8'}),
+      report('C2', 'codec', <String, dynamic>{'mimeType': 'video/H264'}),
+      report('I1', 'inbound-rtp', <String, dynamic>{
+        'kind': 'video',
+        'codecId': 'C1',
+        'trackIdentifier': 'their-camera',
+        'framesDecoded': 38,
+        'decoderImplementation': 'libvpx',
+      }),
+      report('O1', 'outbound-rtp', <String, dynamic>{
+        'kind': 'video',
+        'codecId': 'C2',
+        'framesEncoded': 56,
+        'encoderImplementation': 'c2.qti.avc.encoder',
+      }),
+    ];
+
+    test('says plainly what goes out and comes in', () {
+      expect(
+        describeCallVideoPath(callVideoPath(answeringPhone())),
+        'sends H264 (encoder c2.qti.avc.encoder), receives VP8 '
+        '(decoder libvpx)',
+      );
+      expect(
+        describeCallVideoPath(callVideoPath(<StatsReport>[])),
+        'sends no video, receives no video',
+      );
+    });
+
+    test('with their screen shared too, the camera on the screen is the one '
+        'named, and its frames are the ones counted', () {
+      final List<StatsReport> reports = <StatsReport>[
+        ...answeringPhone(),
+        report('I2', 'inbound-rtp', <String, dynamic>{
+          'kind': 'video',
+          'codecId': 'C2',
+          'trackIdentifier': 'their-screen',
+          'framesDecoded': 400,
+          'decoderImplementation': 'c2.qti.avc.decoder',
+        }),
+      ];
+      expect(
+        callVideoPath(reports, receivedTrackId: 'their-camera').receives,
+        'VP8',
+      );
+      expect(remoteVideoFramesDecoded(reports, trackId: 'their-camera'), 38);
+      expect(remoteVideoFramesDecoded(reports), 400);
+      expect(remoteVideoFramesDecoded(<StatsReport>[]), isNull);
+    });
+  });
+
+  group('the watch over the remote picture', () {
+    test('frames decoded, none on the screen within a look: bound again, at '
+        'most three times', () {
+      final RemotePictureWatch watch = RemotePictureWatch();
+      // At "connected": the count to compare with.
+      expect(
+        watch.look(shown: false, bound: true, decoded: 0),
+        RemotePictureStep.wait,
+      );
+      for (int i = 1; i <= 3; i++) {
+        expect(
+          watch.look(shown: false, bound: true, decoded: i * 50),
+          RemotePictureStep.rebind,
+        );
+        expect(watch.rebinds, i);
+      }
+      expect(
+        watch.look(shown: false, bound: true, decoded: 400),
+        RemotePictureStep.done,
+      );
+    });
+
+    test('nothing to do while nothing is decoded, nothing bound, or the '
+        'picture is there', () {
+      final RemotePictureWatch watch = RemotePictureWatch();
+      expect(
+        watch.look(shown: false, bound: true, decoded: 10),
+        RemotePictureStep.wait,
+      );
+      // No new frame decoded: the sender may simply send none.
+      expect(
+        watch.look(shown: false, bound: true, decoded: 10),
+        RemotePictureStep.wait,
+      );
+      // Their camera is off: nothing bound.
+      expect(
+        watch.look(shown: false, bound: false, decoded: 90),
+        RemotePictureStep.wait,
+      );
+      expect(watch.rebinds, 0);
+      expect(
+        watch.look(shown: true, bound: true, decoded: 200),
+        RemotePictureStep.done,
+      );
+    });
+
+    test('ends after its looks', () {
+      final RemotePictureWatch watch = RemotePictureWatch(maxLooks: 2);
+      expect(
+        watch.look(shown: false, bound: false, decoded: null),
+        RemotePictureStep.wait,
+      );
+      expect(
+        watch.look(shown: false, bound: false, decoded: null),
+        RemotePictureStep.wait,
+      );
+      expect(
+        watch.look(shown: false, bound: false, decoded: null),
+        RemotePictureStep.done,
+      );
+    });
+  });
 }

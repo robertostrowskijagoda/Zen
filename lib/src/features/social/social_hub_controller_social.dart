@@ -1136,12 +1136,23 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
+  /// Whether the controls of [session] act on its media now: in the call,
+  /// and while an outgoing call rings or a call connects once its media
+  /// are set up ([CallMediaSessionController.controlsReady]). What is
+  /// chosen before the answer holds when the call connects.
+  bool _callControlsWork(CallSession session) =>
+      session.status == CallSessionStatus.active ||
+      (!session.isGroup &&
+          session.ownControlsShown &&
+          _callMedia.activeCallId == session.id &&
+          _callMedia.controlsReady);
+
   Future<void> toggleActiveCallMute() async {
     if (state.activeCall?.isGroup ?? false) {
       return _toggleGroupCall(GroupCallToggle.mute);
     }
     final CallSession? session = state.activeCall;
-    if (session == null || session.status != CallSessionStatus.active) {
+    if (session == null || !_callControlsWork(session)) {
       return;
     }
     final bool nextMuted = !session.isMuted;
@@ -1164,7 +1175,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return _toggleGroupCall(GroupCallToggle.speaker);
     }
     final CallSession? session = state.activeCall;
-    if (session == null || session.status != CallSessionStatus.active) {
+    if (session == null || !_callControlsWork(session)) {
       return;
     }
     final bool nextSpeakerOn = !session.isSpeakerOn;
@@ -1178,6 +1189,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (now == null || now.id != session.id) {
       return;
     }
+    if (now.status != CallSessionStatus.active) {
+      // Chosen before the answer: routed once more when the call connects.
+      _speakerChosenBeforeConnectFor = now.id;
+    }
     state = state.copyWith(
       activeCall: now.copyWith(isSpeakerOn: nextSpeakerOn),
     );
@@ -1189,7 +1204,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return _toggleGroupCall(GroupCallToggle.camera);
     }
     final CallSession? session = state.activeCall;
-    if (session == null || session.status != CallSessionStatus.active) {
+    if (session == null || !_callControlsWork(session)) {
       return;
     }
     final bool nextCameraEnabled = !session.isCameraEnabled;
@@ -1442,8 +1457,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
     _stopCallReRing();
+    // The media say whether this was the answer or a copy of it.
     await _callMedia.applyRemoteAnswer(description);
-    logZenMessage('Call answer applied');
     // Read again: the media may have connected while the answer was being
     // applied, and the call it made active must not go back to
     // "Łączenie…" (no second "active" comes to undo that).
@@ -1480,10 +1495,20 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       _dismissCallNotification(session.peerAddress),
       context: 'Dismissing the connected call notification failed',
     );
+    if (_speakerChosenBeforeConnectFor == session.id) {
+      _speakerChosenBeforeConnectFor = null;
+      // "Głośnik" switched while it rang: the platform picks a route of its
+      // own when the other side's sound starts, the one chosen goes back.
+      unawaitedLogged(
+        _callMedia.setSpeakerOn(session.isSpeakerOn),
+        context: 'Routing the call sound as chosen before the answer failed',
+      );
+    }
     state = state.copyWith(
       activeCall: session.copyWith(
         status: CallSessionStatus.active,
         kind: _callMedia.activeKind ?? session.kind,
+        // What the camera is, also when it was switched before the answer.
         isCameraEnabled: _callMedia.hasLocalVideo,
         // The sound went to a car's speakers or earphones: out loud, so
         // "Głośnik" is on, and off takes the call to the phone's ear.

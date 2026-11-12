@@ -25,6 +25,15 @@ import 'package:zen/src/core/logging/zen_log.dart';
 // shared screen) right before each offer and answer. Where the platform
 // refuses them, the local description is reordered instead
 // ([setCallLocalDescription]).
+//
+// That alone decides only what the other side sends. What this side sends
+// follows the order of the other side's description (see
+// [negotiatedVideoCodecs]): an offer that listed H.264 first made the
+// answering phone send H.264 although its answer said "VP8 H264". So the
+// other side's description is reordered too, VP8 first, before it is
+// applied ([preferVp8InRemoteSdp]): two phones that both have VP8 send VP8
+// both ways, whatever either of them listed first, and only one of them
+// needs to know this.
 
 /// Codec names that repair or protect the codecs kept (retransmission,
 /// redundancy, forward error correction): kept with them.
@@ -233,6 +242,81 @@ String? firstVideoCodecInSdp(String sdp) {
     return null;
   }
   return null;
+}
+
+/// The codecs (not the repair formats) of the first video m-section of
+/// [sdp], in its order, each name once. Empty without a video section.
+List<String> videoCodecsInSdp(String sdp) {
+  for (final List<String> section in _sections(sdp.split(RegExp(r'\r?\n')))) {
+    final String head = section.first.trim();
+    if (!head.startsWith('m=video')) {
+      continue;
+    }
+    final (Map<String, String> names, Map<String, String> _) = _payloads(
+      section,
+    );
+    final List<String> codecs = <String>[];
+    for (final String payload in head.split(' ').skip(3)) {
+      final String? name = names[payload];
+      if (name != null &&
+          !_repairCodecs.contains(name.toLowerCase()) &&
+          !codecs.contains(name)) {
+        codecs.add(name);
+      }
+    }
+    return codecs;
+  }
+  return const <String>[];
+}
+
+/// The video codec each side sends once [answer] answers [offer]. WebRTC
+/// takes the send codec from the remote description, in that
+/// description's order: the offering side sends with the first codec of
+/// the answer, the answering side with the first codec of the offer that
+/// its answer kept. So the order of the offer decides what the answering
+/// side sends, whatever the answer lists first (a phone that answered "VP8
+/// H264" to an offer of "H264 ... VP8" sent H.264). Null for a side that
+/// has no video codec in common.
+({String? offererSends, String? answererSends}) negotiatedVideoCodecs({
+  required String offer,
+  required String answer,
+}) {
+  final List<String> answered = videoCodecsInSdp(answer);
+  final Set<String> kept = <String>{
+    for (final String name in answered) name.toUpperCase(),
+  };
+  String? answererSends;
+  for (final String name in videoCodecsInSdp(offer)) {
+    if (kept.contains(name.toUpperCase())) {
+      answererSends = name;
+      break;
+    }
+  }
+  return (
+    offererSends: answered.isEmpty ? null : answered.first,
+    answererSends: answererSends,
+  );
+}
+
+/// The other side's [sdp] as this side applies it: VP8 moved to the front
+/// of its video codecs ([preferVp8InSdp]), so that this side sends VP8
+/// whatever order the other side listed its codecs in (see
+/// [negotiatedVideoCodecs]); a side without VP8 keeps its own order behind
+/// H.264. Every line but the video m-lines stays.
+String preferVp8InRemoteSdp(String sdp) {
+  final String? first = firstVideoCodecInSdp(sdp);
+  if (first == null || first.toUpperCase() == 'VP8') {
+    return sdp;
+  }
+  final String reordered = preferVp8InSdp(sdp);
+  final String? now = firstVideoCodecInSdp(reordered);
+  if (now != null && now.toUpperCase() != first.toUpperCase()) {
+    logZenMessage(
+      'Call video codecs: the other side listed $first first; '
+      '$now moved to the front before applying it',
+    );
+  }
+  return reordered;
 }
 
 /// [sdp] with each video m-section's payload list reordered: VP8 and its

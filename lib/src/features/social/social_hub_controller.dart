@@ -956,6 +956,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   /// The active call was answered while Zen was not on the screen.
   bool _callAnsweredOffScreen = false;
+
+  /// The call whose "Głośnik" was switched before it connected: routed once
+  /// more when it does.
+  String? _speakerChosenBeforeConnectFor;
   final Map<String, int> _openedAt = <String, int>{};
 
   /// [hub] as saved: each friend's presence with its latest confirmation

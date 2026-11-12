@@ -374,7 +374,8 @@ class _DesktopButtons extends ConsumerWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
-        if (session.status == CallSessionStatus.active)
+        // The microphone from the first ring on, as on the call screen.
+        if (session.ownControlsShown)
           IconButton.filledTonal(
             key: const Key('call-compact-mute'),
             tooltip: session.isMuted ? t('Włącz mikrofon') : t('Wycisz'),

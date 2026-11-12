@@ -127,7 +127,8 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final CallSession session = widget.session;
-    final bool active = session.status == CallSessionStatus.active;
+    // The call's own controls: while it rings out and connects too.
+    final bool active = session.ownControlsShown;
 
     return Material(
       color: Colors.transparent,
