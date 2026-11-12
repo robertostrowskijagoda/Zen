@@ -56,7 +56,11 @@ don't see you either.
 - **Safe date:** in a pair, both can agree to see your mutual friends, to ask
   them about each other. **I'm going on a date** tells a friend where and
   when; they can ask for your location, and get an alarm if you don't check
-  in.
+  in. The friend's phone counts the time left from when the word reached
+  it, so two clocks that disagree (one twenty minutes ahead used to ring the
+  alarm before the date was over) no longer matter. A date nobody
+  confirmed, and its last place, do not stay for ever: they go a week after
+  the alarm, and the friend can end it by hand once the time has passed.
 
 **Hiding.** Hide your profile from chosen friends or whole group chats:
 *only from them*, or *from them and their circle* (nobody who reaches you
@@ -78,11 +82,23 @@ itself; the list of hidden people never travels in your profile.
   goes only to your own friends, salted anew for each, so friends of friends
   cannot test addresses against it.
 - **Report a minor** disables a profile on your phone at once and reports it
-  to the pyramid; a phone that sees reports from two different people
-  disables it too. Pyramid dating bans hide a profile as well.
+  to the pyramid. A profile is switched off for everyone on a phone only when
+  **two of its owner's own friends** reported it: a person with several
+  dating keys counts once (keys cost nothing, so they used to count as many
+  reporters and could switch someone's profile off on other phones), and
+  reports from keys the phone cannot put a person to only show a warning. A
+  report can be withdrawn. Pyramid dating bans hide a profile as well. A
+  profile that is switched off, banned or hidden also announces no messages
+  and no matches: one rule decides everywhere a match can reach the person.
+- **Blocking** a person (in any feature) also removes their dating profile
+  and keys; see [Chats](chats-and-delivery.md).
 
 ## Limits
 
+- **The private test protects only against apps that follow the rules.** A
+  modified app can ask without wishes and read the offer; what keeps your
+  profile from a particular friend is the **hide list**, which your phone
+  enforces itself and which protects against friends, not the match test.
 - A modified app of a dater learns, from each answer, whom the lantern's
   holder looks for (as it could with the earlier test, in three answers);
   answers per lantern and friend stay limited.

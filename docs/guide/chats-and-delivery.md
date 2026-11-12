@@ -24,6 +24,14 @@
   GIF picked from the gallery as your profile photo or cover keeps
   playing too, and a HEIC photo is read by the phone's own decoder for the
   profile, posts and comments.
+- **What leaves with a picture or a film.** Photos, films and voice or
+  video recordings sent in a chat leave without place, time and device data
+  (EXIF and the like), however you picked them: from the gallery or the
+  camera, dropped, pasted or recorded (a film used to go as it was, and a
+  HEIC photo as a file with its whole EXIF, while posts already stripped
+  both). A file of another kind goes unchanged, and so does one that cannot
+  be cleaned; the attach sheet says so before you send. More kinds of
+  received files warn before opening.
 - On a computer, **drop** files anywhere on a conversation or **paste** them
   with Ctrl+V (⌘V on a Mac): photos, GIFs, videos, files. Text in the
   clipboard pastes as text, as usual.
@@ -39,6 +47,11 @@
 - *typing…* shows while a friend writes and goes a few seconds after their
   last keystroke, and at once when they leave the chat or Zen.
 - Audio and video calls, also in groups, with screen sharing.
+- **The conversation does not move under your finger.** While you drag the
+  list or it keeps moving after a flick, a new message, receipt, "typing…"
+  line or file no longer shifts what is on the screen (it used to jump by
+  the height of what came, also at the newest message). What arrived waits
+  on the *to newest* button.
 - Filters in the chat list: all, unread, online, close friends.
 
 ## Reactions, replies, edits, forwarding
@@ -54,6 +67,11 @@
   The message is marked *edited*; the earlier text is not kept. Other
   devices take an edit only from the message's author, and only up to 25
   hours after it was sent (one hour of leeway for clocks).
+- **Disappearing messages.** The timer you set for a chat carries a stamp
+  that orders every change on every device, whatever the clocks say, so a
+  message written before the change no longer switches the timer back on
+  for both phones. A copy of a message that comes again writes its file
+  once.
 - **Delete for everyone.** Your own messages; in a group, its creator may
   also delete anyone's message (a pyramid cell chat has no creator, so
   there only authors can). A *Message deleted* note stays in its place,
@@ -123,9 +141,11 @@ reactions and reply.
 
 Every message is written to disk before the first attempt, so nothing is
 lost if the app or the phone stops in between. A message is confirmed to
-its sender only once it is in the recipient's chat: one lost on the way in
-(the app killed, a failed write) comes again instead of showing
-*Delivered* for ever. A message that could not be sent puts its text and
+its sender only once it is in the recipient's chat or refused for good, on
+every path: one lost on the way in (the app killed, a failed write, a busy
+start while the friend list could not be read, a message that arrived
+before its sender's acceptance, an edit that came before its message)
+comes again instead of showing *Delivered* for ever. A message that could not be sent puts its text and
 its quote back into the field; a group message longer than the members'
 phones keep (64 K characters) is refused instead of cut. Duplicates (a direct copy and
 a mailbox copy) are recognised and shown once. The outbox holds up to 32 MB
@@ -179,7 +199,12 @@ of posts). A receipt for a message a friend took from a mailbox while you
 were away reaches you through your own mailboxes. A device of a friend
 that has been silent for a week while another of theirs answers is taken
 for gone: it still gets what a person sent, but nothing Zen sends by
-itself until it is heard from again. Mail for someone who is no longer
+itself until it is heard from again. What a person did while it was away
+now reaches it when it is back: a group leave, a friend removal, a
+cancelled transfer, a board post, and also a voice message, a photo or a
+text over 48 KB (only chat kinds counted as a person's before). A mailbox's
+read receipt is no longer replaced by a newer one, and a message that can
+only travel directly says so. Mail for someone who is no longer
 your friend goes.
 
 **Friends with several devices, or a new phone.** Each of your devices has
@@ -251,7 +276,11 @@ confirm.
 reading it marks only the friend's messages, all of them up to the one
 read, and sends one receipt. A chat read on one device of the account is
 read on its others too (groups included), with no unread count and no
-notification left there.
+notification left there, also when they were off: the read mark waits in
+the queue until it is sent, and a message that arrives after its mark comes
+in read. A call taken on another device of yours leaves no missed call (the
+call's end sent to the callee's other devices looked like the caller
+hanging up).
 
 ## Calls
 
@@ -267,10 +296,18 @@ video and shared screen are protected three times:
 
 The call screen says which protection a call has. In a group call every
 participant has a separate connection to every other. The camera and a
-shared screen use the VP8 codec on both sides, also with an older Zen:
-two phones with hardware codecs could agree on one whose frames the frame
-encryption could not open, and the picture stayed black while the sound
-worked. The technical log (**Diagnostics**) shows for each call which
+shared screen use the VP8 codec on both sides, whatever either side lists
+first (the side that answers puts VP8 first in the other's offer): two phones
+with hardware codecs could agree on one whose frames the frame encryption
+could not open, and the picture stayed black while the sound worked. The
+other side's picture shows in every video call: the picture was bound to
+the stream when the call first reported it, before the system had
+registered it, so in some calls it stayed black while frames were
+decoded; it is now bound once the system has the stream, and again if
+decoded frames never reach the screen. The microphone, loudspeaker and
+camera buttons work while the call rings, not only once it is active. These
+fixes need both sides on this version; a call with an older Zen keeps the
+old behaviour on that side. The technical log (**Diagnostics**) shows for each call which
 codecs were offered and how many video frames went out, came in and were
 shown.
 
@@ -292,6 +329,25 @@ Linux `.wav`. On Linux it needs PulseAudio or PipeWire. A finished
 recording is encrypted into Zen's storage in small pieces, however long it
 is, and the plain file is deleted only after that; Zen says *saved* only
 then, and offers *Retry* when saving failed.
+
+## Blocking a person
+
+A block is of **the person**, in every feature and on every device of your
+account. One list, kept by account with every address, device and dating key
+Zen knows for them, is read by the messenger, Dating, *Nearby*, the wall and
+films, pebbles, introductions and mentions, and it comes back from every
+copy of your account. Before, each feature kept its own: someone blocked in
+the messenger still got your dating profile through a mutual friend, and a
+block in Dating was beaten by a new dating key. Their likes and comments no
+longer show under friends' posts (the wall, a post's page, the profile, the
+bell and the system notifications leave them out) and their names leave the
+counts; a removed friend's account is remembered so that a block still finds
+it. The dialog says what a block covers.
+
+**The honest limit:** an account costs nothing. Someone you blocked can make
+a new account and a new dating key, and Zen cannot recognise them as the
+same person; it refuses the accounts, addresses, devices and keys it knows
+to be theirs, never the person.
 
 ## Privacy
 
@@ -333,8 +389,14 @@ then, and offers *Retry* when saving failed.
 - While an Android phone sleeps (Doze), mail from the mailboxes can come a
   few minutes late.
 - Read receipts exist only in one-to-one chats.
-- Leaving or declining a group, or **Clear history** in a group, removes
-  its chat, its files and its notifications from this phone. A creator who
+- Leaving a group removes its chat, its files and its notifications from
+  **every device of your account**, not only this phone (the dialog says
+  so); declining a group or **Clear history** in a group removes them from
+  this phone. Two members adding someone at the same time no longer split a
+  group: a newcomer takes the members' additions it missed, and a message
+  from a member it does not know yet waits until it does. An invitation
+  shows whether it arrived, says when it did not (it used to show as waiting
+  for ever after it had expired unseen) and can be sent again. A creator who
   left the group is no longer a member: no phone takes their messages
   until they are invited again.
 - **Presence.** Friends see one of three states, as a dot on the avatar

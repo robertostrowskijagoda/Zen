@@ -106,6 +106,18 @@ sound is copied when it is AAC and otherwise encoded by vo-aacenc (ffmpeg's
 own encoder on the ffmpeg path), so it is lost only when it cannot even be
 decoded (the app says so).
 
+## Data shipped with the app
+
+The **Public Suffix List** (https://publicsuffix.org/list/, MPL-2.0) is part
+of the app: `lib/src/features/passwords/public_suffix_rules.dart` holds its
+rules without the comments, with its version, its commit and its licence
+notice (`assets/licenses/native/public_suffix_list.txt`). The password
+autofill offers a login as the same site only within one registrable domain
+of this list. `dart run tool/public_suffix_list.dart` refreshes it (and its
+test vectors, `test/fixtures/public_suffix/test_psl.txt`, public domain);
+`dart run tool/release.dart prepare` stops when the list is older than 120
+days, since hosts that hand out subdomains are added to it every week.
+
 ## Fonts, icons and sounds
 
 - Baloo 2, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans: SIL Open Font

@@ -58,6 +58,29 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   internet (1.6; Yggdrasil's own multicast discovery stays off), desktop
   inbound listener `tls://[::]:32913` [V], UPnP / NAT-PMP port mapping and
   "bridge" announcements in the ledger (`lg_bridges`).
+- **Every device has an order of its own** over the built-in public peers
+  (`public_peers.go`, `peerOrderSeed`): the order comes from the node's
+  private key, so it is the same after a restart and cannot be worked out
+  from outside from a Zen address, with one pick per operator (`peerGroup`:
+  the /24 of an IPv4 address, the /48 of an IPv6 one, else the host name; the
+  port plays no part). With one order for all, every locked phone dialled
+  the same volunteer's node first, which saw the address and the invitation
+  code of nearly every locked phone, and when it went away all moved to the
+  same next one. A computer's built-in selection is spread the same way
+  (countries first, each country's peers in its own order). The door host
+  (`door_node.go`) takes a peer of a different operator than the main
+  node's, so no operator links the sticker on a door with the person.
+- **Port mapping** (`port_mapper.dart`): the SSDP search is believed only
+  from the default gateway (the router that forwards a port to this
+  computer is the gateway), its `LOCATION` must name that same address,
+  redirects are not followed, and a router is described over plain http at
+  an address on the local network, never this computer. The announced
+  bridge carries this node's key, and a friend confirms a bridge only when
+  the node at the announced address proves that key (`bridge_book.dart`),
+  so a device on the same Wi-Fi can no longer pose as the router and have
+  the computer announce a stranger's server. Addresses that are not worth
+  announcing (6to4, Teredo, the newer documentation range, besides the
+  private and loopback ones) are left out.
 - Transit on phones (`transit_guard.go`) [V]: every Yggdrasil node forwards,
   and ironwood weighs links by latency, so a phone on the same Wi-Fi as a
   computer bridge can become the cheapest way for the bridge's strangers'
@@ -69,7 +92,11 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   above 64 KiB/s, or with transit while the last hour's is above 32 MiB, it
   keeps a single way to the mesh for 30 minutes: the friends' bridges when
   one is up (they are never set aside), otherwise one public peer, or one
-  device nearby when no public peer is up. Holds double for each further
+  device nearby when no public peer is up. A hold that began from transit
+  between public peers alone leaves the links to people nearby open, and
+  keeps the public peer that carried the least (not the first that was
+  up), so a public peer can neither close those links nor make itself the
+  only peer. Holds double for each further
   hold within a day (at most 6 hours) only when the transit crossed between
   a peering nearby and a public one, as a home computer routing through the
   phone does; then transit that comes back holds again after one window.
@@ -330,9 +357,20 @@ device keys, label `zen.local.v1`); a stranger has none.
   sign.
 - **Adverts** carry a Bloom filter with one tag per device the sender links
   with (`HMAC(tagKey, "adv" | 5-minute slot | salt)`, a fresh random salt
-  every time, filter size in steps of 16 bytes), so to anyone without the
-  secret they are random bytes; they reveal only that a Zen device with
-  local links is there and roughly how many devices it links with.
+  every time, filter size in steps of 16 bytes, seven positions per tag),
+  so to anyone without the secret they are random bytes; they reveal only
+  that a Zen device with local links is there and roughly how many devices
+  it links with. A filter holds only as many tags as keep a false match
+  rare (16 bits a device; `localAdvertCapacity`: eight in the 16 bytes of
+  a Bluetooth advert): the account's own devices go in first, then those
+  linked lately, then the others by turns, a new set each slot. A filter
+  with more than 35% of its bits set is made again under a new salt, and
+  one a receiver sees with more than 40% set means nothing and is not
+  tested on any transport (an advert with every bit set once matched every
+  phone). Bluetooth: the advert's service UUID and the L2CAP channel
+  number (PSM) in the manufacturer data are not hidden, so a Zen device,
+  and the same one while its listener runs, can be recognised by anyone in
+  range.
 - **LAN beacon**: the advert, then the "people nearby" advert of 2.12 (20
   bytes, only while the person is visible), an info byte (that advert's
   length, 0 or 20, plus `0x80` while the sender looks around) and the TCP
@@ -341,9 +379,19 @@ device keys, label `zen.local.v1`); a stranger has none.
   (at most every 5 s per address). A device with no devices to link with
   beacons only while it looks around.
 - **Handshake** (both ends, any stream, `local_link_handshake.go`, version
-  2): fresh one-time keys, X25519 and an ML-KEM-768 encapsulation key, and a
-  selector `HMAC(selKey, one-time keys)[:8]` per candidate device shuffled
-  with random padding. Each side then encapsulates a secret to the other's
+  3): each side opens with the version and a fresh random nonce, then sends
+  a hello: fresh one-time keys, X25519 and an ML-KEM-768 encapsulation key,
+  and a selector `HMAC(selKey, its own mesh address | its one-time keys |
+  the other side's nonce)[:8]` per candidate device, shuffled and padded
+  with random ones to one of a few fixed counts (so a hello's size does
+  not tell how many devices a phone links with). A hello so answers only
+  the opening it was made for: one recorded from a phone and played to it
+  or to its friends later, anywhere, names nothing they would answer, and
+  one sent back to its sender names the wrong address. A device on
+  version 2 sends its hello where the opening belongs; either side then
+  closes, so the two link only over the internet until both have version
+  3. On a network stream the opening must come within two seconds, else
+  the slot is freed. Each side then encapsulates a secret to the other's
   ML-KEM key; the stream keys come from HKDF over the X25519 result and both
   ML-KEM secrets (the lower side's first), salt the pair's link key, info
   both hellos and both ciphertexts. So the stream is hybrid post-quantum,
@@ -354,6 +402,13 @@ device keys, label `zen.local.v1`); a stranger has none.
   sealed again by 1.5. The link counts the frames it carries for the device
   at its other end (`local_link_traffic.go`); a stream that names a frame
   longer than a node takes (1 MiB) is no longer counted.
+- A LAN beacon is taken only when it comes from the beacon port of an
+  address on one of this device's local networks and names the TCP port the
+  system gave the listener (never a well-known one), and a beacon is
+  answered only on the local network (the socket listens on every
+  interface, and a host with a public address would otherwise be answered
+  or dialled). An iPhone takes at most two waiting Bluetooth streams from
+  one device, as Android and the bridge do.
 - Limits: 2048 devices, 16 streams, 8 handshakes at once, 2 per source,
   beacon rate limits per sender and in all.
 
@@ -553,6 +608,24 @@ and reads their next messages through it. What really was written earlier
 where its time says, and a late copy never puts its older words at the
 top of the chat list.
 
+**Confirmation** (`message_ack`): a message is confirmed only when the app
+kept it or refused it for good, on every path. A signal that cannot be
+decided yet is put off and comes again, not dropped and confirmed: while the
+friend list could not be read (a busy start) a message was dropped and still
+confirmed (the sender saw "delivered" for a message that was gone); the same
+for a message that overtook its sender's acceptance, and an edit that came
+before its message was confirmed while it waited in memory only.
+
+**Disappearing timers** carry a stamp: a message carries when its sender's
+timer was set (`ttlAt`, beside `ttl`), and `disappear_timer` carries it as
+`at`. The later setting wins, the same on every phone of the conversation;
+a stamp of a change made after seeing another one is later than it whatever
+the clocks say (`laterDisappearStamp`), two at the very same millisecond
+leave the shorter one. A setting with no stamp (Zen 1.16.5 and earlier) is
+taken only while none is known: it may still switch a timer on, never undo a
+stamped change. A message is looked up before its file is written, so a
+copy that comes again writes its file once.
+
 `msg_react`, `msg_edit` and `msg_delete` (like `message` and `disappear_timer`)
 are mirrored to the sender's other devices, which apply them as their own.
 A message that disappears (`ttl`), is edited, is deleted from one device or
@@ -571,7 +644,13 @@ left, and sends nothing to the friend. Groups have no read receipts: a
 device that read a group sends its other devices `acct_mirror {to:
 "group:<id>", p: {type: "group_read", groupId, msgId, author}}` naming the
 newest member's message read, and they mark the group read up to it.
-Devices older than 1.16.5 ignore a mirrored type they do not know.
+Devices older than 1.16.5 ignore a mirrored type they do not know. The read
+mark reaches the account's other devices also when they were off: it waits
+in the queue until it is sent (it went as one packet that was never sent
+again), and a message that arrives after its mark comes in read. The
+call's end sent to the callee's other devices is no longer taken as the
+caller hanging up, so a call taken on another device leaves no missed call
+(1.17.0; both sides).
 
 **Numbers and nesting from a peer** (`runtime_signal_parser.dart`): a number
 that is not finite, or lies beyond ±(2^53 − 1) (`kMaxSignalNumber`), and
@@ -612,6 +691,18 @@ no phone takes the creator's messages, calls, timers, edits or deletions,
 nor tells of them while locked, until a later invitation makes them a
 member again. A phone restored from a copy keeps who left.
 
+**Converging membership** (1.17.0; the fixes need both sides). Two members
+adding someone at once no longer split a group: a newcomer used to learn
+the member list from its inviter alone and dropped the messages of members
+it did not know. Members now pass on the additions a newcomer missed, and a
+`group_message` from a member not yet known is put off until it is.
+**Invitations are tracked**: a `group_invite` shows as waiting until its
+`group_invite_ack` came; one that expired unseen is told as not arrived (it
+showed as waiting for ever) and can be sent again; member list updates are
+not counted as invitations waiting. A `group_leave` of the person's own
+account reaches its other devices, which leave too: the chat and its files go
+from all of them.
+
 ### 2.5 Calls (signalling) [V]
 
 Not reliable (real-time). `kind` is `"audio"` or `"video"`; most carry `callId`.
@@ -641,7 +732,15 @@ VP9 or AV1, and two phones listing their hardware codecs first could
 otherwise agree on frames the other side could not open (the picture
 stayed black while the sound worked). An older Zen on the other side gets
 VP8 too: it answers in the order offered, and its own offer is answered
-with VP8 first. The technical log names per call the codecs offered, whether
+with VP8 first. Since 1.17.0 the side that answers also puts VP8 first in
+the other side's description before applying it: it used to send the first
+codec of the offer, so an offer with H.264 first still got hardware H.264.
+The other side's picture is bound to the renderer by the track once the
+platform has registered its stream (it was bound when the track was first
+reported, before that, so in some calls it stayed bound to nothing while
+frames were decoded), and bound again if decoded frames never reach the
+screen; the microphone, loudspeaker and camera controls are shown and work
+while the call rings, not only once it is active. The technical log names per call the codecs offered, whether
 the camera's frames were sealed and opened, the video packets sent and
 received and the frames decoded and shown (`call_video_trace.dart`, lines
 `Call video`).
@@ -842,7 +941,16 @@ Only between friends (lanterns and what travels back also across opened gates), 
 | `date_intro`, `date_intro_re` | A matchmaker asks a friend for a lantern for an introduction; the friend's phone answers alike with dating on or off. |
 | `date_ask`, `date_ask_re` | "What do you think about X?" and the answer, between friends. |
 | `date_vouch_req`, `date_vouch` | Ask for / give a few words for a profile. |
-| `date_safe`, `date_safe_ok`, `date_loc_req` | "I'm going on a date", "All OK", a one-shot location request. |
+| `date_safe`, `date_safe_ok`, `date_loc_req` | "I'm going on a date", "All OK", a one-shot location request. The watcher counts the time left from when `date_safe` arrived (its own clock, not the time the other phone named), so a clock twenty minutes ahead cannot ring the alarm early; a date nobody confirmed and its last place are dropped a week after the alarm, and the watcher can end it by hand once the time has passed. |
+
+Minor reports: a profile is hidden for everyone on a phone only when two of
+its owner's own friends (accounts the phone can put the dating keys to)
+reported it as a minor; reports from keys that cannot be put to a person only
+show a warning, two keys of one person count once, and a report can be
+withdrawn. A profile that is switched off, banned or hidden announces no
+messages and no matches: one rule decides wherever a match can reach it. The
+hide list holds against friends; the sealed match test (`match`, `match_re`)
+holds only against apps that follow the rules.
 
 ### 2.9 Relay mailboxes (`rly_*`)
 
@@ -1072,11 +1180,32 @@ without the password.
     listed there (at most 24), at most two of each kind per sender, 48 in
     all, and only with the Argon2 cost pieces are written with; it tries at
     most 600 combinations of the halves that came.
-- **What a holder keeps** (`recovery/pieces`, at most 200 accounts): the
-  newest generation and the one before; the one before goes 60 days after
-  a newer one came if nobody said to forget it (`kPreviousPieceKept`), all
-  of them 42 days after the friendship ended (`kPiecesAfterFriendship`; a
-  friendship that comes back within it changes nothing).
+- **What a holder keeps** (`recovery/pieces`, at most 200 accounts): every
+  generation until told to forget it (since 1.17.0; it kept the two newest,
+  so two changes in a row dropped the last complete generation, and the
+  60-day `kPreviousPieceKept` rule no longer drops one on its own), all of
+  them 42 days after the friendship ended (`kPiecesAfterFriendship`; a
+  friendship that comes back within it changes nothing). Older generations
+  are forgotten only by holders who confirmed the new one (`rc_forget`
+  names the generation kept), and a piece forgotten does not come back
+  from a device that was away.
+- **Fewer holders.** A change that leaves fewer holders (fewer than two
+  close friends included, which used to make every holder forget at once,
+  with no wait and no password) waits a week (`kReductionDelay`) and tells
+  the person; it goes at once only when the person confirms it with the
+  account password. A holder not heard from for five weeks does not count
+  as having confirmed, so it does not count towards "secured".
+- **The account password on every device** (`ledger_identity_store.dart`):
+  the account key is kept only wrapped by the account password, on every
+  device. The wrapping, signed by the account key and carrying the time it
+  was set, travels with the account (a link, a copy, a backup, the paper key)
+  and between its devices when the password is set or changed on one of them
+  (`takeWrapping`: only one the account key signed, only a newer one; the
+  newest password wins); a device that took the account without it offers to
+  set one (`offersKeyGuard`). A cut-off device that comes back as a new
+  device of the account is not taken by the owner's devices until the person
+  says it is theirs; friends cannot tell and accept it (the account key is
+  not taken off a cut-off device).
 - **Limits.** The delays and the alarm bind honest apps only. Holders of
   one generation who reach the threshold together open the circle box and
   can then guess the account password offline, one Argon2id run per guess.
@@ -1132,7 +1261,10 @@ back to the account (another device, a key copy on paper or in a file, the
 key pieces) opens it.
 
 - **Sections:** `profile`, `contacts`, `levels`, `settings`, `pyramid`,
-  `household`, `dating`, `passwords` (the stored vault, `passwords/vault`)
+  `household`, `dating`, `passwords` (the stored vault, `passwords/vault`;
+  a switch, "Hasła w kopii u znajomych", on by default and the same on every
+  device of the account: off, the friends' copy is replaced at once with one
+  without the section)
   and `notes` (the notes to self, `notes/self`), and the conversations' text
   when "with chats" is on (the oldest left out past the cap). `passwords`
   and `notes` are padded with a `z` field to a multiple of 16 KiB, so the
@@ -1147,7 +1279,27 @@ key pieces) opens it.
   (`cbk_no`) is passed over for 7 days and the next is asked. A holder takes the copy of an account whose key piece it
   keeps, or of an accepted friend (friends' copies together at most 60 MB),
   at most 10 MB (+10 %) per account and 100 MB in all; a copy goes when
-  neither holds any more (the piece went, the friendship ended).
+  neither holds any more (the piece went, the friendship ended). A copy
+  whose size is under half of the one kept does not replace it at once: the
+  holder keeps the larger previous copy for 30 days. A manifest dated ahead
+  of the holder's clock, or signed by a device that was cut off, is refused
+  (it used to block every real copy), and the owner is told when friends
+  refuse.
+- **A phone that is looking for its copy never replaces it with its own.** A
+  search that gave up (a copy from a newer Zen, or thirty days without
+  finding one) let the new phone make a copy of its nearly empty data, of
+  which friends keep only the newest. The search now goes on once a day,
+  and a fresh copy from such a phone needs the person's word. An item over
+  the size of a part used to fail the whole copy, and a group's item carried
+  every name ever seen in it: names are kept for current members only, an
+  item still too large is trimmed or left out, the rest is saved, and
+  "Dlaczego nie działa?" says how many were cut.
+- **Another account never replaces one that holds anything** (a copy, a
+  backup file, a link or a key; `account_holdings.dart`): a device with a
+  name, notes, passwords, posts, chats or invitations, or an accepted
+  friend, a group or a pyramid, is not fresh. The person adds the other
+  account beside this one, or wipes this one on purpose after being offered
+  a backup; saved passwords go along only when ticked.
 - **When:** at most once a day, and after an important change (a friend, a
   group, a password, a note) at most once an hour; only the chunks a
   holder lacks travel. A part that cannot be read now (Zen locked) makes no
@@ -1391,7 +1543,15 @@ account's other devices take in what it lists, and its removals.
   the app sends by itself is no longer queued for it, and what waits or is
   held for it of that goes; what a person sent still waits as for any
   device that is away. It is back as soon as it is heard from. A friend who
-  is away with all their devices is never affected.
+  is away with all their devices is never affected. Since 1.17.0 **everything
+  is personal except the kinds that catch up by themselves**: a group leave,
+  a friend removal, a transfer cancel or a board post never reached a
+  device that was back after a week, and neither did a voice message, a
+  photo or a text over 48 KB, because a blob's manifest was judged by its
+  own kind. A mailbox's `zrcpt` is no longer replaced by a newer one, member
+  list updates are not counted as invitations waiting, a clock set back no
+  longer makes a mailbox refuse newer mail, and a message that can only
+  travel directly says so.
 - **Receipts for mail** (`zrcpt {ids}`): payloads taken from a mailbox
   while their sender did not answer (its `rly_ack` was likely lost) are
   confirmed by one receipt queued for the sender's mailboxes; a receipt

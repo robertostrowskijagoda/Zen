@@ -144,6 +144,14 @@ cannot read it.
   Their TLS 1.3 uses the hybrid post-quantum key exchange X25519MLKEM768.
   On unencrypted `tcp://` and `ws://` links, anyone on the line could see
   which mesh keys your node talks to.
+- **Every device has an order of its own** over the built-in list, made
+  from its node's private key (the same after a restart, and not to be
+  worked out from outside), with one pick per operator. With one order for
+  all, every locked phone dialled the same volunteer's node first: that one
+  operator saw the address and the invitation code of nearly every locked
+  Zen phone, and when it went away all moved to the same next one. A
+  household's door takes a peer of another operator than the main node's,
+  so no operator can link the sticker on a door to the person.
 - A phone keeps links to 4 peers at a time (1 while Zen only receives in
   the background: a phone with two links can become the shortest way
   between them, and strangers' traffic would then pass through it and
@@ -155,7 +163,10 @@ cannot read it.
   link that dies without a word (a mobile network that forgot it) is
   noticed on the phone's next wake, about every ten minutes: each
   wake sends its peer a tiny packet, and a peer that does not answer
-  within 3 seconds is replaced. With
+  within 3 seconds is replaced. The ten-minute marks are kept also on a
+  phone without exact alarms (Android 14 and later do not give them by
+  default): Zen asks for an inexact alarm whose window ends on the mark, and
+  a wake that came early runs nothing early. With
   no network at all the phone tries again in waves, less and less often
   (up to every 15 minutes), so a phone whose first picks went quiet moves
   on to peers that still answer without dialling round and round. A
@@ -166,6 +177,8 @@ cannot read it.
   *Connecting…*, *Not connecting* (a phone soon tries another one), *In
   reserve*, or *Paused for a while* (a phone keeps a single link for a
   while after too much of other people's mesh traffic passed through it).
+  Traffic that only passes between public peers never closes your links to
+  people nearby, and the peer kept is the one that carried the least.
 - **Settings → Network → Public peers:** see the list (the default one or
   your own), add a peer (the address is checked strictly), remove one,
   switch one off (it is then never used), **Check peers** (reachable? latency in ms, does the key
@@ -174,10 +187,19 @@ cannot read it.
   one peer must stay on.
 - Your own node answers no "who are you" questions (operating system,
   version) and has no admin socket.
+- **Names of peers (Android).** The system resolves the names of peers that
+  are given by name. Only when it does not answer, the bridge asks Quad9,
+  Cloudflare and Google over an encrypted DNS connection (DNS-over-TLS,
+  certificate checked): those resolvers then see your IP address and the
+  peer's name.
 
 ### Your own bridge (for advanced users)
 
-Zen on a computer helps others connect by itself when the router allows it. You can
+Zen on a computer helps others connect by itself when the router allows it (it
+asks only the network's default gateway, and a friend confirms the bridge only
+when the node at the announced address proves its key, so another device on
+the same Wi-Fi cannot pose as the router and have your computer announce a
+stranger's server). You can
 also set up a permanent bridge without Zen — an ordinary Yggdrasil node that runs
 around the clock and helps everyone (it can't see the content of messages):
 

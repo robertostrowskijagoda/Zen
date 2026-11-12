@@ -65,6 +65,12 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 | libayatana-appindicator3, libdbusmenu (copied into the Flatpak) | Linux Flatpak | LGPL-2.1 / LGPL-3.0; source: the Ubuntu packages of the same version |
 | libayatana-indicator3 (copied into the Flatpak) | Linux Flatpak | GPL-3.0; source: the Ubuntu package of the same version |
 
+## Data shipped with the app
+
+| Data | Licence |
+|---|---|
+| The Public Suffix List (https://publicsuffix.org/list/, its rules in `lib/src/features/passwords/public_suffix_rules.dart`; the password autofill tells one site from another by it; its own test vectors in `test/fixtures/public_suffix/test_psl.txt` are in the public domain) | MPL-2.0, unmodified rules without the comments (`assets/licenses/native/public_suffix_list.txt`); refreshed with `dart run tool/public_suffix_list.dart` |
+
 ## Fonts and icons
 
 | Asset | Licence |

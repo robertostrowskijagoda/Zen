@@ -61,5 +61,6 @@ help: [Zen on Discord](https://discord.gg/g4vHvpKV37).
   [NOTICE](../NOTICE); the components and their licences in
   [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
-`python3 tool/ci/check_links.py` checks every link of these files (CI runs
-it in the job "Docs and site").
+`python3 tool/ci/check_links.py` checks every link of these files and, through
+`tool/ci/check_site.py`, the website's links, anchors and download names (CI
+runs it in the job "Docs and site").

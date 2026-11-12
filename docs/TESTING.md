@@ -92,6 +92,19 @@ are in the library (the bridge's traffic meter and the door's link check
 call those functions since before), not in the bridge's code; every test
 that asks a core for its sessions or peers while traffic flows shows them.
 
+The bridge's local links and peers have tests of their own:
+`local_link_handshake_test.go` (handshake version 3: a recorded hello answers
+nothing played back later or elsewhere, a version 2 hello makes both sides
+close, hellos of one size, a connection that says nothing leaves its slot
+after two seconds), `local_link_advert_test.go` (an advert holds only as
+many tags as keep a false match rare, a filter too full matches nothing on
+any transport, the eight devices go in turns, a forged advert with every bit
+set matches no phone), `public_peer_order_test.go` (every node's own order of
+the public peers, one pick per operator, the same after a restart, a peer
+added or dropped moves no other) and `stranger_signals_test.go` (the budget
+that a receive-only node gives senders it does not name before the app is
+woken).
+
 ## 1. Network simulator (`lib/src/dev/sim/sim_network.dart`)
 
 `SimNetwork` is an in-memory network of phones:
@@ -220,6 +233,24 @@ header, and that nothing else brings it in.
 | `test/secure_clipboard_test.dart` | a copied secret leaves the clipboard at a lock and at the end of its time in the background, without the clipboard being read; a failed marked copy copies nothing and says so; the plain clipboard where the system has no marked one |
 | `test/pyramid_era_seal_test.dart`, `test/pyramid_treasury_test.dart`, `test/pyramid_court_anonymity_test.dart` | on the pyramid's simulated world: operations dated into a sealed era count nowhere, late changes of the treasurers undo no payment, two seals of one era; a number split between orders freed by a release, a dishonest treasurer among six, what treasurers keep; the court's one-time cards (two distinct cards decide, one judge counts once, a card of one matter counts in no other, nobody outside the court holds one) |
 | `test/profile_photo_gif_test.dart`, `test/diagnostics_go_crash_accounts_test.dart`, `test/ledger_device_record_key_test.dart` | a GIF profile photo keeps moving, HEIC read by the phone's own decoder (faked), animated WebP and PNG made GIFs; the Go crash file given to the bridge only for a listed account; a key named in a friend's device record is a hint from that friend's account, never a pin |
+| `test/account_password_devices_test.dart`, `test/device_after_cut_off_test.dart`, `test/account_devices_names_test.dart` | the account password protects the key on every device: the wrapped key travels with the account (a link, a copy, a backup, the paper key) and between devices, the newest password wins, a device without it offers to set one; a device that appears after another was cut off is not taken until the person says it is theirs; device names are translated |
+| `test/account_replace_rule_test.dart` | another account never replaces one that holds anything, by a copy, a backup, a link or a key (one rule, the holdings read in `account_holdings.dart`); adding it beside, or wiping on purpose, and passwords only when ticked |
+| `test/circle_backup_fresh_copy_test.dart`, `test/circle_backup_restore_guard_test.dart`, `test/contacts_backup_fit_test.dart`, `test/password_circle_backup_switch_test.dart` | the copy with friends: a phone that is still looking never replaces it (the search goes on daily, a fresh copy needs the person's word), a copy under half the kept one waits 30 days, a copy dated ahead or signed by a cut-off device is refused, the owner is told; one large group no longer stops the copy; the passwords are a switch, the same on every device |
+| `test/recovery_pieces_kept_test.dart`, `test/recovery_reduction_test.dart`, `test/recovery_forgotten_devices_test.dart` | pieces of the account key: kept until told to forget, a change to fewer holders waits a week unless confirmed with the account password, a holder silent for five weeks does not count, a forgotten piece does not come back from a device that was away |
+| `test/friend_level_devices_test.dart` | a friend's level is the same on every device, the newest change wins, taken before the audience keys, back from every copy without undoing a later change |
+| `test/block_book_test.dart`, `test/blocked_everywhere_test.dart`, `test/dating_block_everywhere_test.dart`, `test/feed_blocked_people_test.dart` | a block is of the person in every feature and on every device (one list, every address and key, back from every copy, a lifted block stays lifted); the wall, a post's page, the profile, the bell and notifications leave a blocked person out |
+| `test/outgoing_media_metadata_test.dart`, `test/picked_file_cap_test.dart`, `test/tappable_icons_named_test.dart`, `test/password_strength_fit_test.dart` | everything sent in a chat leaves without place, time and device data however it was picked (a file that cannot be cleaned goes unchanged and says so); files opened from outside are read up to a bound; icon buttons have names for a screen reader; the strength line of a password |
+| `test/call_remote_picture_test.dart`, `test/call_controls_before_answer_test.dart`, `test/call_answered_elsewhere_test.dart` | the remote renderer is bound by the track once the platform has the stream, and again when decoded frames never reach the screen; VP8 first whatever either side lists; microphone, loudspeaker and camera work while it rings; a call taken on another device leaves no missed call |
+| `test/chat_scroll_touch_test.dart` | the conversation does not move under a finger: while the list is dragged or flung, a message, a receipt, the typing line or a file shifts nothing and waits on *to newest* |
+| `test/message_copy_vault_test.dart`, `test/disappearing_timer_order_test.dart`, `test/friend_invite_delivery_test.dart` | a message copy that comes again writes its file once; a disappearing timer carries a stamp that orders every change, an older message does not switch it back on; an invitation says whether it arrived and can be sent again |
+| `test/background_runner_conformity_test.dart` | one test runs the same signals through the app and through every runner (the default account, an additional account receiving in the background, the computer's tray): each rings and notifies by its own account's rules, a runner without a notice kit stays quiet, a muted friend's other devices stay quiet |
+| `test/locked_stranger_wake_test.dart`, `test/locked_wake_grid_sim_test.dart` | strangers cannot keep a locked phone awake (the hold only for friends, own devices and mailboxes, sixty an hour for the others, urgent pings only for friends); a model of Android's alarm windows for phones in a star of locked friends, with and without exact alarms (the wakes an hour and the longest gap; the figure "6 an hour" is this model's, not a phone's) |
+| `test/ledger_fold_test.dart`, `test/relayed_comment_test.dart`, `test/pebble_found_by_friends_test.dart` | what friends keep of reactions and profile is folded with a bound (a signed start of the log, the author's word, a bound per friend, posts never folded); a relayed comment carries the signed part its id hashes, a copy that proves itself wins; a pebble's "found" count takes only the author's friends |
+| `test/dating_minor_report_test.dart`, `test/dating_safe_date_clock_test.dart` | a profile is hidden for everyone only when two of its owner's own friends reported it, two keys of one person count once, a report is withdrawn, a switched-off profile announces no match; the date watcher counts from when the word arrived, an unconfirmed date goes a week after the alarm |
+| `test/pyramid_sign_rule_test.dart`, `test/pyramid_order_time_test.dart`, `test/pyramid_outside_verdict_test.dart`, `test/pyramid_wallet_uncounted_test.dart` | a treasurer signs only what its own ledger counts, a payee counts only what the statement lists, a refused order is dated again, a statement fits any number of treasurers; an outside verdict is shown as named friends' word; what a seal left out is shown in the wallet |
+| `test/password_public_suffix_test.dart` (with `test/fixtures/public_suffix/test_psl.txt`, the list's own vectors), `test/password_vault_two_devices_test.dart`, `test/password_csv_recovery_test.dart`, `test/account_decoys_vault_size_test.dart` | a login is offered only within one registrable domain of the Public Suffix List, hosts in their ASCII form; two devices editing and importing, each version naming its parent, conflicts never pruned, duplicates merged; a damaged CSV row costs that row; a decoy's password file can be as large as a real one |
+| `test/update_notice_signed_versions_test.dart`, `test/net_address_test.dart` | the update notice waits for the signed checksums and forgets a withdrawn version; addresses not worth announcing (6to4, Teredo, the newer documentation range) are left out |
+| `test/i18n_labels_test.dart`, `test/i18n_plural_one_test.dart` | a text that quotes a button or a screen uses that label's own translation, and a plural's form for one shows the number in languages where that form also covers 21 or 0 (section 5) |
 
 A new scenario: build a world, perform actions, `await w.net.run()`, check the
 state at a **different** person than the one who acted, and finally
@@ -471,6 +502,16 @@ translations in all files (under the same Polish key, with the same
 placeholders; plural forms per the language's CLDR), finally `--prune` and
 once more without options.
 
+Two more checks keep the translations honest. A text that quotes a button
+or a screen of the app must use that label's own translation (the empty
+"Close friends" filter once told people to mark someone as "Friend", the
+middle level; `test/i18n_labels_test.dart`, with the scanner in
+`tool/i18n/scanner.dart` and the few allowed exceptions in
+`tool/i18n/label_exceptions.dart`), and a plural's form for one must show
+the number in the languages where that form also covers 21 or 0
+(`test/i18n_plural_one_test.dart`: where 21 takes the form of 1, a text must
+not drop the number from it). `tool/i18n.dart` reports both.
+
 `test/i18n_test.dart` (part of `flutter test`, hence of CI) checks the
 translation layer (placeholders, missing translation = Polish text, plural
 forms in Polish, English, Russian and Arabic, language selection: chosen, then
@@ -542,7 +583,7 @@ cover that and the slow-start screen.
 | Job | Where | What it does |
 |---|---|---|
 | What to run | Ubuntu | decides whether a pull request changes code or only documentation, and whether the Linux build runs in the prebuilt image (`tool/ci/ci_plan.py`, below) |
-| Docs and site | Ubuntu | every run: no broken link in the Markdown files (`tool/ci/check_links.py`), the release contract (`tool/release.dart check`), the Python tests of `tool/ci` and that every screenshot of the website is there (`tool/screenshots.dart --check`); when only documentation changed, also the app's tests that read it (`flat_door_link_test.dart`, `legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`, `security_hardening_test.dart`) |
+| Docs and site | Ubuntu | every run: no broken link in the Markdown files and on the website (`tool/ci/check_links.py`, which runs `tool/ci/check_site.py` too: every page holds its menu and footer without JavaScript, in a `<noscript>` block made from `site.js`'s own list, `--write` makes them; every link, image, script and style names a file or folder that exists, a `#fragment` an id of its page, a repository link a path that exists, a download link a file the release attaches; nothing is loaded from another host; every page has a language, one title and one h1, a description, a canonical address and alt texts), the release contract (`tool/release.dart check`), the Python tests of `tool/ci` and that every screenshot of the website is there (`tool/screenshots.dart --check`); when only documentation changed, also the app's tests that read it (`flat_door_link_test.dart`, `legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`, `security_hardening_test.dart`) |
 | Format and analyze | Windows | `dart format` (no changes) and `flutter analyze` |
 | Tests (1 of 6) … (6 of 6) | Windows | the app's tests (including translations), a sixth of the files each, at the same time (`dart run tool/test.dart --shard N/6`, see "Running the tests") |
 | Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
@@ -814,7 +855,10 @@ fuzz target for every parser of what comes from the network or a nearby
 device (relay frames, IPv6 packets, LAN beacons, the local link's hello and
 frames, the door's JSON, DNS questions, signal reassembly), with round trips
 where there is a builder. `go test` runs their seeds; the CI job *Go
-bridge* also fuzzes each target for 8 seconds in every run. A finding is
+bridge* also fuzzes **every target of every package** for 8 seconds in every
+run (`tool/ci/go_fuzz_targets.sh` lists every `func Fuzz` of every
+`*_test.go` under `native/`, the ironwood copy included, and fails on an
+empty list: the step once read one file, so 14 targets ran as seeds only). A finding is
 written to `testdata/fuzz/<target>/`; committed, it becomes a seed.
 
 ### 11.3 Coverage
@@ -832,11 +876,15 @@ at a time, as a slip would change them (`==`/`!=`, `<`/`>=`, `&&`/`||`,
 `true`/`false`, a `!` dropped, `+ 1`/`- 1`), each change run against the
 file's tests; a change no test notices is named in the summary, a line to
 pin down. On every pull request to `main` (eight runners beside CI, about
-12 files and 25 minutes each, 10 changes per file), weekly and by
+13 files and 26 minutes each, 10 changes per file; a file takes about two
+minutes), weekly and by
 hand; each run tries other changes (the seed is the run's number). The
-list grows with every release: `tool/ci/test_ci_checks.py` fails when a
-runner would get more than 16 files, and the workflow's matrix then gets
-another runner. The summary is written file by file, so a runner cut off
+list grows with every release (100 files in 1.17.0, of the 128 that eight
+runners hold): `tool/ci/test_ci_checks.py` fails when a runner would get
+more than 16 files, and the workflow's matrix then gets another runner. The
+limit was 20 before; a runner with 30 files did not end within its 45
+minutes and no run of 1.16.5 said anything, and at 20 a runner took about
+43 of them. The summary is written file by file, so a runner cut off
 by its 45 minutes still says how far it got. A change that makes a test hang (after `--timeout`, 240 s)
 or eat memory (a `flutter_tester` past 2 GB, as an endless loop that writes
 on every turn does within seconds) counts as noticed; the test is stopped
@@ -870,7 +918,13 @@ setup looks at and what their provider's answer means
 only the documented values of the switch, the provider is the browser's
 own) and how long a request waits while a new login is typed
 (`ZenAutofillTimeoutTest`: five minutes from when it opened, a minute to
-pick but never past the same end). The CI job
+pick but never past the same end), whose certificate may vouch for a
+page (`ZenAutofillTrustTest`: a browser's word counts only when the
+installed package is signed by that browser's maker, the fingerprints are
+pinned, a browser without a confirmed one is filled like any other app),
+who signs an APK as Android verified it, with its lineage (`ApkSignersTest`)
+and the window of an inexact alarm that ends on the ten-minute grid
+(`InexactAlarmWindowTest`). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
 

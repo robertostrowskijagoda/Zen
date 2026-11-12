@@ -123,7 +123,8 @@ in-app way of handing Zen to a friend).
 3. **Backup:** a lost key means no more updates for anyone. Split the key file
    and password with Shamir (e.g. 3 of 5) among trusted people; never publicly,
    never in the repository. If the key ever has to change — rotation through
-   APK Signature Scheme v3 (the old key signs the new one).
+   APK Signature Scheme v3 (the old key signs the new one), see "Rotating the
+   APK key" below the list.
 4. **Certificate fingerprint** (paste it into the README section "Isn't it a
    virus? How to check" and into the description of every release):
    ```
@@ -146,7 +147,41 @@ in-app way of handing Zen to a friend).
    and the tool.)
 
 Android does not let an app be overwritten by one signed with a different
-key, so every release must be signed with this key.
+key, so every release must be signed with this key, or with a later key of a
+rotation lineage the old key vouched for.
+
+**Rotating the APK key** (the key is suspected, or the keystore must move).
+This is the only way to change it, and it works only while the old key
+still exists:
+
+1. Make the new keystore outside the repository (item 1) and a lineage
+   file with `apksigner rotate` (old signer, then new signer; Android's
+   documentation has the flags of your build-tools version). Back both
+   up as in item 3.
+2. In the release that first uses the new key, the **sign** job's
+   `apksigner` call must sign with the new key and the lineage (APK
+   Signature Scheme v3; the old key still signs the v2 block that older
+   phones read). `release.yml` signs with one key today, so that call has
+   to be changed for this release, and the new keystore goes into the
+   `release` environment secrets in place of the old one.
+3. In the same release add the new fingerprint to
+   `kOfficialApkCertificatesSha256` (`apk_signature.dart`) **and keep the
+   old one**: the tag build's `fingerprint --pinned` accepts either, an
+   installed copy counts as official when its certificate is listed, and the
+   README and every release description show the new fingerprint too.
+4. Installed copies update over the rotation: since 1.17.0 the updater asks,
+   as Android does, that the installed copy's signer is an earlier link of
+   the lineage Android verified for the new APK (before, it required every
+   certificate of the new APK to be one the installed copy has, so every
+   installed copy would have refused the first release after a rotation).
+   An unrelated key, a branch off an old key and a return to an old key are
+   still refused. **Copies older than 1.17.0 refuse the first release after
+   a rotation** and have to be updated by hand to a 1.17.0 or later build
+   first: so do the rotation only after the releases from 1.17.0 on have
+   spread, and say so on the install page.
+5. A key that is lost, with no lineage made before, cannot be rotated: no
+   update can then replace an installed copy, and everyone reinstalls (with
+   a full account copy made first).
 
 ## 3. Release step by step
 
@@ -219,6 +254,29 @@ key, so every release must be signed with this key.
 >     and Samsung Internet probably never show Zen). The first-start setup
 >     step appears once after the update over 1.16.5 and not again.
 >
+> Since 1.17.0 (nothing of it was tried on real phones beyond the owner's
+> reports for calls and chat scrolling):
+>
+> 16. A video call between two phones on the new version, started from each
+>     side in turn: the other side's picture shows in every call; the
+>     microphone, loudspeaker and camera buttons work while it rings, on
+>     both the calling and the called side. Then a call with a phone still on
+>     1.16.5: it works, but the fixes of the new side do not reach the old.
+> 17. A long chat: drag the list and let a friend write, send a photo and
+>     show "typing": the screen does not jump, and what came waits on the
+>     *to newest* button.
+> 18. Two phones on the new version beside a third on 1.16.5, all on one
+>     Wi-Fi with the internet off: the two link directly, the old one does
+>     not (it links only through the internet until it updates).
+> 19. On a phone with Android 14 or later and no exact alarms, locked
+>     overnight in a group of friends' locked phones: the log's `beat` lines
+>     come about 6 times an hour, not 36 to 39.
+> 20. An account that receives in the background on a second profile, and a
+>     computer's tray: with *Połączenia* off nothing rings; with a chat
+>     muted nothing shows for it.
+> 21. A photo with a place in its data and a film, sent in a chat: the
+>     received file has no place or time in it.
+>
 > Only when all of it works, edit the release, untick "pre-release" and tick
 > "Set as the latest release". If something fails, delete the pre-release and
 > its tag, fix it and release again.
@@ -241,7 +299,16 @@ key, so every release must be signed with this key.
    (`--skip-checks` skips them when CI already ran them on this commit),
    checks that `release.yml` makes every file the app updates from under
    exactly the names the app asks for (`tool/release_contract.dart`; also
-   `dart run tool/release.dart check`, which CI runs), writes the version
+   `dart run tool/release.dart check`, which CI runs), **stops** unless the
+   upgrade fixture of the version being replaced exists
+   (`test/fixtures/upgrade/<current version>`; `--allow-missing-fixture`
+   only for a test release; the next release is tested on that data) and
+   unless the Public Suffix List the password autofill relies on is
+   younger than 120 days (`lib/src/features/passwords/public_suffix_rules.dart`;
+   refresh it with `dart run tool/public_suffix_list.dart`, review the diff
+   and commit; `--allow-old-suffix-list` goes on with a warning), refuses an
+   `[en]` line of "What's new" that names a screen by its Polish label
+   (section 3.5), writes the version
    and the next build number into `pubspec.yaml`,
    `lib/src/app/app_version.dart` and the Linux AppStream metadata (Android,
    iOS, macOS and Windows take them from `pubspec.yaml`), turns "Unreleased"
@@ -259,7 +326,11 @@ key, so every release must be signed with this key.
    the **End-to-end on Linux** job of CI (real nodes: invitations,
    messages, mailboxes, restarts), see `docs/TESTING.md` — and merge it with
    a merge commit (not squash or rebase: the tag must stay on a commit of
-   `main`). Then `git push origin v1.12.0`. Approve the `release`
+   `main`). **Merge first, push the tag after:** the `preflight` job fails a
+   tag whose commit is not an ancestor of `origin/main` ("merge the release
+   commit into main first, then push the tag"), so a tag pushed from the
+   release branch is wasted and has to be deleted and made again on the
+   merge commit. Then `git push origin v1.12.0`. Approve the `release`
    environment when GitHub asks. It asks once, when every build is done
    (about half an hour after the push; Actions → the run → "Review
    deployments"), and that one approval lets the sign job use both the APK
@@ -286,8 +357,11 @@ key, so every release must be signed with this key.
 7. Publish the draft as a full release: not a pre-release, with "Set as
    the latest release" ticked (the app asks only for the latest release,
    through `releases/latest` and the API, which never
-   show a draft or a pre-release). This starts `pages.yml`,
-   which refreshes the install page data and the SideStore / AltStore
+   show a draft or a pre-release). This starts `pages.yml` (on `published`
+   and on `released`: publishing a draft fires both, promoting a
+   pre-release only `released`; before, only `published` was heard and a
+   promoted pre-release left the install page naming the old version until
+   the next day's run; a failed deployment is tried twice more), which refreshes the install page data and the SideStore / AltStore
    source (`apps.json`) for the new `Zen-unsigned.ipa`. A running app
    finds the release within a quarter of an hour, and at once when it
    starts or comes back to the screen 15 minutes or more after its last
@@ -345,8 +419,10 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    release and its note; a fork without them gets a release without APKs
    and without `SHA256SUMS.sig`, with a warning. Only the `sign` job uses the environment, so a tag run asks
    for one approval. The environment
-   requires an approver (the maintainer) and has a rule for `v*` tags
-   only; the keys go only to a run of a `v*` tag after approval (described
+   requires an approver (the maintainer) and has a rule for tags only (the
+   suggestion in `release.yml`: the narrower `v[0-9]*.[0-9]*.[0-9]*`, since
+   `v*` also lets in a tag such as `vX` or `v9-test`; a tag on a commit that
+   is not on `main` stops in preflight in any case); the keys go only to a run of a `v*` tag after approval (described
    at the top of `release.yml`). The workflow's token is read-only
    (`permissions: {}` at the top, `contents: read` per job); only the
    `attach` job, for tags, may write. The `preflight` job ("Keys and
@@ -461,8 +537,24 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    succeeded (Android, Windows, Linux, Flatpak, macOS, iOS) and the
    preflight passed.
    The attach job never replaces a file already attached (no `--clobber`)
-   and stops if the release is already published; to redo a file, delete it
-   from the draft by hand and re-run the job.
+   and stops if the release is already published. **It can be run again**
+   (a re-run, or after a cut-off attempt): it looks the draft up in the list
+   of releases, not by its tag; a draft that already holds files is
+   completed, not changed: a file with the very bytes of this run's is left,
+   a file whose upload never ended is removed and uploaded again, and a file
+   that differs, or one this run did not make, stops the job (files of two
+   builds must never share a release, the signed `SHA256SUMS` belongs to
+   one build). Then delete the draft in the GitHub UI and run again. More
+   than one release of one tag stops it too: delete the extra ones.
+
+   **When runs never start (GitHub outage).** If pushing the tag starts
+   no Release run, start the workflow by hand: Actions, Release, Run
+   workflow, with the tag chosen as the ref (not a branch: a branch run
+   builds unsigned files only). Let **only one** run reach the approval of
+   the `release` environment: if both the tag's own run and the manual one
+   turn up, reject the second (or cancel it) before approving the first,
+   because files of two builds must not share a release (attach refuses
+   to mix them).
 6. **GitHub → Releases:** tag `v<kAppVersion>` (e.g. `v1.11.0`). Pushing the
    tag creates a draft with all files from item 4. In the description: what's
    new (from the CHANGELOG), the certificate fingerprint, the SHA-256 sums.
@@ -638,6 +730,21 @@ SideStore does not open. App identifier: `com.roj.zen`. iOS 15+. Locally on a Ma
   (`golang.org/x/vuln/cmd/govulncheck`, pinned version) reports known
   vulnerabilities in the bridge's modules and in Go itself; it turns CI red
   until the module or toolchain is raised.
+- **Mutation testing** (`.github/workflows/mutation.yml`, weekly and by
+  hand) runs on **eight runners**, each taking every eighth file of
+  `tool/mutation_targets.json` and writing its summary file by file (a
+  runner that was cut off at 45 minutes used to write nothing). A file takes
+  about two minutes, so a runner may get at most 16 files, 128 in all;
+  `tool/ci/test_ci_checks.py` fails when a runner would get more (add a
+  runner to the matrix of `mutation.yml` first). Section 11.4 of
+  [TESTING.md](TESTING.md).
+- **The workflows do their work or fail.** Every workflow installs system
+  packages through `tool/ci/apt_install.sh`, which also knows an archive
+  that cannot be reached; the Go fuzz step runs every target of every
+  package (`tool/ci/go_fuzz_targets.sh`) and fails on an empty list; a
+  truncated tar no longer passes through gzip; the emulator's upgrade check
+  fails when it read no file; the docs job's list of self-tests and the
+  upgrade fixtures have checks.
 - **Dependencies locked.** Every `flutter pub get` in `ci.yml`,
   `release.yml` and `ios.yml` uses `--enforce-lockfile`: exactly the
   packages and hashes of `pubspec.lock`.
@@ -694,6 +801,13 @@ Rules (`tool/release.dart` checks them):
   makes anything in it clickable.
 - Say what a person notices ("Messages reach you even when Zen is
   closed"), not how it was done. One change per line, the biggest first.
+- **An `[en]` line names a screen by its English name** ("Passwords",
+  "Settings"), never by the Polish label the app's source has ("Hasła",
+  "Ustawienia"): the signed English note of 1.16.5 said "Hasła" where the
+  English app says "Passwords". `prepare` and `check` refuse an `[en]` line
+  that holds a Polish label whose English translation words it differently
+  (the list comes from the app's own translations, `englishLabelsFrom` in
+  `tool/release_contract.dart`). `[pl]` lines use the Polish labels.
 
 How it travels:
 
@@ -872,7 +986,7 @@ GPL-3.0 — so no "NonFreeAssets".
 
 | Item | What to do | Effort |
 |---|---|---|
-| Build recipe | a merge request to `fdroiddata` with `metadata/com.roj.zen.yml`: Flutter from the `flutter` srclib at the version in `pubspec.yaml`, Go 1.26 downloaded with a pinned SHA-256 (Debian's is older), the NDK; one build per ABI (`--split-per-abi --target-platform android-arm64`, `android-arm`, `android-x64`, each with its own `VercodeOperation`) | 1–2 days, including a local `fdroid build` run |
+| Build recipe | a merge request to `fdroiddata` with `metadata/com.roj.zen.yml`: Flutter from the `flutter` srclib at the version in `pubspec.yaml`, Go 1.27 (the `toolchain` line of `go.mod`) downloaded with a pinned SHA-256 (Debian's is older), the NDK; one build per ABI (`--split-per-abi --target-platform android-arm64`, `android-arm`, `android-x64`, each with its own `VercodeOperation`) | 1–2 days, including a local `fdroid build` run |
 | Self-update | build the store variant: `flutter build apk --release --flavor appStoreOnly` (or `--dart-define=ZEN_STORE=true`). It has no GitHub update check, no APK sharing, no `REQUEST_INSTALL_PACKAGES`, and it skips the "re-signed copy" check, which would otherwise flag F-Droid's signature and block wallet transfers. The app then says it is updated by the store it came from. This is a build option Zen provides, so the build counts as unmodified (NOTICE, section 5) | none (optional: a separate `ZEN_DISTRIBUTION=fdroid` define so About can say "F-Droid build", about half a day) |
 | WebRTC | `flutter_webrtc` pulls the prebuilt `io.github.webrtc-sdk:android` from Maven Central (BSD-3-Clause) and `com.github.davidliu:audioswitch` from JitPack (the build takes only
 the `com.github.davidliu` group from JitPack). F-Droid accepts free libraries from trusted Maven repositories, but reviewers may ask for WebRTC to be built from source (F-Droid has discussed hosting its own WebRTC build) | none to days, depending on review; the slowest item |
@@ -1335,9 +1449,13 @@ with a bad signature or another version, nothing is installed. Builds since
 1.12.0 pin one key, so every release needs `SHA256SUMS.sig` made with it
 (the `ZEN_RELEASE_SIGNING_KEY` secret). A build with an empty list behaves
 as in section 8.5 and "Updates and Pass it on" says that it cannot check
-the author's signature yet. The notice itself never waits for the
-signature: a newer tag is announced from the API's answer alone; only
-installing (and showing the note of section 3.5) checks it.
+the author's signature yet. Since 1.17.0 the notice waits for the signed
+checksums of the version: a version is announced only after its
+`SHA256SUMS.sig` was read and checked, and a remembered version that was
+withdrawn is forgotten (the highest version ever announced used to be taken
+from GitHub's unsigned answer, so a mistaken tag or a false answer naming a
+higher version silenced the notice for every real version below it).
+Installing and showing the note of section 3.5 check it as before.
 
 `SHA256SUMS.sig` has the format of a signed release, like the canary (section 8.3):
 `{"m": {"t": "zen_sums", "app": "zen", "version", "files": {name: sha256}},
@@ -1376,3 +1494,51 @@ One-time steps for the maintainer:
 
 Push the first tag only after step 3: a release without `SHA256SUMS.sig`
 cannot update the builds that know the key.
+
+### 8.7 Rotating or losing the release signing key
+
+The key of section 8.6 is pinned in every installed build, and a build
+installs only a file whose `SHA256SUMS.sig` carries a signature of a pinned
+key. So a new key cannot simply replace it: installed builds would refuse
+every release it signs.
+
+**Rotating it (the key is still there).** Dual-sign from the release that
+adds the second key:
+
+1. `keygen` the new key (section 8.6, step 1) and add its hybrid id next to
+   the old one in `kReleaseMaintainers` (`maintainers --write <old id>
+   <new id>`; commit it).
+2. From that release on, sign `SHA256SUMS.sig` with **both** keys (`sign`
+   twice on the same file; the `ZEN_RELEASE_SIGNING_KEY` secret holds one
+   key today, so the sign job has to be given the second one as well, and
+   it checks the result with `verify --pinned`). Builds before that release
+   pin only the old key and accept the old key's signature; builds from it
+   on accept either.
+3. After enough users run a build that pins the new key (at least the
+   releases from step 1 on), the next release drops the old id from the list
+   and is signed with the new key alone; a build that never updated past
+   the older ones refuses it and has to be installed by hand.
+
+**The trap.** `kReleaseThreshold` is 2: with **two** keys in
+`kReleaseMaintainers` the list reaches the number that switches on
+friend-to-friend updates (`UpdateBook.enabled`: releases, holds back,
+canaries and signed donation details from friends). From the release of
+step 1 a release spreads between friends only when signed by both keys
+(which dual-signing does), a canary needs both too, **either key alone can
+hold a release back** (a hold-back needs one signature), and every build
+starts to accept and pass on such files (section 8, "How it works today").
+That is more than a rotation asks for: decide first that this is wanted.
+
+**Losing it (or suspecting it).** Nothing can replace the pinned key in
+installed builds. Without the key no `SHA256SUMS.sig` can be made that they
+accept: the update check shows no new version signed, and the self-update
+installs nothing. What is left is a new build with a new key that people
+install **by hand** over the old one (Android accepts it, being signed with
+the same APK key, section 2), announced on the repository, the install page
+and the README, with the new fingerprint and the new hybrid id; from then on
+that build updates itself. If the key may have leaked, the old key could
+sign a forged release for builds that still pin it, so say plainly which
+builds must be replaced by hand and treat any release signed with the old key
+after the announcement as not official. Keep the backup (section 2, item 3,
+for the same Shamir split) so that a loss does not happen.
+

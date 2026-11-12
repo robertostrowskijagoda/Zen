@@ -2058,7 +2058,7 @@ void main() {
       expect(texts['pl']!['f15t'], 'Hasła');
       for (final String part in <String>[
         'password manager',
-        'only on your devices',
+        'encrypted on your devices',
         'the same on all',
         'return with the account',
         'Generator',
@@ -2070,7 +2070,7 @@ void main() {
       }
       for (final String part in <String>[
         'Menedżer haseł',
-        'zaszyfrowane, tylko na Twoich urządzeniach',
+        'zaszyfrowane na Twoich urządzeniach',
         'takie same na każdym',
         'wracają razem z kontem',
         'Generator',

@@ -35,7 +35,12 @@ aligned for phones with 16 KB memory pages. Details:
   newer than yours, Zen looks at once. GitHub sees your IP address and the
   name "Zen", nothing else.
 - When there is a newer version, a quiet notification (once per version)
-  and a bar say so, with a few lines about what is new in it. A version
+  and a bar say so, with a few lines about what is new in it. The notice
+  waits until the version's signed checksums can be read, and a remembered
+  version that was withdrawn is forgotten: the highest version ever
+  announced used to be taken from GitHub's unsigned answer, so a mistaken
+  tag or a false answer naming a higher version silenced the notice for
+  every real version below it. A version
   published after that takes the old notice's place, also when you closed
   the bar of the older one; once you have installed it, the notification
   goes away. What **Update** does depends on the system, and the updates
@@ -44,8 +49,10 @@ aligned for phones with 16 KB memory pages. Details:
     system (on Android the APK for your phone's processor type, on Windows
     the x64 or ARM64 ZIP Zen runs as, on the Mac the universal ZIP for Apple
     Silicon and Intel) and checks it against the release's `SHA256SUMS` and
-    the maintainers' signature; on Android also that it is signed with the
-    same certificate as the installed app. Then the system installer asks
+    the release key's signature; on Android also that it is signed with the
+    installed app's certificate, or with a later key of the same lineage
+    when the release key was rotated (as Android itself allows; an unrelated
+    key, a branch off an old key and a return to an old key are refused). Then the system installer asks
     (Android; the first time Android asks you to let Zen install apps), or
     a helper swaps the folders after Zen closes and starts the new version
     (Windows, Linux tarball, Mac). Where Zen's folder is not writable
@@ -109,10 +116,9 @@ aligned for phones with 16 KB memory pages. Details:
   to that version or newer. Data written by a newer Zen (for example after
   you went back to an older build) is left untouched, and a bar asks you to
   update to use it.
-- Once the maintainers' keys are pinned in the app, an update is installed
-  only when `SHA256SUMS.sig` carries their hybrid signature (Ed25519 +
-  ML-DSA-65) for this version and file. Until then the update screen says
-  that the signature can't be checked yet.
+- One release signing key is pinned in the app: an update is installed only
+  when `SHA256SUMS.sig` carries its hybrid signature (Ed25519 + ML-DSA-65)
+  for this version and file.
 - If github.com cannot be reached at all, Zen tells you, in case someone is
   blocking it.
 
@@ -145,8 +151,8 @@ friends have a newer version and shows a quiet hint.
 **Updates from friends** over the network (a friend's device passing a new
 version on, with no GitHub) switch on once the maintainers' keys are
 published in the app: such an update needs two of three maintainer
-signatures. Until then the card in *Updates* says so; GitHub updates work
-already.
+signatures, and only one key is pinned so far. Until then the card in
+*Updates* says so; GitHub updates work already.
 
 ## Checking a download yourself
 
@@ -169,7 +175,7 @@ already.
   there.
 - The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
-  not against a forged release; that is what the signature is for, once it
-  is pinned.
+  not against a forged release; that is what the signature of the release
+  key is for.
 
 [Back to the guide](README.md)

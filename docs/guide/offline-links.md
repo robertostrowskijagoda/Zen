@@ -29,11 +29,21 @@ Bluetooth advertises and scans only in short windows.
    (a UDP broadcast on Wi-Fi, a Wi-Fi Direct service record, a Bluetooth
    advert). It contains only random-looking tags: one per friend, derived
    from a secret only the two of you share, with a fresh salt every time and
-   a new window every 5 minutes. A stranger sees random bytes.
+   a new window every 5 minutes. A stranger sees random bytes. An advert
+   holds the tags of at most eight devices (a Bluetooth one cannot carry
+   more without matching strangers by chance): your own devices first, then
+   those you linked with lately, then the other friends by turns, so every
+   friend is in it now and then. An advert too full to mean anything matches
+   nothing.
 2. **Connecting.** When a device recognises a friend's tag, the two connect
-   (the lower address dials) and run a handshake: they prove they hold the
-   pair secret, then agree on a new link key that mixes X25519 with a one-time
-   **ML-KEM-768** from both sides, and encrypt the link with AES-256-GCM.
+   (the lower address dials) and run a handshake: each side opens with a
+   fresh random number, and the proof that it holds the pair secret names
+   the sender and the other side's number, so a recording of a handshake is
+   worth nothing played back later or elsewhere. They then agree on a new
+   link key that mixes X25519 with a one-time **ML-KEM-768** from both
+   sides, and encrypt the link with AES-256-GCM. This is handshake version
+   3: **a device on 1.16.5 or older links with one on this version only
+   through the internet until it updates.**
 3. **Using it.** The mesh then runs over that link with the friend's pinned
    key, and Zen's own post-quantum session layer runs inside, as always.
    Up to 16 links at a time.
@@ -48,7 +58,13 @@ on. Their phones form a group and the chat just works.
 ## Privacy
 
 - Strangers on the same network or nearby cannot tell who you are: adverts
-  carry no address, no name and no stable identifier.
+  carry no address, no name and no identifier of yours that is stable over
+  time. **But anyone within Bluetooth range can tell that a Zen user is
+  there**: the advert carries Zen's service identifier, and with it the
+  number of the channel the phone listens on. That number stays the same
+  while the listener runs, so someone who stays around can recognise the
+  same phone for as long as the listener runs. On Wi-Fi a beacon likewise
+  shows that a Zen device is on the network.
 - Recorded link traffic stays unreadable, also for a future quantum
   computer (the link key mixes in ML-KEM-768).
 

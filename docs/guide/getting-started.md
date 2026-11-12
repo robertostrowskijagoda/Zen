@@ -93,7 +93,7 @@ to the install page and the same steps for every system.
 5. **How do you start?** *New account* goes on to the next step. If you
    already have an account, pick *I have a copy* (a full account copy, a
    paper key or a key file), *Recover from another device* or *Recover with
-   the circle's help* (close friends who hold pieces of your key; see
+   close friends' help* (close friends who hold pieces of your key; see
    below).
 6. **Your name.** *How should friends see you?* The name goes to the people
    you invite and to your groups; you can change it later in your profile.
@@ -191,7 +191,12 @@ from a decoy.
 by default only the default account receives; *Receive in the background*
 in **Accounts on this device** changes that for each account (more battery,
 and an extra account is then less hidden from someone with full access to
-the device). An account without it receives while it is open; what arrives
+the device). An account that receives in the background rings and notifies by
+**its own** rules (its own *Calls* and *Notifications from this account*
+switches and its muted chats), also in the computer's tray; one that has not
+written them yet stays quiet instead of guessing, and a hidden account no
+longer gives itself away by ringing. *Answer* opens the account that is
+called. An account without it receives while it is open; what arrives
 meanwhile waits with friends' mailboxes or in the sender's outbox and comes
 in when you open it. Someone who watches the folders over time, compares
 when they were made, measures how much is written to each, or reads the
@@ -228,7 +233,7 @@ recovered and how*):
 | Pyramid and wallet | yes | if chosen | confirmed by the pyramid⁵ | confirmed by the pyramid⁵ |
 | Dating | yes | if chosen | without photos²⁴ | without photos²⁴ |
 | Neighbours (household) | yes | if chosen | from the copy with friends² | from the copy with friends² |
-| Passwords | yes | yes, always | from the copy with friends² | from the copy with friends² |
+| Passwords | yes | yes, always | from the copy with friends²⁷ | from the copy with friends²⁷ |
 | Notes to self | yes | yes, always | from the copy with friends² | from the copy with friends² |
 | Meetings and dinner circles | yes | if chosen | no | no |
 | Films | yes | if chosen | no | no |
@@ -243,12 +248,17 @@ confirm them. ⁶ the account's settings (look,
 sounds, privacy of notifications and screens, GIFs, cleanup, who may
 invite you to groups); each device keeps its own lock, connections,
 notifications permissions, storage and media-over-mobile-data settings.
-Disappearing messages never come back.
+Disappearing messages never come back. ⁷ unless you switched
+*Passwords in the backup with friends* off (it is on by default and the same
+on every device of the account); then they come back only from another
+device or a full account copy.
 
 **Your devices hold the same account, all the time.** While two or more
 devices of an account run, they keep each other up to date without you
 doing anything: conversations with their photos, videos, files and voice
-messages; friends and groups; your profile with its photos; posts, the
+messages; friends and groups, **and the level of each friend, the same on
+every device (the newest change wins; a friend taken off *Friend* on the
+phone no longer stays close on the computer)**; your profile with its photos; posts, the
 gallery and the films you published, with all their files (not only the
 ones opened on that device); the account's settings; your dating profile;
 meetings, plans, events and circles; the pyramid; your passwords and
@@ -282,7 +292,18 @@ the same steps fill in what it lacks (nothing is deleted). Both devices
 need the same version of Zen; otherwise both screens say so. Giving the
 old device away? Remove the account from it (Settings → *Delete this
 account from this device*) or unlink it in **Devices** on the new one;
-otherwise it keeps receiving your messages.
+otherwise it keeps receiving your messages. **What unlinking does not do:**
+your devices and your friends stop sending the unlinked device anything and
+refuse what it wrote after, but the account key stays on it. If it was
+unlocked and the key was not protected by your account password (or someone
+knows that password), whoever has it can make it a new device of your
+account. Your own devices then ask you before they give it anything; **your
+friends cannot tell and still accept it as yours**. The way out is a new
+account: Settings → Accounts on this device → Add account, invite your
+friends again, and delete the old one. Set the account password
+([below](#getting-your-account-back)) on every device: it protects the key on
+each of them, and a device that took the account without it offers to set
+one.
 
 **Full account copy (file).** Account and recovery → **Create a full
 account copy**. Tick what goes
@@ -295,9 +316,13 @@ password you choose (Argon2id and AES-256-GCM); without it nobody can open
 it, you included. A copy larger than 1 GB is saved in parts
 (`.zenbackup`, `.zenbackup.2`…) — keep them together. To restore, choose
 **I have a copy** on the first start or later in Account and recovery.
-On the same account the data is merged (nothing is deleted); a copy of a
-different account is refused on a device that already has an account with
-data. A copy made by a newer Zen asks you to update first.
+On the same account the data is merged (nothing is deleted). **Another
+account never replaces one that holds anything:** a copy, a backup file, a
+link or a key for a different account is refused on a device that has a
+name, notes, passwords, posts, chats or invitations (or an accepted friend,
+a group or a pyramid). You can add the other account beside this one, or
+wipe this one on purpose after Zen offers you a backup; saved passwords go
+along only when you tick them. A copy made by a newer Zen asks you to update first.
 With *Settings* ticked the copy restores the whole app on a new device:
 every setting as it was (the lock, connections, the setup — which shows
 once more only when the copy comes from an older setup) and the app
@@ -354,7 +379,13 @@ friends*:
    with 5 to 9, 4 with 10 or more. You need at least 2 close friends.
    When your close friends change, a new set of pieces goes out; the
    previous set keeps working until enough of the new pieces are
-   confirmed, then its holders are asked to delete the old ones. A piece
+   confirmed, then its holders are asked to delete the old ones. A friend
+   keeps every set until told to forget, so two changes in a row no longer
+   lose the last complete one. **A change to fewer holders waits a week**
+   (Zen tells you) unless you confirm it with your account password; going
+   below two close friends used to make everyone forget at once, with no
+   wait and no password. A friend whose device is silent for five weeks no
+   longer counts towards *Account is secured*. A piece
    you keep for a friend moves with you to a new phone and into your full
    account copies.
 3. **Who keeps the keys** lists the names, marking those whose device has
@@ -362,7 +393,7 @@ friends*:
    list** writes a short text file with their names, their invitation
    codes, your account fingerprint and what to do; keep it with your key
    copy (the list may change with your close friends).
-4. **On a new phone:** *Recover with the circle's help* on the first
+4. **On a new phone:** *Recover with close friends' help* on the first
    start, or later Account and recovery → **Start recovery**. The screen
    shows **this device's code** (a code and a QR code, not a secret). Type
    or scan the codes of the close friends who hold pieces: their devices
@@ -388,12 +419,25 @@ the copy with friends.
 your data (Settings → Account and recovery → *Copy with friends*): first
 the friends who serve as your offline mailboxes, then your close friends,
 and others only so that at least two keep it; six people at most. No
-setup is needed: it starts once you have a friend. It holds your profile,
+setup is needed: it starts once you have a friend. **Your phone never
+replaces it with its own copy while it is still looking for it:** a new phone
+searches once a day and does not give up, and a fresh copy from such a phone
+needs your word; before, a search that gave up (a copy from a newer Zen, or
+thirty days without finding one) let the new phone save a nearly empty copy,
+and the passwords, notes and chats in the old one were gone. A friend who
+gets a copy under half the size of the one kept keeps the old one for 30
+days; a copy dated ahead of the clock, or signed by a device you cut off, is
+refused, and you are told when friends refuse. One large group no longer
+stops the copy of friends and groups: a group's names are kept for current
+members only, an item still too large is trimmed or left out, the rest is
+saved, and *Why isn't it working?* says how many were cut. It holds your profile,
 friends and groups, friendship levels, settings, the pyramid, your
 household (flat key, your resident key, its profile, household members'
 names; not the door key or the neighbours), your dating profile and its
-settings, your passwords, your notes to self, and — unless you turn it
-off — the text of your one-to-one and group conversations, with edits,
+settings, your passwords (*Passwords in the backup with friends*, on by
+default and the same on every device; switched off, the friends' copy is
+replaced at once with one without them), your notes to self, and — unless
+you turn it off — the text of your one-to-one and group conversations, with edits,
 deletions, reactions and replies (no photos, videos, files or
 disappearing messages). It is refreshed at most once a day, and within
 about an hour after a new friend, a group change, a password or a note;
