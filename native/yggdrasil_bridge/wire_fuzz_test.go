@@ -87,13 +87,60 @@ func FuzzParseLanBeacon(f *testing.F) {
 func FuzzParseLocalHello(f *testing.F) {
 	f.Add([]byte{localHandshakeVersion})
 	f.Add(append([]byte{localHandshakeVersion}, make([]byte, localEphemeralSize+2)...))
+	whole := append([]byte{localHandshakeVersion}, make([]byte, localEphemeralSize+2+64*localSelectorSize)...)
+	whole[1+localEphemeralSize+1] = 64
+	f.Add(whole)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		ephemeral, selectors, err := parseLocalHello(data)
 		if err != nil {
 			return
 		}
-		if len(ephemeral) != localEphemeralSize || len(selectors) > localMaxSelectors {
-			t.Fatalf("ephemeral %d bytes, %d selectors", len(ephemeral), len(selectors))
+		if len(ephemeral) != localEphemeralSize || len(selectors) > localMaxSelectors || !localHelloSizeAllowed(len(data)) {
+			t.Fatalf("ephemeral %d bytes, %d selectors, hello of %d bytes", len(ephemeral), len(selectors), len(data))
+		}
+	})
+}
+
+// Whatever a stranger nearby sends, the handshake ends with an error well
+// within its time and never panics.
+func FuzzLocalLinkHandshake(f *testing.F) {
+	keyA, _, _ := ed25519.GenerateKey(nil)
+	keyB, _, _ := ed25519.GenerateKey(nil)
+	peer, err := newLocalPeer(meshAddressForKey(keyB), "0000000000000000000000000000000000000000000000000000000000000001", false)
+	if err != nil {
+		f.Fatal(err)
+	}
+	peers := []localPeer{peer}
+	opening := append([]byte{0, localOpeningSize, localHandshakeVersion}, make([]byte, localNonceSize)...)
+	f.Add([]byte{0, 5, 2, 1, 2, 3, 4})
+	f.Add(opening)
+	f.Add(append(append([]byte(nil), opening...), 0x06, 0xC3, localHandshakeVersion))
+	f.Add([]byte{0xFF, 0xFF})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		stranger, device := net.Pipe()
+		go func() {
+			buf := make([]byte, 4096)
+			for {
+				if _, err := stranger.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+		done := make(chan error, 1)
+		go func() {
+			_, err := localLinkHandshakeWithin(device, peers, keyA, localFirstFrameTimeout)
+			_ = device.Close()
+			done <- err
+		}()
+		_, _ = stranger.Write(data)
+		_ = stranger.Close()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("a stranger's bytes passed the handshake")
+			}
+		case <-time.After(localHandshakeTimeout + 2*time.Second):
+			t.Fatal("the handshake did not end")
 		}
 	})
 }

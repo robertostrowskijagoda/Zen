@@ -30,9 +30,11 @@ func testNearbyLan(nearby lanNearby) (*lanDiscovery, *[]*net.UDPAddr, *[][]byte)
 	}
 	var to []*net.UDPAddr
 	var packets [][]byte
+	_, wifi, _ := net.ParseCIDR("192.168.1.0/24")
 	lan := &lanDiscovery{
 		m:          m,
 		tcpPort:    40000,
+		interfaces: []lanInterface{{name: "wlan0", nets: []*net.IPNet{wifi}}},
 		ownSalts:   map[[4]byte]time.Time{},
 		lastSource: map[string]time.Time{},
 		lastReply:  map[string]time.Time{},
