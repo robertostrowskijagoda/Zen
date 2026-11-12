@@ -210,45 +210,48 @@ class _CallPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: ZenLook.of(context).tinted(
-              ZenColors.of(context),
-              color,
-              radius: 18,
-              alpha: 0.40,
-              offset: const Offset(0, 5),
+    // The label below names the button for a screen reader.
+    return MergeSemantics(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: ZenLook.of(context).tinted(
+                ZenColors.of(context),
+                color,
+                radius: 18,
+                alpha: 0.40,
+                offset: const Offset(0, 5),
+              ),
+            ),
+            child: IconButton.filled(
+              key: buttonKey,
+              onPressed: onPressed == null ? null : () => onPressed!.call(),
+              style: IconButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: ZenColors.foregroundFor(color),
+                disabledBackgroundColor: color.withValues(alpha: 0.35),
+                fixedSize: const Size(60, 60),
+                minimumSize: const Size(60, 60),
+                shape: const CircleBorder(),
+              ),
+              icon: Icon(icon, size: 28),
             ),
           ),
-          child: IconButton.filled(
-            key: buttonKey,
-            onPressed: onPressed == null ? null : () => onPressed!.call(),
-            style: IconButton.styleFrom(
-              backgroundColor: color,
-              foregroundColor: ZenColors.foregroundFor(color),
-              disabledBackgroundColor: color.withValues(alpha: 0.35),
-              fixedSize: const Size(60, 60),
-              minimumSize: const Size(60, 60),
-              shape: const CircleBorder(),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              color: labelColor,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
             ),
-            icon: Icon(icon, size: 28),
           ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          maxLines: 1,
-          style: TextStyle(
-            color: labelColor,
-            fontSize: 12.5,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

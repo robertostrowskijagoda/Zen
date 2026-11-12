@@ -230,6 +230,9 @@ Future<String?> scanOrPaste(
       content: SizedBox(
         width: 400,
         child: TextField(
+          enableSuggestions: false,
+          autocorrect: false,
+          enableIMEPersonalizedLearning: false,
           key: const Key('flat-paste'),
           controller: c,
           autofocus: true,

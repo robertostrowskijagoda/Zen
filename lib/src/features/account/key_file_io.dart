@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/file_picking.dart';
+import 'package:zen/src/features/account/key_file.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
 /// Where the backup file is saved and read from (replaced in tests).
@@ -39,7 +40,7 @@ final class PlatformKeyFileIo implements KeyFileIo {
     if (path == null) {
       return null;
     }
-    return File(path).readAsBytes();
+    return readPickedFile(path, maxBytes: kMaxKeyFileReadBytes);
   }
 }
 

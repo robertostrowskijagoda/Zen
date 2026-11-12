@@ -444,6 +444,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                 ],
                 const SizedBox(height: 12),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
+                  keyboardType: TextInputType.visiblePassword,
                   key: const Key('recovery-help-address'),
                   controller: target,
                   autocorrect: false,
@@ -1277,6 +1279,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                         const SizedBox(height: 12),
                         if (hasPassword) ...<Widget>[
                           TextField(
+                            enableSuggestions: false,
+                            autocorrect: false,
                             key: const Key('recovery-password-current'),
                             controller: _current,
                             obscureText: true,
@@ -1289,6 +1293,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           const SizedBox(height: 10),
                         ],
                         TextField(
+                          enableSuggestions: false,
+                          autocorrect: false,
                           key: const Key('recovery-password'),
                           controller: _password,
                           obscureText: true,
@@ -1303,6 +1309,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                         ),
                         const SizedBox(height: 10),
                         TextField(
+                          enableSuggestions: false,
+                          autocorrect: false,
                           key: const Key('recovery-password-repeat'),
                           controller: _repeat,
                           obscureText: true,
@@ -1545,6 +1553,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             children: <Widget>[
                               Expanded(
                                 child: TextField(
+                                  enableIMEPersonalizedLearning: false,
+                                  keyboardType: TextInputType.visiblePassword,
                                   key: const Key('recovery-helper-code'),
                                   controller: _helperCode,
                                   autocorrect: false,
@@ -1611,6 +1621,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             _mixedAccountsWarning(zen),
                           const SizedBox(height: 14),
                           TextField(
+                            enableSuggestions: false,
+                            autocorrect: false,
                             key: const Key('recovery-old-password'),
                             controller: _recoverPassword,
                             obscureText: true,

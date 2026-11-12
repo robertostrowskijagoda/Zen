@@ -286,23 +286,20 @@ class _PasswordFormScreenState extends ConsumerState<PasswordFormScreen> {
                   ),
                   passwordField,
                   const SizedBox(height: 8),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: _password.text.isEmpty
-                            ? const SizedBox.shrink()
-                            : PasswordStrengthLine(password: _password.text),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        key: const Key('password-generate'),
-                        onPressed: () => unawaited(_generate()),
-                        icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-                        label: Text(t('Generuj')),
-                      ),
-                    ],
+                  // The strength line has the whole width: beside the button
+                  // its word was cut on a narrow phone.
+                  if (_password.text.isNotEmpty)
+                    PasswordStrengthLine(password: _password.text),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton.icon(
+                      key: const Key('password-generate'),
+                      onPressed: () => unawaited(_generate()),
+                      icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                      label: Text(t('Generuj')),
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 4),
                   _field(
                     'password-field-address',
                     t('Adres'),

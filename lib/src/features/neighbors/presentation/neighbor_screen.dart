@@ -117,6 +117,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                   decoration: InputDecoration(
                     hintText: t('Napisz o zaproszeniu…'),
                     suffixIcon: IconButton(
+                      tooltip: t('Wyślij'),
                       icon: const Icon(Icons.send_rounded),
                       onPressed: () {
                         final String text = input.text;

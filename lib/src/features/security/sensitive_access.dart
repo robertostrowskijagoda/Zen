@@ -283,6 +283,7 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
               labelText: t('Hasło aplikacji'),
               errorText: _error,
               suffixIcon: IconButton(
+                tooltip: _obscure ? t('Pokaż hasło') : t('Ukryj hasło'),
                 onPressed: () => setState(() => _obscure = !_obscure),
                 icon: Icon(
                   _obscure

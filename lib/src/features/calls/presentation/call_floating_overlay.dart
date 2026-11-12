@@ -255,6 +255,9 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
                           color: session.isMuted
                               ? zen.danger
                               : zen.textSecondary,
+                          semanticLabel: session.isMuted
+                              ? t('Włącz mikrofon')
+                              : t('Wycisz mikrofon'),
                         ),
                         onPressed: () => runCallAction(
                           context,
@@ -274,6 +277,9 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
                           color: session.isSpeakerOn
                               ? zen.accent
                               : zen.textSecondary,
+                          semanticLabel: session.isSpeakerOn
+                              ? t('Głośnik')
+                              : t('Słuchawka'),
                         ),
                         onPressed: () => runCallAction(
                           context,
@@ -293,6 +299,9 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
                           color: session.isCameraEnabled
                               ? zen.accent
                               : zen.textSecondary,
+                          semanticLabel: session.isCameraEnabled
+                              ? t('Wyłącz kamerę')
+                              : t('Włącz kamerę'),
                         ),
                         onPressed: () => runCallAction(
                           context,
@@ -311,7 +320,12 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
                         foregroundColor: ZenColors.foregroundFor(zen.danger),
                         shape: const CircleBorder(),
                       ),
-                      icon: const Icon(Icons.call_end_rounded),
+                      // Named on the icon: the banner sits above the
+                      // navigator, where a tooltip has no overlay.
+                      icon: Icon(
+                        Icons.call_end_rounded,
+                        semanticLabel: t('Rozłącz'),
+                      ),
                       onPressed: () => runCallAction(
                         context,
                         () => ref

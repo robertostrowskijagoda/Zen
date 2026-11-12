@@ -6,17 +6,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:mime/mime.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/core/utils/file_picking.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
-import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/gif_files.dart';
-import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
 
 /// Where a file for a chat comes from.
@@ -66,11 +62,13 @@ Future<ChatAttachmentSource?> pickChatAttachmentSource(
     BuildContext sheetContext,
     ChatAttachmentSource source,
     IconData icon,
-    String label,
-  ) => ListTile(
+    String label, {
+    String? note,
+  }) => ListTile(
     key: Key('chat-attach-${source.name}'),
     leading: Icon(icon, color: zen.accent),
     title: Text(label),
+    subtitle: note == null ? null : Text(note),
     onTap: () => Navigator.of(sheetContext).pop(source),
   );
   return showModalBottomSheet<ChatAttachmentSource>(
@@ -104,6 +102,12 @@ Future<ChatAttachmentSource?> pickChatAttachmentSource(
               ChatAttachmentSource.file,
               Icons.attach_file_rounded,
               t('Załącznik'),
+              // Said before anything is picked: what Zen cleans and what it
+              // sends as it is.
+              note: t(
+                'Zdjęcia, filmy i nagrania idą bez miejsca i danych '
+                'urządzenia. Inne pliki idą bez zmian.',
+              ),
             ),
             if (gifEnabled)
               option(
@@ -151,11 +155,11 @@ Future<PickedChatAttachment?> pickChatAttachment(
   switch (source) {
     case ChatAttachmentSource.camera:
     case ChatAttachmentSource.video:
-      return _fromCamera(source == ChatAttachmentSource.video);
+      return _fromCamera(context, source == ChatAttachmentSource.video);
     case ChatAttachmentSource.gallery:
-      return _fromGallery();
+      return _fromGallery(context);
     case ChatAttachmentSource.file:
-      return _fromFiles();
+      return _fromFiles(context);
     case ChatAttachmentSource.gif:
       return _fromGifSearch(context, ref);
     case ChatAttachmentSource.voice:
@@ -174,11 +178,25 @@ Future<PickedChatAttachment?> _fromClipboard(BuildContext context) async {
   if (items.isEmpty) {
     throw FormatException(t('W schowku nie ma obrazka ani pliku.'));
   }
-  final OutgoingAttachment? attachment = await prepareOutgoing(items.first);
+  if (!context.mounted) {
+    return null;
+  }
+  return _prepared(context, items.first);
+}
+
+/// [item] made ready to send by [prepareOutgoing], the one way every
+/// picked photo, film and file goes: without its location, device and
+/// time data where Zen can take them out. A GIF that cannot play asks
+/// before it goes as a file; a file that goes unchanged says so.
+Future<PickedChatAttachment?> _prepared(
+  BuildContext context,
+  TransferItem item,
+) async {
+  final OutgoingAttachment? attachment = await prepareOutgoing(item);
   if (attachment == null) {
     throw FormatException(
       t('Nie udało się odczytać pliku „{name}”.', <String, Object>{
-        'name': items.first.name,
+        'name': item.name,
       }),
     );
   }
@@ -186,6 +204,9 @@ Future<PickedChatAttachment?> _fromClipboard(BuildContext context) async {
   if (problem != null &&
       (!context.mounted || !await confirmGifAsFile(context, problem))) {
     return null;
+  }
+  if (context.mounted) {
+    tellFilesGoUnchanged(context, attachment);
   }
   return PickedChatAttachment(
     bytes: attachment.bytes,
@@ -196,7 +217,10 @@ Future<PickedChatAttachment?> _fromClipboard(BuildContext context) async {
   );
 }
 
-Future<PickedChatAttachment?> _fromCamera(bool video) async {
+Future<PickedChatAttachment?> _fromCamera(
+  BuildContext context,
+  bool video,
+) async {
   final ImagePicker picker = ImagePicker();
   final XFile? file = video
       ? await picker.pickVideo(source: ImageSource.camera)
@@ -215,44 +239,27 @@ Future<PickedChatAttachment?> _fromCamera(bool video) async {
     }
   }
   final int now = DateTime.now().millisecondsSinceEpoch;
-  if (video) {
-    final String name = file.name.trim().isNotEmpty
-        ? file.name.trim()
-        : 'video-$now.mp4';
-    return PickedChatAttachment(
-      bytes: bytes,
-      fileName: name,
-      mimeType: lookupMimeType(name) ?? 'video/mp4',
-      type: ChatMessageType.video,
-    );
+  final String name = file.name.trim().isNotEmpty
+      ? file.name.trim()
+      : (video ? 'video-$now.mp4' : 'photo-$now.jpg');
+  if (!context.mounted) {
+    return null;
   }
-  return _photo(bytes, 'photo-$now');
+  return _prepared(context, TransferItem(name: name, bytes: bytes));
 }
 
-Future<PickedChatAttachment?> _fromGallery() async {
+Future<PickedChatAttachment?> _fromGallery(BuildContext context) async {
   final XFile? file = await ImagePicker().pickMedia();
-  if (file == null) {
+  if (file == null || !context.mounted) {
     return null;
   }
   final String name = file.name.trim().isNotEmpty
       ? file.name.trim()
       : 'media-${DateTime.now().millisecondsSinceEpoch}';
-  final String? mime = lookupMimeType(name);
-  if (mime != null && mime.startsWith('video/')) {
-    return PickedChatAttachment(
-      path: file.path,
-      fileName: name,
-      mimeType: mime,
-      type: ChatMessageType.video,
-    );
-  }
-  // An animated WebP or PNG plays as a GIF instead of becoming a still.
-  final Uint8List bytes = await gifIfAnimated(await file.readAsBytes());
-  final PickedChatAttachment? gif = _gif(bytes, name);
-  return gif ?? await _photo(bytes, name);
+  return _prepared(context, TransferItem(name: name, path: file.path));
 }
 
-Future<PickedChatAttachment?> _fromFiles() async {
+Future<PickedChatAttachment?> _fromFiles(BuildContext context) async {
   final PlatformFile? picked = await FilePicker.pickFile();
   if (picked == null) {
     return null;
@@ -261,28 +268,13 @@ Future<PickedChatAttachment?> _fromFiles() async {
       ? picked.path!.trim()
       : null;
   // The picker hands a path over, never the bytes.
-  if (path == null) {
+  if (path == null || !context.mounted) {
     return null;
   }
   final String name = picked.name.trim().isNotEmpty
       ? picked.name.trim()
       : 'zalacznik-${DateTime.now().millisecondsSinceEpoch}';
-  final Uint8List? head = await _header(path);
-  if (head != null &&
-      looksLikeGif(head) &&
-      await pickedLength(picked) <= kMaxSentGifBytes) {
-    // A GIF file goes as an animated picture.
-    final Uint8List whole = await File(path).readAsBytes();
-    final PickedChatAttachment? gif = _gif(whole, name);
-    if (gif != null) {
-      return gif;
-    }
-  }
-  return PickedChatAttachment(
-    path: path,
-    fileName: name,
-    mimeType: lookupMimeType(name, headerBytes: head),
-  );
+  return _prepared(context, TransferItem(name: name, path: path));
 }
 
 Future<PickedChatAttachment?> _fromGifSearch(
@@ -333,58 +325,6 @@ Future<PickedChatAttachment?> _fromVoice(
     type: ChatMessageType.voice,
     durationMs: clip.durationMs,
   );
-}
-
-/// A picture as a fresh JPEG; as it is when it cannot be read as one.
-Future<PickedChatAttachment> _photo(Uint8List bytes, String name) async {
-  final int dot = name.lastIndexOf('.');
-  final String stem = dot > 0 ? name.substring(0, dot) : name;
-  try {
-    return PickedChatAttachment(
-      bytes: await sanitizePhoto(bytes),
-      fileName: '$stem.jpg',
-      mimeType: 'image/jpeg',
-      type: ChatMessageType.image,
-    );
-  } on ArgumentError {
-    return PickedChatAttachment(
-      bytes: bytes,
-      fileName: name,
-      mimeType: lookupMimeType(name),
-    );
-  }
-}
-
-/// [bytes] as an animated GIF without metadata; `null` when not a GIF.
-/// One that cannot play in a chat goes as a plain file.
-PickedChatAttachment? _gif(Uint8List bytes, String name) {
-  final PickedGif gif = preparePickedGif(bytes);
-  if (gif.status == PickedGifStatus.notGif) {
-    return null;
-  }
-  final bool ready = gif.status == PickedGifStatus.ready;
-  return PickedChatAttachment(
-    bytes: ready ? gif.bytes : (stripGifMetadata(bytes) ?? bytes),
-    fileName: gifFileName(name),
-    mimeType: 'image/gif',
-    type: ready ? ChatMessageType.image : ChatMessageType.file,
-  );
-}
-
-Future<Uint8List?> _header(String? path) async {
-  if (path == null || path.isEmpty) {
-    return null;
-  }
-  final File file = File(path);
-  if (!await file.exists()) {
-    return null;
-  }
-  final RandomAccessFile handle = await file.open(mode: FileMode.read);
-  try {
-    return Uint8List.fromList(await handle.read(16));
-  } finally {
-    await handle.close();
-  }
 }
 
 /// Records a voice message: "Wyślij" ends it, "Anuluj" drops it.

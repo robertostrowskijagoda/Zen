@@ -69,6 +69,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
               const Spacer(),
               _ComposerActionButton(
                 key: const Key('conversation-record-button'),
+                tooltip: t('Wiadomość głosowa'),
                 toneIndex: 5,
                 icon: _isRecordingVoice
                     ? Icons.mic_rounded
@@ -211,6 +212,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                                     key: const Key(
                                       'conversation-stop-record-button',
                                     ),
+                                    tooltip: t('Zatrzymaj nagrywanie'),
                                     onPressed: onPressed,
                                     style: IconButton.styleFrom(
                                       backgroundColor: zen.warning,
@@ -228,44 +230,57 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                                   )
                                 : ZenBreathingGlow(
                                     active: hasText,
-                                    // Held: "Wyślij później" (scheduled).
-                                    child: GestureDetector(
-                                      onLongPress: hasText && canCompose
-                                          ? () => unawaited(_scheduleMessage())
-                                          : null,
-                                      child: IconButton.filled(
-                                        key: const Key(
-                                          'conversation-send-button',
+                                    // Held: "Wyślij później" (scheduled),
+                                    // one node with the button for a screen
+                                    // reader.
+                                    child: MergeSemantics(
+                                      child: Semantics(
+                                        onLongPressHint: t('Wyślij później'),
+                                        child: GestureDetector(
+                                          onLongPress: hasText && canCompose
+                                              ? () => unawaited(
+                                                  _scheduleMessage(),
+                                                )
+                                              : null,
+                                          child: IconButton.filled(
+                                            key: const Key(
+                                              'conversation-send-button',
+                                            ),
+                                            onPressed: onPressed,
+                                            style: IconButton.styleFrom(
+                                              backgroundColor: hasText
+                                                  ? zen.accent
+                                                  : zen.surfaceMuted,
+                                              foregroundColor: hasText
+                                                  ? zen.onAccent
+                                                  : zen.textSecondary,
+                                              disabledBackgroundColor:
+                                                  zen.surfaceMuted,
+                                              disabledForegroundColor: zen
+                                                  .textMuted
+                                                  .withValues(alpha: 0.6),
+                                              padding: EdgeInsets.zero,
+                                              shape: const CircleBorder(),
+                                            ),
+                                            icon: _isRecordingBusy
+                                                ? SizedBox(
+                                                    width: 16,
+                                                    height: 16,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                          color:
+                                                              zen.textSecondary,
+                                                        ),
+                                                  )
+                                                : Icon(
+                                                    Icons.send_rounded,
+                                                    size: 20,
+                                                    // Named here: a tooltip would take the long press.
+                                                    semanticLabel: t('Wyślij'),
+                                                  ),
+                                          ),
                                         ),
-                                        onPressed: onPressed,
-                                        style: IconButton.styleFrom(
-                                          backgroundColor: hasText
-                                              ? zen.accent
-                                              : zen.surfaceMuted,
-                                          foregroundColor: hasText
-                                              ? zen.onAccent
-                                              : zen.textSecondary,
-                                          disabledBackgroundColor:
-                                              zen.surfaceMuted,
-                                          disabledForegroundColor: zen.textMuted
-                                              .withValues(alpha: 0.6),
-                                          padding: EdgeInsets.zero,
-                                          shape: const CircleBorder(),
-                                        ),
-                                        icon: _isRecordingBusy
-                                            ? SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                      color: zen.textSecondary,
-                                                    ),
-                                              )
-                                            : const Icon(
-                                                Icons.send_rounded,
-                                                size: 20,
-                                              ),
                                       ),
                                     ),
                                   ),
@@ -550,7 +565,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
 
       if (file == null || !mounted) return;
 
-      Uint8List bytes = await file.readAsBytes();
+      final Uint8List bytes = await file.readAsBytes();
       final bool fromCamera =
           option == _CaptureOption.photo || option == _CaptureOption.video;
       if (fromCamera && (Platform.isAndroid || Platform.isIOS)) {
@@ -562,57 +577,18 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
           // Removed with the cache later.
         }
       }
-      String fileName = file.name.trim().isNotEmpty
+      final String fileName = file.name.trim().isNotEmpty
           ? file.name.trim()
           : (option == _CaptureOption.video
                 ? 'video-${DateTime.now().millisecondsSinceEpoch}.mp4'
                 : 'photo-${DateTime.now().millisecondsSinceEpoch}.jpg');
-      if (option == _CaptureOption.gallery) {
-        // An animated WebP or PNG plays as a GIF instead of a still.
-        bytes = await gifIfAnimated(bytes);
-        if (await _sendPickedGif(bytes, fileName)) {
-          return;
-        }
-      }
-      String? sendPath = fromCamera ? null : file.path;
-      if (option != _CaptureOption.video) {
-        // A photo goes out as a fresh JPEG: no location or camera data in
-        // it, and small enough to arrive quickly.
-        try {
-          bytes = await sanitizePhoto(bytes);
-          final int dot = fileName.lastIndexOf('.');
-          fileName = '${dot > 0 ? fileName.substring(0, dot) : fileName}.jpg';
-          sendPath = null;
-        } on ArgumentError {
-          // Not a picture this can read: it goes as it is.
-        }
-        if (!mounted) return;
-      }
-
-      final String mimeType =
-          lookupMimeType(
-            fileName,
-            headerBytes: bytes.length > 16
-                ? Uint8List.sublistView(bytes, 0, 16)
-                : bytes,
-          ) ??
-          (option == _CaptureOption.video ? 'video/mp4' : 'image/jpeg');
-
-      final String displayName =
-          ref
-              .read(socialHubControllerProvider)
-              .friendByAddress(widget.peerAddress)
-              ?.displayLabel ??
-          widget.title;
-
-      await _socialHubController.sendLocalAttachment(
-        peerAddress: widget.peerAddress,
-        displayName: displayName,
-        bytes: bytes,
-        attachmentPath: sendPath,
-        fileName: fileName,
-        mimeType: mimeType,
-      );
+      if (!mounted) return;
+      // The one way picked media go (prepareOutgoing): a photo as a fresh
+      // JPEG (a HEIC one after the phone decoded it), an animated picture
+      // as a GIF, a film without its location, device and dates.
+      await _sendTransferred(<TransferItem>[
+        TransferItem(name: fileName, bytes: bytes),
+      ]);
     } catch (error) {
       if (!mounted) return;
       _showComposerSnackBar(
@@ -1042,8 +1018,13 @@ class _ComposerActionButton extends StatelessWidget {
         ),
       ),
     );
-    if (hasLongPress || tooltip == null) {
+    if (tooltip == null) {
       return button;
+    }
+    if (hasLongPress) {
+      // A tooltip would take the long press the button records with: the
+      // name is given to the screen reader alone.
+      return Semantics(label: tooltip, child: button);
     }
     return Tooltip(message: tooltip!, child: button);
   }
@@ -1203,6 +1184,7 @@ class _EmojiPickerSheetState extends State<_EmojiPickerSheet> {
                   prefixIcon: const Icon(Icons.search_rounded, size: 20),
                   suffixIcon: _query.isNotEmpty
                       ? IconButton(
+                          tooltip: t('Wyczyść'),
                           icon: const Icon(Icons.clear_rounded, size: 18),
                           onPressed: () {
                             _searchController.clear();
@@ -1407,6 +1389,7 @@ class _ConversationGifPickerDialogState
               child: Row(
                 children: <Widget>[
                   IconButton(
+                    tooltip: t('Zamknij'),
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.close_rounded),
                   ),
@@ -1786,6 +1769,7 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             IconButton.filledTonal(
+              tooltip: _isPlaying ? t('Pauza') : t('Odtwórz'),
               iconSize: 22,
               padding: const EdgeInsets.all(8),
               constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
@@ -1855,13 +1839,16 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
                       ),
                       const SizedBox(width: 6),
                       if (widget.message.hasAttachment)
-                        InkWell(
-                          onTap: () =>
-                              _saveAttachmentCopy(context, widget.message),
-                          child: Icon(
-                            Icons.download_rounded,
-                            size: 14,
-                            color: zen.textMuted,
+                        Tooltip(
+                          message: t('Zapisz plik'),
+                          child: InkWell(
+                            onTap: () =>
+                                _saveAttachmentCopy(context, widget.message),
+                            child: Icon(
+                              Icons.download_rounded,
+                              size: 14,
+                              color: zen.textMuted,
+                            ),
                           ),
                         )
                       else
@@ -2150,6 +2137,7 @@ class _VideoAttachmentPreviewScreenState
         title: Text(widget.message.fileName ?? t('Wideo')),
         actions: <Widget>[
           IconButton(
+            tooltip: t('Zapisz plik'),
             onPressed: widget.message.hasAttachment
                 ? () => _saveAttachmentCopy(context, widget.message)
                 : null,

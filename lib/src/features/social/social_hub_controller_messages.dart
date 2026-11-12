@@ -124,14 +124,22 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     bool forwarded = false,
   }) async {
     final String normalizedFileName = fileName.trim();
-    final Uint8List? initialBytes = bytes == null || bytes.isEmpty
-        ? null
-        : bytes;
-    final String? normalizedPath = attachmentPath?.trim().isNotEmpty == true
-        ? attachmentPath!.trim()
-        : null;
-    if ((initialBytes == null && normalizedPath == null) ||
-        normalizedFileName.isEmpty) {
+    if (normalizedFileName.isEmpty) {
+      return;
+    }
+    // Whatever way it came here, it leaves without the location, device
+    // and time data Zen knows how to remove.
+    final ({Uint8List? bytes, String? path}) outgoing =
+        await _attachmentWithoutMetadata(
+          _mediaVault,
+          bytes == null || bytes.isEmpty ? null : bytes,
+          attachmentPath?.trim().isNotEmpty == true
+              ? attachmentPath!.trim()
+              : null,
+        );
+    final Uint8List? initialBytes = outgoing.bytes;
+    final String? normalizedPath = outgoing.path;
+    if (initialBytes == null && normalizedPath == null) {
       return;
     }
     final int timestamp = _outgoingStamp(peerAddress, sentAtMillis);
@@ -2532,4 +2540,41 @@ int _effectiveSentAt(ZenSignal signal, int receivedAtMillis) {
     return receivedAtMillis;
   }
   return claimed;
+}
+
+/// [bytes], or the file at [path] (a plain path or one of [vault]'s), as
+/// they leave this device: without the location, device and time data
+/// `outgoing_media.dart` removes. What has nothing to remove, a kind it
+/// does not know and a file too large to be read for it stay as they
+/// are; a file that lost something goes on as bytes in memory.
+Future<({Uint8List? bytes, String? path})> _attachmentWithoutMetadata(
+  MediaVault vault,
+  Uint8List? bytes,
+  String? path,
+) async {
+  if (bytes != null) {
+    return (bytes: await stripOutgoingMetadataSized(bytes), path: path);
+  }
+  if (path == null) {
+    return (bytes: null, path: null);
+  }
+  try {
+    final int length = await vault.length(path);
+    if (length <= 0 || length > kMaxCleanedTransferBytes) {
+      return (bytes: null, path: path);
+    }
+    final Uint8List head = await vault.readRange(path, 0, min(16, length));
+    if (!canStripMetadata(head)) {
+      return (bytes: null, path: path);
+    }
+    final Uint8List whole = await vault.read(path);
+    final Uint8List clean = await stripOutgoingMetadataSized(whole);
+    return identical(clean, whole)
+        ? (bytes: null, path: path)
+        : (bytes: clean, path: null);
+  } on Object catch (error, stackTrace) {
+    // Unreadable here: the send itself says what is wrong with it.
+    logZenError('Reading an attachment to clean failed', error, stackTrace);
+    return (bytes: null, path: path);
+  }
 }

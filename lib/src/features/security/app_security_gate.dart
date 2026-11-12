@@ -743,6 +743,8 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
             ),
             const SizedBox(height: 24),
             TextFormField(
+              enableSuggestions: false,
+              autocorrect: false,
               key: const Key('app-unlock-password-field'),
               controller: _passwordController,
               obscureText: _obscureText,

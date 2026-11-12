@@ -496,10 +496,18 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     if (group.isInvitePending) {
       throw StateError(t('Najpierw dołącz do grupy.'));
     }
-    final String? path = attachmentPath?.trim().isNotEmpty == true
-        ? attachmentPath!.trim()
-        : null;
-    final Uint8List? given = bytes == null || bytes.isEmpty ? null : bytes;
+    // Whatever way it came here, it leaves without the location, device
+    // and time data Zen knows how to remove.
+    final ({Uint8List? bytes, String? path}) outgoing =
+        await _attachmentWithoutMetadata(
+          _mediaVault,
+          bytes == null || bytes.isEmpty ? null : bytes,
+          attachmentPath?.trim().isNotEmpty == true
+              ? attachmentPath!.trim()
+              : null,
+        );
+    final String? path = outgoing.path;
+    final Uint8List? given = outgoing.bytes;
     if (given == null && path == null) {
       return;
     }

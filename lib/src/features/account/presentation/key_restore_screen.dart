@@ -319,6 +319,7 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                 ),
                 const SizedBox(height: 8),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   key: const Key('paper-restore-input'),
                   controller: _input,
                   minLines: 2,
@@ -372,6 +373,8 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                 if (found != null) ...<Widget>[
                   const SizedBox(height: 14),
                   TextField(
+                    enableIMEPersonalizedLearning: false,
+                    keyboardType: TextInputType.visiblePassword,
                     key: const Key('key-restore-friend'),
                     controller: _friend,
                     autocorrect: false,

@@ -470,6 +470,8 @@ class _OtherAccountPanelState extends ConsumerState<OtherAccountPanel> {
           ),
         const SizedBox(height: 12),
         TextField(
+          enableSuggestions: false,
+          autocorrect: false,
           key: const Key('other-account-password'),
           controller: _password,
           obscureText: _obscure,

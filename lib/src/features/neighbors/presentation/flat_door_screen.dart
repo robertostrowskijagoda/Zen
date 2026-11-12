@@ -7,6 +7,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
@@ -386,7 +387,7 @@ class FlatJoinRequestCard extends StatelessWidget {
                     if (request.device.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 3),
                       Text(
-                        request.device,
+                        deviceNameLabel(request.device),
                         style: TextStyle(
                           color: zen.textSecondary,
                           fontSize: 13.5,

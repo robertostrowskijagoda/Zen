@@ -208,6 +208,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
         scrollable: true,
         title: Text(t('Zapasowy SMS')),
         content: TextField(
+          enableIMEPersonalizedLearning: false,
           key: const Key('alarm-sms-numbers'),
           controller: controller,
           autofocus: true,
@@ -1058,6 +1059,9 @@ class _PinSetupState extends State<_PinSetup> {
     ) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: TextField(
+        enableSuggestions: false,
+        autocorrect: false,
+        enableIMEPersonalizedLearning: false,
         key: Key(key),
         controller: c,
         obscureText: true,
@@ -1131,6 +1135,9 @@ Future<String?> _askPin(
       scrollable: true,
       title: Text(title),
       content: TextField(
+        enableSuggestions: false,
+        autocorrect: false,
+        enableIMEPersonalizedLearning: false,
         key: const Key('alarm-pin-confirm'),
         controller: controller,
         autofocus: true,

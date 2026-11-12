@@ -103,6 +103,21 @@ Future<String?> pickOnePath({
   return path == null || path.isEmpty ? null : path;
 }
 
+/// At most [maxBytes] + 1 bytes from the start of [path], for a file Zen
+/// reads whole because it was opened or picked from outside (a key
+/// backup, an update). A larger file comes back cut one byte past
+/// [maxBytes], which the reader that takes it refuses as damaged, and the
+/// rest is never read into memory.
+Future<Uint8List> readPickedFile(String path, {required int maxBytes}) async {
+  final RandomAccessFile file = await File(path).open();
+  try {
+    final int length = await file.length();
+    return await file.read(length > maxBytes ? maxBytes + 1 : length);
+  } finally {
+    await file.close();
+  }
+}
+
 /// The size of [file] as the picker reported it, read from the file when
 /// it did not; 0 when it cannot be told.
 Future<int> pickedLength(PlatformFile file) async =>

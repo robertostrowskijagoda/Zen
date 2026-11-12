@@ -117,7 +117,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
   String? _flatRunsOn(LedgerNode node) {
     for (final AccountDevice d in node.ownDevices) {
       if (!d.isThis && _runsFlat(d)) {
-        return t('Działa na: {device}', {'device': d.name});
+        return t('Działa na: {device}', {'device': deviceNameLabel(d.name)});
       }
     }
     return null;
@@ -128,7 +128,9 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
         scrollable: true,
-        title: Text(t('Odłączyć „{name}”?', {'name': device.name})),
+        title: Text(
+          t('Odłączyć „{name}”?', {'name': deviceNameLabel(device.name)}),
+        ),
         content: Text(
           t(
             'To urządzenie przestanie należeć do konta: nie dostanie '
@@ -163,7 +165,9 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     try {
       await _node!.unlinkDevice(device.device);
       unlinked = true;
-      _message = t('„{name}” jest odłączone.', {'name': device.name});
+      _message = t('„{name}” jest odłączone.', {
+        'name': deviceNameLabel(device.name),
+      });
     } on Object catch (error) {
       _message = t('Nie udało się: {error}', {'error': error});
     } finally {
@@ -179,7 +183,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
         context,
         ref.read(neighborsServiceProvider),
         lead: t('„{device}” otwierało drzwi mieszkania.', {
-          'device': device.name,
+          'device': deviceNameLabel(device.name),
         }),
       );
     }
@@ -239,7 +243,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                           ? Icons.smartphone_rounded
                           : Icons.computer_rounded,
                       tone: d.isThis ? zen.accent : zen.tone(ZenTone.network),
-                      title: d.name,
+                      title: deviceNameLabel(d.name),
                       subtitle: d.isThis
                           ? t('To urządzenie')
                           : d.address == null
@@ -502,6 +506,8 @@ Future<String?> askAccountPassword(BuildContext context, String title) async {
       scrollable: true,
       title: Text(title),
       content: TextField(
+        enableSuggestions: false,
+        autocorrect: false,
         key: const Key('account-password-field'),
         controller: controller,
         obscureText: true,
@@ -730,6 +736,10 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
             ),
             const SizedBox(height: 8),
             TextField(
+              enableSuggestions: false,
+              autocorrect: false,
+              enableIMEPersonalizedLearning: false,
+              keyboardType: TextInputType.visiblePassword,
               key: const Key('link-code'),
               controller: _code,
               enabled: !_done,

@@ -497,6 +497,9 @@ class _AccountCopyReceiveScreenState
                 ),
               const SizedBox(height: 8),
               TextField(
+                enableSuggestions: false,
+                autocorrect: false,
+                keyboardType: TextInputType.visiblePassword,
                 key: const Key('account-copy-code'),
                 controller: _code,
                 enabled: !_busy,

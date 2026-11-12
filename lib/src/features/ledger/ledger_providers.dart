@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
@@ -196,7 +197,22 @@ final class _HubChatTarget implements ChatSyncTarget {
       _hub.forgetGroupFromOtherDevice(groupId);
 }
 
+/// A device's name as the person reads it, in the app's language. The name
+/// is stored and sent as [thisDeviceName] gives it (other devices and
+/// older versions read it so): the names Zen gives are translated here,
+/// anything else is shown as it is.
+String deviceNameLabel(String stored) => switch (stored) {
+  'Przeglądarka' => t('Przeglądarka'),
+  'Telefon (Android)' => t('Telefon (Android)'),
+  'Komputer (Windows)' => t('Komputer (Windows)'),
+  'Komputer (macOS)' => t('Komputer (macOS)'),
+  'Komputer (Linux)' => t('Komputer (Linux)'),
+  'Urządzenie' => t('Urządzenie'),
+  _ => stored,
+};
+
 /// A plain name for this device, as other devices of the account show it.
+/// Stored and sent as it is, in Polish; shown through [deviceNameLabel].
 String get thisDeviceName {
   if (kIsWeb) {
     return 'Przeglądarka';

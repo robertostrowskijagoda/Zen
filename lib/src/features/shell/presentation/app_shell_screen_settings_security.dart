@@ -794,6 +794,8 @@ Future<String?> _showPasswordDialog(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       TextFormField(
+                        enableSuggestions: false,
+                        autocorrect: false,
                         key: fieldKey,
                         controller: passwordController,
                         obscureText: obscurePassword,
@@ -839,6 +841,8 @@ Future<String?> _showPasswordDialog(
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
+                        enableSuggestions: false,
+                        autocorrect: false,
                         key: confirmKey,
                         controller: confirmController,
                         obscureText: obscureConfirm,

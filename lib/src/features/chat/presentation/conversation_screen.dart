@@ -1322,61 +1322,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final String fileName = picked.name.trim().isNotEmpty
         ? picked.name.trim()
         : 'zalacznik-${DateTime.now().millisecondsSinceEpoch}';
-    final Uint8List? headerBytes = await _readAttachmentHeader(attachmentPath);
-    // A GIF file goes as an animated picture, like one from the gallery (a
-    // too large one as a file, if the person agrees).
-    if (headerBytes != null && looksLikeGif(headerBytes)) {
-      final int size = await pickedLength(picked);
-      if (size > kMaxSentGifBytes) {
-        if (await _confirmGifAsFile(PickedGifStatus.tooLarge) && mounted) {
-          await _sendGifAttachment(
-            gifFileName(fileName),
-            ChatMessageType.file,
-            path: attachmentPath,
-          );
-        }
-        return;
-      }
-      Uint8List? whole;
-      try {
-        whole = await File(attachmentPath).readAsBytes();
-      } on FileSystemException {
-        whole = null;
-      }
-      if (!mounted) {
-        return;
-      }
-      if (whole != null && await _sendPickedGif(whole, fileName)) {
-        return;
-      }
-    }
-    final String? mimeType = lookupMimeType(
-      picked.name,
-      headerBytes: headerBytes,
-    );
-    final String displayName =
-        ref
-            .read(socialHubControllerProvider)
-            .friendByAddress(widget.peerAddress)
-            ?.displayLabel ??
-        widget.title;
-
-    try {
-      await _socialHubController.sendLocalAttachment(
-        peerAddress: widget.peerAddress,
-        displayName: displayName,
-        attachmentPath: attachmentPath,
-        fileName: fileName,
-        mimeType: mimeType,
-      );
-    } on FormatException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
-    }
+    // Made ready like a dropped file: a photo or film without its
+    // location, device and time data, a GIF animated (a too large one as a
+    // file, if the person agrees), anything else as it is.
+    await _sendTransferred(<TransferItem>[
+      TransferItem(name: fileName, path: attachmentPath),
+    ]);
   }
 
   Future<Uint8List?> _readAttachmentHeader(String? path) async {

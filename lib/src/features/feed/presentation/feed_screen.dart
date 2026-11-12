@@ -2968,6 +2968,7 @@ class _PostVideoState extends State<PostVideo> {
                         Icons.play_arrow_rounded,
                         size: 40,
                         color: zen.textPrimary,
+                        semanticLabel: t('Odtwórz'),
                       ),
                     ),
                     if (_error != null)

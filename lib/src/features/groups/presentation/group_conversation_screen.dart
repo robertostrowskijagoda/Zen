@@ -1960,23 +1960,34 @@ class _GroupConversationScreenState
                                 ),
                               ),
                               composer.sendSlot(
-                                // Held: "Wyślij później" (not on the board).
-                                GestureDetector(
-                                  onLongPress: _boardTab || !_canWrite
-                                      ? null
-                                      : () => unawaited(_scheduleMessage()),
-                                  child: IconButton.filled(
-                                    key: const Key('group-chat-send-button'),
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: zen.accent,
-                                      foregroundColor: zen.onAccent,
-                                      shape: const CircleBorder(),
-                                    ).merge(_composerButtonFrame),
-                                    icon: const Icon(
-                                      Icons.send_rounded,
-                                      size: 20,
+                                // Held: "Wyślij później" (not on the board),
+                                // one node with the button for a screen
+                                // reader.
+                                MergeSemantics(
+                                  child: Semantics(
+                                    onLongPressHint: t('Wyślij później'),
+                                    child: GestureDetector(
+                                      onLongPress: _boardTab || !_canWrite
+                                          ? null
+                                          : () => unawaited(_scheduleMessage()),
+                                      child: IconButton.filled(
+                                        key: const Key(
+                                          'group-chat-send-button',
+                                        ),
+                                        style: IconButton.styleFrom(
+                                          backgroundColor: zen.accent,
+                                          foregroundColor: zen.onAccent,
+                                          shape: const CircleBorder(),
+                                        ).merge(_composerButtonFrame),
+                                        icon: Icon(
+                                          Icons.send_rounded,
+                                          size: 20,
+                                          // Named here: a tooltip would take the long press.
+                                          semanticLabel: t('Wyślij'),
+                                        ),
+                                        onPressed: _sendMessage,
+                                      ),
                                     ),
-                                    onPressed: _sendMessage,
                                   ),
                                 ),
                               ),

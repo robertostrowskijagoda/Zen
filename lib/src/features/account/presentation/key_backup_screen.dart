@@ -701,6 +701,8 @@ class _PaperBackupViewState extends State<PaperBackupView> {
     const SizedBox(height: 8),
     for (int i = 0; i < _asked.length; i++) ...<Widget>[
       TextField(
+        enableIMEPersonalizedLearning: false,
+        keyboardType: TextInputType.visiblePassword,
         key: Key('paper-check-$i'),
         controller: _answers[i],
         autocorrect: false,

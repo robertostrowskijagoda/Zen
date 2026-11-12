@@ -364,43 +364,46 @@ class _RoundCallAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: ZenLook.of(context).tinted(
-              ZenColors.of(context),
-              color,
-              radius: 22,
-              alpha: 0.45,
-              offset: const Offset(0, 6),
+    // The label below names the button for a screen reader.
+    return MergeSemantics(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: ZenLook.of(context).tinted(
+                ZenColors.of(context),
+                color,
+                radius: 22,
+                alpha: 0.45,
+                offset: const Offset(0, 6),
+              ),
+            ),
+            child: IconButton.filled(
+              key: buttonKey,
+              onPressed: onPressed,
+              style: IconButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: ZenColors.foregroundFor(color),
+                fixedSize: const Size(72, 72),
+                minimumSize: const Size(72, 72),
+                shape: const CircleBorder(),
+              ),
+              icon: Icon(icon, size: 32),
             ),
           ),
-          child: IconButton.filled(
-            key: buttonKey,
-            onPressed: onPressed,
-            style: IconButton.styleFrom(
-              backgroundColor: color,
-              foregroundColor: ZenColors.foregroundFor(color),
-              fixedSize: const Size(72, 72),
-              minimumSize: const Size(72, 72),
-              shape: const CircleBorder(),
+          const SizedBox(height: 10),
+          Text(
+            label,
+            style: TextStyle(
+              color: labelColor,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
             ),
-            icon: Icon(icon, size: 32),
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          label,
-          style: TextStyle(
-            color: labelColor,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

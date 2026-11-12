@@ -981,6 +981,58 @@ void main() {
     }
   });
 
+  test('a film sent to the group leaves without where and on what it was '
+      'made', () async {
+    final _Mesh mesh = await _buildMesh();
+    final _Device b = mesh.devices[bob]!;
+    final GroupProfile group = await _group(mesh);
+    final String key = 'group:${group.id}';
+    List<int> box(String type, List<int> body) => <int>[
+      0, 0, (8 + body.length) >> 8, (8 + body.length) & 0xFF, //
+      ...latin1.encode(type),
+      ...body,
+    ];
+    const String place = '+52.2297+021.0122/';
+    final Uint8List film = Uint8List.fromList(<int>[
+      ...box('ftyp', <int>[...latin1.encode('isom'), 0, 0, 2, 0]),
+      ...box('moov', <int>[
+        ...box('udta', <int>[
+          ...box('©xyz', latin1.encode(place)),
+          ...box('©mod', latin1.encode('Pixel 9')),
+        ]),
+      ]),
+      ...box('mdat', List<int>.filled(64, 7)),
+    ]);
+
+    await b.controller.sendGroupAttachment(
+      groupId: group.id,
+      bytes: film,
+      fileName: 'film.mp4',
+      mimeType: 'video/mp4',
+      type: ChatMessageType.video,
+    );
+    await mesh.settle();
+    for (final String member in <String>[alice, carol]) {
+      final _Device device = mesh.devices[member]!;
+      await mesh.until(
+        () async => (await device.timelines.load(
+          key,
+        )).any((ChatMessage m) => m.attachmentPath != null),
+        reason: '$member gets the film',
+      );
+      final ChatMessage got = (await device.timelines.load(
+        key,
+      )).singleWhere((ChatMessage m) => m.attachmentPath != null);
+      final String bytes = latin1.decode(
+        await device.container
+            .read(mediaVaultProvider)
+            .read(got.attachmentPath!),
+      );
+      expect(bytes.contains(place), isFalse, reason: member);
+      expect(bytes.contains('Pixel 9'), isFalse, reason: member);
+    }
+  });
+
   test('a larger file is sealed once as blocks the members fetch', () async {
     final _Mesh mesh = await _buildMesh();
     final _SharedBlocks blocks = _SharedBlocks();

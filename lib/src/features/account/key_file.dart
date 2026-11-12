@@ -30,6 +30,10 @@ const String kKeyFileExtension = 'zenkey';
 /// Shortest password the backup file accepts.
 const int kKeyFileMinPasswordLength = kMinAccountPasswordLength;
 
+/// The most of a file that is read as a key backup (picked, or opened in
+/// Zen from outside): the real file is under a hundred bytes.
+const int kMaxKeyFileReadBytes = 4 * 1024;
+
 const String _magic = 'ZENKEY';
 const int _seedLength = 32;
 const int _saltLength = 16;

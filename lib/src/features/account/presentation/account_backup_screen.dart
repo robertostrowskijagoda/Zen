@@ -436,6 +436,8 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
               ),
               ZenSection(t('Hasło kopii')),
               TextField(
+                enableSuggestions: false,
+                autocorrect: false,
                 key: const Key('account-backup-password'),
                 controller: _password,
                 obscureText: _obscure,
@@ -449,6 +451,8 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
               ),
               const SizedBox(height: 8),
               TextField(
+                enableSuggestions: false,
+                autocorrect: false,
                 key: const Key('account-backup-repeat'),
                 controller: _repeat,
                 obscureText: _obscure,
@@ -755,6 +759,8 @@ class _AccountBackupRestoreScreenState
                       ),
                       const SizedBox(height: 8),
                       TextField(
+                        enableSuggestions: false,
+                        autocorrect: false,
                         key: const Key('account-restore-password'),
                         controller: _password,
                         obscureText: _obscure,
@@ -918,6 +924,8 @@ class _AppPasswordDialogState extends State<_AppPasswordDialog> {
           ),
           const SizedBox(height: 12),
           TextField(
+            enableSuggestions: false,
+            autocorrect: false,
             key: const Key('account-restore-app-password'),
             controller: _password,
             obscureText: true,

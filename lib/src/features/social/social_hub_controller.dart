@@ -50,6 +50,7 @@ import 'package:zen/src/features/ledger/contacts_backup.dart'
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/media/outgoing_media.dart';
 import 'package:zen/src/features/profile/profile_card.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
