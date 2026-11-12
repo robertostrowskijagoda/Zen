@@ -255,13 +255,15 @@ const List<_Name> _names = <_Name>[
     max: 20000,
     background: true,
   ),
+  // Names, levels and a tag for each member of each joined group (about 35
+  // bytes a member): a few groups make it tens of kilobytes.
   _Name(
     'background/notice-kit.zenbg',
     way: _Way.atomic,
     first: 0.3,
     used: 0.6,
     min: 120,
-    max: 3000,
+    max: 40000,
     background: true,
   ),
   _Name(

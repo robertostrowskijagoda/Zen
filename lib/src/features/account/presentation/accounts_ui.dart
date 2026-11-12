@@ -868,6 +868,9 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
     await ref
         .read(zenBackgroundAccountsProvider)
         .setNotify(ref.read(zenAccountProvider), value);
+    // The Android service opens its nodes again with the new choice (the
+    // ring and the call card follow it as the notifications do).
+    ref.read(androidBackgroundServiceControllerProvider).accountsChanged();
   }
 
   /// "Odbieraj w tle": on only after the warning (the battery, and for an
@@ -897,6 +900,13 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
     final bool done = await settings.setOn(account, value);
     // The Android service reads the list again at once.
     ref.read(androidBackgroundServiceControllerProvider).accountsChanged();
+    if (zenDesktopBackgroundPlatform && mounted) {
+      // The notice kit the tray node decides with is written from now on
+      // (and no more once off), not only at the next minute's check.
+      ref
+          .read(desktopReceivesInBackgroundProvider.notifier)
+          .set(done ? value : await settings.isOn(account));
+    }
     if (zenDesktopBackgroundPlatform && !value) {
       await applyDesktopBackgroundSetting(
         account: account,

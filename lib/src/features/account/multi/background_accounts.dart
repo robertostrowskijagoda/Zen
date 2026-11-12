@@ -13,6 +13,7 @@ import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/runtime/locked_presence.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -508,6 +509,124 @@ final class BackgroundAccountWatch {
   }
 }
 
+/// What a receive-only node of an account ([BackgroundAccountNode]) runs
+/// with, as the app last wrote it into the account's folder: the background
+/// capability and the kits. The notice kit is the account's own (the app
+/// writes one into each account's folder while that account is open), so
+/// the node rings and tells of what the app would, by that account's own
+/// settings.
+@immutable
+final class BackgroundAccountKits {
+  const BackgroundAccountKits._({
+    required this.capability,
+    required this.inbox,
+    this.doorKit,
+    this.outboxKit,
+    this.presenceKit,
+    this.noticeKit,
+  });
+
+  final BackgroundCapability capability;
+
+  /// The sealed inbox the node keeps what comes in.
+  final SealedInboxWriter inbox;
+  final LockedDoorKit? doorKit;
+  final LockedOutboxKit? outboxKit;
+
+  /// What its pongs may tell friends ("w tle", when Zen was last open), as
+  /// the account left it when it was last open; without it a pong says
+  /// nothing of presence and the friends lose the state shown.
+  final LockedPresenceKit? presenceKit;
+
+  /// The account's notice kit; `null` before the app wrote one (an account
+  /// not opened since 1.17.0 on a computer, or since it was made): the node
+  /// then stays quiet ([LockedNoticeKit.quiet]).
+  final LockedNoticeKit? noticeKit;
+
+  /// `null` when [support] holds no background capability that
+  /// [credentials] opens (padding, or an account never opened since its
+  /// "Odbieraj w tle" was turned on).
+  static Future<BackgroundAccountKits?> read({
+    required Directory support,
+    required AppSecurityCredentialsStore credentials,
+  }) async {
+    Future<Directory> folder() async => support;
+    final FileBackgroundVault vault = FileBackgroundVault(
+      supportDirectory: folder,
+      credentials: credentials,
+    );
+    final BackgroundCapability? capability = await vault.load();
+    if (capability == null) {
+      return null;
+    }
+    return BackgroundAccountKits._(
+      capability: capability,
+      inbox: SealedInboxWriter(
+        file: await vault.inboxFile(),
+        recipientPublicKey: capability.inboxPublicKey,
+      ),
+      doorKit: LockedDoorKit.fromJson(
+        await lockedDoorKitFile(
+          supportDirectory: folder,
+          credentials: credentials,
+        ).read(),
+      ),
+      outboxKit: LockedOutboxKit.fromJson(
+        await lockedOutboxKitFile(
+          supportDirectory: folder,
+          credentials: credentials,
+        ).read(),
+      ),
+      presenceKit: LockedPresenceKit.fromJson(
+        await lockedPresenceKitFile(
+          supportDirectory: folder,
+          credentials: credentials,
+        ).read(),
+      ),
+      noticeKit: await readLockedNoticeKit(
+        supportDirectory: folder,
+        credentials: credentials,
+      ),
+    );
+  }
+
+  /// The node's receiver on [transport]. For an additional [account]
+  /// everything it posts goes through [GenericAccountNotices] (no name, no
+  /// content, it opens that account; none with "Powiadomienia z tego konta"
+  /// off), and the ring and the call card follow the same choice: with its
+  /// notifications off nothing rings or shows ([LockedNoticeKit.quiet]),
+  /// and the card names nobody and opens that account.
+  LockedReceiver receiver({
+    required SignalTransport transport,
+    required RuntimeSystemNotificationService notices,
+    ZenBackgroundAccount? account,
+    int slot = 0,
+    Future<bool> Function()? meshLinked,
+    Stream<SignalTransportFrame>? doorFrames,
+  }) => LockedReceiver(
+    transport: transport,
+    capability: capability,
+    inbox: inbox,
+    notices: account == null
+        ? notices
+        : GenericAccountNotices(
+            notices,
+            slot: slot,
+            folder: account.folder,
+            notify: account.notify,
+          ),
+    meshLinked: meshLinked,
+    doorFrames: doorFrames,
+    knocks: doorKit?.knockWatch(),
+    presence: presenceKit,
+    noticeKit: account == null || account.notify
+        ? noticeKit
+        : LockedNoticeKit.quiet,
+    callCardRoute: account == null ? '' : buildAccountRouteKey(account.folder),
+    callCardNames: account == null,
+  );
+}
+
 /// An additional account's receive-only node, run without its password:
 /// the node under its background key, the sealed inbox, the doors of its
 /// door kit and its outbox kit — what the default account's locked
@@ -537,11 +656,14 @@ final class BackgroundAccountNode {
 
   /// `null` when [account]'s folder holds no background capability under
   /// its secret (padding, or an account never opened since it was turned
-  /// on).
+  /// on). [notices]: the device's own; the node's go through
+  /// [GenericAccountNotices] ([slot] keeps them apart from another
+  /// account's).
   static Future<BackgroundAccountNode?> open({
     required Directory accounts,
     required ZenBackgroundAccount account,
     required RuntimeSystemNotificationService notices,
+    int slot = 0,
     Duration waitTimeout = const Duration(seconds: 30),
     SecureStorageCredentialsStore secrets =
         const SecureStorageCredentialsStore.device(),
@@ -559,7 +681,8 @@ final class BackgroundAccountNode {
       notices: notices,
       waitTimeout: waitTimeout,
       goneApp: goneApp,
-      accountFolder: account.folder,
+      account: account,
+      slot: slot,
     );
   }
 
@@ -567,47 +690,28 @@ final class BackgroundAccountNode {
   /// [credentials] reads (a computer's default account while its window is
   /// locked, too). [goneApp]: the app engine Android ended (0 for none),
   /// whose node the bridge gives this one at once (node_identity.go).
-  /// [accountFolder]: an additional account's folder name, whose node a
-  /// wipe of the account stops ([BackgroundAccountRuns],
-  /// [BackgroundAccountWatch]).
+  /// [account]: an additional account (its notifications, and its node
+  /// stopped by a wipe of the account: [BackgroundAccountRuns],
+  /// [BackgroundAccountWatch]); `null` for the default account.
   static Future<BackgroundAccountNode?> openAt({
     required Directory support,
     required AppSecurityCredentialsStore credentials,
     required RuntimeSystemNotificationService notices,
     Duration waitTimeout = const Duration(seconds: 30),
     int goneApp = 0,
-    String? accountFolder,
+    ZenBackgroundAccount? account,
+    int slot = 0,
   }) async {
     Future<Directory> folder() async => support;
-    final FileBackgroundVault vault = FileBackgroundVault(
-      supportDirectory: folder,
+    final BackgroundAccountKits? kits = await BackgroundAccountKits.read(
+      support: support,
       credentials: credentials,
     );
-    final BackgroundCapability? capability = await vault.load();
-    if (capability == null) {
+    if (kits == null) {
       return null;
     }
-    final LockedDoorKit? doorKit = LockedDoorKit.fromJson(
-      await lockedDoorKitFile(
-        supportDirectory: folder,
-        credentials: credentials,
-      ).read(),
-    );
-    final LockedOutboxKit? outboxKit = LockedOutboxKit.fromJson(
-      await lockedOutboxKitFile(
-        supportDirectory: folder,
-        credentials: credentials,
-      ).read(),
-    );
-    // What its pongs may tell friends ("w tle", when Zen was last open),
-    // as the account left it when it was last open; without it a pong
-    // says nothing of presence and the friends lose the state shown.
-    final LockedPresenceKit? presenceKit = LockedPresenceKit.fromJson(
-      await lockedPresenceKitFile(
-        supportDirectory: folder,
-        credentials: credentials,
-      ).read(),
-    );
+    final LockedDoorKit? doorKit = kits.doorKit;
+    final LockedOutboxKit? outboxKit = kits.outboxKit;
     final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
       config: RuntimeSignalBootstrapConfig(
         waitTimeout: waitTimeout,
@@ -629,22 +733,17 @@ final class BackgroundAccountNode {
         ..setDoorKey(doorKit.doorKey)
         ..setMailboxDoorKeys(doorKit.mailboxDoorKeys);
     }
-    final SealedInboxWriter inbox = SealedInboxWriter(
-      file: await vault.inboxFile(),
-      recipientPublicKey: capability.inboxPublicKey,
-    );
+    final String? accountFolder = account?.folder;
     late final BackgroundAccountNode node;
     node = BackgroundAccountNode._(
       runtime,
-      LockedReceiver(
+      kits.receiver(
         transport: runtime,
-        capability: capability,
-        inbox: inbox,
         notices: notices,
+        account: account,
+        slot: slot,
         meshLinked: runtime.meshLinked,
         doorFrames: runtime.doorFrames,
-        knocks: doorKit?.knockWatch(),
-        presence: presenceKit,
       ),
       outboxKit == null || outboxKit.items.isEmpty
           ? null
@@ -685,12 +784,8 @@ final class BackgroundAccountNode {
         final BackgroundAccountNode? node = await open(
           accounts: accounts,
           account: account,
-          notices: GenericAccountNotices(
-            notices,
-            slot: slot,
-            folder: account.folder,
-            notify: account.notify,
-          ),
+          notices: notices,
+          slot: slot,
           waitTimeout: waitTimeout,
           secrets: secrets,
           goneApp: goneApp,

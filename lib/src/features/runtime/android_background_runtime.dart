@@ -2380,12 +2380,11 @@ final class LockedReceiverSession {
         credentials: credentials,
       ).read(),
     );
-    // Who wrote (and what) a message's notice may say.
-    final LockedNoticeKit? noticeKit = LockedNoticeKit.fromJson(
-      await lockedNoticeKitFile(
-        supportDirectory: () async => support,
-        credentials: credentials,
-      ).read(),
+    // What rings and what is told about, and who wrote (and what) a
+    // message's notice may say; none: quiet (LockedNoticeKit.quiet).
+    final LockedNoticeKit? noticeKit = await readLockedNoticeKit(
+      supportDirectory: () async => support,
+      credentials: credentials,
     );
     // What this device still had to send, sealed for each recipient.
     final LockedOutboxKit? outboxKit = LockedOutboxKit.fromJson(

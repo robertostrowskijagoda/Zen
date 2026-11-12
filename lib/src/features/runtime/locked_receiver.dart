@@ -661,6 +661,8 @@ final class LockedReceiver {
     Future<bool> Function()? onNetwork,
     this.relinkWait = const Duration(seconds: 10),
     this.relinkStep = const Duration(milliseconds: 500),
+    this.callCardRoute = '',
+    this.callCardNames = true,
   }) : _transport = transport,
        _beat = beat,
        _meshLinked = meshLinked,
@@ -672,7 +674,7 @@ final class LockedReceiver {
        _doorFrames = doorFrames,
        _knocks = knocks,
        _mailbox = mailbox,
-       _noticeKit = noticeKit ?? const LockedNoticeKit(),
+       _noticeKit = noticeKit ?? LockedNoticeKit.quiet,
        _presence = presence ?? const LockedPresenceKit(),
        _presenceSnapshot =
            presenceSnapshot ??
@@ -708,13 +710,15 @@ final class LockedReceiver {
   /// This phone as a mailbox for friends (`null`: no mailbox kit).
   final LockedMailbox? _mailbox;
 
-  /// What a message's notice may say (without a kit: only that it came).
+  /// What a message's notice may say, and the switches the app wrote.
+  /// Without a kit [LockedNoticeKit.quiet]: what the settings could have
+  /// switched off counts as off, so a runner that has none stays quiet
+  /// rather than ringing against the person's choice.
   final LockedNoticeKit _noticeKit;
 
   /// What decides whether a call rings and a chat message is told about,
   /// by the app's own rules ([incomingAlertOf]): who is a friend from the
-  /// capability, the rest from the notice kit. Without a kit only friends'
-  /// calls and messages count; with a kit of before 1.16.5, which does not
+  /// capability, the rest from the notice kit. With a kit of before 1.16.5, which does not
   /// say who speaks in which group, the capability's friends and group
   /// members do, as they did then.
   late final AlertFacts _alertFacts = _noticeKit.alertFacts(
@@ -823,25 +827,44 @@ final class LockedReceiver {
   /// call_platform_channel.dart; replaced in tests).
   Future<void> Function(bool on) ringForCall = setCallRinging;
 
-  /// Who calls, as the card over the lock screen may say it: the name the
-  /// notice kit knows, unless the notification level keeps names off it.
-  String _callCardName(String from) {
-    final String name = (_noticeKit.names[from] ?? '').trim();
-    return name.isEmpty ||
-            _noticeKit.levelOf(from) == NotificationPrivacy.generic
-        ? t('Połączenie przychodzące')
-        : name;
+  /// Where "Odbierz" on the call card leads once Zen is unlocked (`''`: the
+  /// call itself, in the account Zen opens; an additional account's own
+  /// route, so that account opens and its call rings on there).
+  final String callCardRoute;
+
+  /// Whether the call card may name who calls (an additional account's
+  /// card never does, as none of its notices does).
+  final bool callCardNames;
+
+  /// What the card over the lock screen says of a call from [from] and
+  /// where its "Odbierz" leads: the name the notice kit knows, unless the
+  /// notification level keeps names off it or [callCardNames] is off.
+  @visibleForTesting
+  ({String name, String route}) callCardFor(String from) {
+    final String name = callCardNames
+        ? (_noticeKit.names[from] ?? '').trim()
+        : '';
+    return (
+      name:
+          name.isEmpty ||
+              _noticeKit.levelOf(from) == NotificationPrivacy.generic
+          ? t('Połączenie przychodzące')
+          : name,
+      route: callCardRoute,
+    );
   }
 
   /// Shows the native call card for a call from [from] (replaced in
-  /// tests): the name as the notice kit knows it.
-  late Future<void> Function(String from) showCallCard = (String from) =>
-      showIncomingCallPopup(
-        displayName: _callCardName(from),
-        isVideo: false,
-        peerAddress: from,
-        acceptRouteKey: '',
-      );
+  /// tests), as [callCardFor] says.
+  late Future<void> Function(String from) showCallCard = (String from) {
+    final ({String name, String route}) card = callCardFor(from);
+    return showIncomingCallPopup(
+      displayName: card.name,
+      isVideo: false,
+      peerAddress: from,
+      acceptRouteKey: card.route,
+    );
+  };
   final Map<String, int> _pongedAt = <String, int>{};
 
   /// A contact's pings from a Zen that just started ([kPresenceFreshKey])
@@ -1802,6 +1825,16 @@ final class LockedReceiver {
     }
   }
 
+  /// What mail worth a notice can be: a message, a group's message or a
+  /// mention, a missed call, an invitation.
+  static const Set<NoticeKind> _mailKinds = <NoticeKind>{
+    NoticeKind.message,
+    NoticeKind.groupMessage,
+    NoticeKind.mention,
+    NoticeKind.call,
+    NoticeKind.invitation,
+  };
+
   /// Mail a mailbox handed over, from [senders]: sealed for the relay key,
   /// so what it is cannot be told here, only from whom (the envelope says
   /// it). Nothing when none of them is a contact (a removed friend, a
@@ -1813,7 +1846,10 @@ final class LockedReceiver {
       for (final String s in senders)
         if (_capability.kindOf(s) != BackgroundContactKind.stranger) s,
     ];
-    if (contacts.isEmpty) {
+    // Sealed mail may be any of these: with every one of them switched off
+    // (or no kit, [LockedNoticeKit.quiet]) the mail tells of nothing the
+    // person wants to hear about.
+    if (contacts.isEmpty || _mailKinds.every(_noticeKit.muted.contains)) {
       return;
     }
     final String? name = contacts.length == 1
