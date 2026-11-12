@@ -732,17 +732,19 @@ final class PebbleHosting {
     }
   }
 
-  /// A finder's "znaleziono" note. It counts only when the device that sent
-  /// it is the finder's own: the note travels straight from the finder to
-  /// the author (never through a third phone), so its sender must be a
-  /// device this one knows as belonging to the account that signed it, and
-  /// the author's own account never finds its own pebble. The signature
-  /// alone proves nothing about who sent the frame: anyone can sign with a
-  /// key made a moment ago. With this rule a finder is an account this one
-  /// knows and each counts once per pebble, so one sender cannot make the
-  /// number grow beyond the accounts the author has; a note that changes
-  /// nothing writes nothing. An account adds at most [kFoundNotesPerDay]
-  /// new finders a day over all pebbles.
+  /// A finder's "znaleziono" note. It counts only from a friend: the note
+  /// travels straight from the finder to the author (never through a third
+  /// phone), so its sender must be a device of a friend's account (the
+  /// friend's own address, or another device of theirs a hello proved) and
+  /// that account must be the one that signed it; the author's own account
+  /// never finds its own pebble. The signature alone proves nothing about
+  /// who sent the frame: anyone can sign with a key made a moment ago, and
+  /// anyone can prove a fresh account in a hello, so a device known only
+  /// from its hello does not count either. Nothing proves the finder stood
+  /// by the sticker (a photo of it will do), so the count says how many of
+  /// the author's friends collected it. Each counts once per pebble; a note
+  /// that changes nothing writes nothing. An account adds at most
+  /// [kFoundNotesPerDay] new finders a day over all pebbles.
   Future<void> _onFound(String from, Map<String, dynamic> p) async {
     final PebbleFoundNote? note = PebbleFoundNote.fromJson(p['n']);
     if (note == null) {
@@ -752,13 +754,33 @@ final class PebbleHosting {
     if (e == null ||
         !e.created ||
         note.finder == e.card.authorAccount ||
-        peers.accountOf(from) != note.finder ||
+        _friendAccountAt(from) != note.finder ||
         store.hasFinder(note.id, note.finder) ||
         !await note.verify() ||
         !_foundPerDay.take(note.finder, _now)) {
       return;
     }
     await store.addFinder(note.id, note.finder);
+  }
+
+  /// The account of the device at [address] when that account is a
+  /// friend's (their own address, or another device of theirs), else
+  /// `null`. [PebblePeers.accountOf] alone also names anyone who sent a
+  /// proven hello, and an account costs nothing to make.
+  String? _friendAccountAt(String address) {
+    final String? account = peers.accountOf(address);
+    if (account == null) {
+      return null;
+    }
+    if (peers.isFriend(address)) {
+      return account;
+    }
+    for (final String friend in peers.friends()) {
+      if (peers.accountOf(friend) == account) {
+        return account;
+      }
+    }
+    return null;
   }
 
   // ---- as a keeper ----

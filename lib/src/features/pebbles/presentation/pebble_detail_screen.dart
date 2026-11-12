@@ -584,9 +584,9 @@ class _PebbleDetailScreenState extends ConsumerState<PebbleDetailScreen> {
       Text(
         tn(
           service.store.finderCount(card.id),
-          one: '{n} osoba dała znać, że go znalazła.',
-          few: '{n} osoby dały znać, że go znalazły.',
-          many: '{n} osób dało znać, że go znalazło.',
+          one: '{n} osoba z Twoich znajomych dała znać, że go znalazła.',
+          few: '{n} osoby z Twoich znajomych dały znać, że go znalazły.',
+          many: '{n} osób z Twoich znajomych dało znać, że go znalazło.',
         ),
         key: const Key('pebble-finders-count'),
         style: TextStyle(color: zen.textSecondary, fontSize: 14),
