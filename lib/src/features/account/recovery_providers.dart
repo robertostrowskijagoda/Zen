@@ -331,6 +331,19 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
           }
         },
       );
+      // The passwords put into the copy or taken out of it (here, or on
+      // another device of the account): a new copy at once, which replaces
+      // the friends' copy.
+      ref.listen<bool>(
+        appSettingsControllerProvider.select(
+          (AppSettings s) => s.passwordsInCircleBackup,
+        ),
+        (bool? previous, bool next) {
+          if (previous != null && previous != next) {
+            service.contentChanged();
+          }
+        },
+      );
       // A password added, changed or deleted: a fresh copy soon.
       final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
       vault.edits.addListener(service.changed);
@@ -374,18 +387,27 @@ final class AppCircleBackupData implements CircleBackupData {
     final PyramidService pyramid = ref.read(pyramidServiceProvider);
     // No wallet statement: nothing takes it back (the balance comes back
     // with the pyramid's records, which its members confirm).
-    // The passwords, padded so the holders cannot tell how many there are.
-    // Unreadable now (locked, damaged): no copy rather than one without
-    // them.
-    final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
+    // The passwords, padded so the holders cannot tell how many there are,
+    // unless the person took them out of the copy ("Hasła w kopii u
+    // znajomych", the same on all the account's devices). Unreadable now
+    // (locked, damaged): no copy rather than one without them. The switch
+    // as saved: the controller holds the defaults until it has loaded.
+    final AppSettings settings =
+        await ref.read(appSettingsStoreProvider).load() ??
+        ref.read(appSettingsControllerProvider);
     final Map<String, Object?>? vaultSection;
-    try {
-      vaultSection = await vault.exportForCopy();
-    } on PasswordVaultException catch (error) {
-      throw CircleBackupNotNow(error.error.name);
-    }
-    if (vault.damaged) {
-      throw const CircleBackupNotNow('passwords');
+    if (settings.passwordsInCircleBackup) {
+      final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
+      try {
+        vaultSection = await vault.exportForCopy();
+      } on PasswordVaultException catch (error) {
+        throw CircleBackupNotNow(error.error.name);
+      }
+      if (vault.damaged) {
+        throw const CircleBackupNotNow('passwords');
+      }
+    } else {
+      vaultSection = null;
     }
     final Map<String, Object?>? notesSection = await ref
         .read(selfNotesServiceProvider)

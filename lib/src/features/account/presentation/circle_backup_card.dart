@@ -9,6 +9,8 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// [bytes] as people read it (KB / MB).
 String circleBackupSize(int bytes) {
@@ -20,8 +22,9 @@ String circleBackupSize(int bytes) {
 
 /// "Kopia u znajomych" in "Konto i odzyskiwanie": when friends (or the
 /// circle) last confirmed a copy and how big it is, that nobody can keep
-/// it while there is no friend, whether conversation text goes in, the
-/// restore after a recovery, and the copies this device keeps for others.
+/// it while there is no friend, whether the passwords and conversation text
+/// go in, the restore after a recovery, and the copies this device keeps
+/// for others.
 class CircleBackupCard extends ConsumerWidget {
   const CircleBackupCard({super.key});
 
@@ -32,6 +35,11 @@ class CircleBackupCard extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final ZenColors zen = ZenColors.of(context);
+    final bool passwords = ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings s) => s.passwordsInCircleBackup,
+      ),
+    );
     return AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[
         service.status,
@@ -96,14 +104,54 @@ class CircleBackupCard extends ConsumerWidget {
               ],
               const SizedBox(height: 8),
               ZenInfo(
+                key: const Key('circle-backup-contents'),
                 icon: Icons.lock_outline_rounded,
-                text: t(
-                  'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, którzy '
-                  'są Twoimi skrzynkami, i bliscy znajomi) oraz osoby '
-                  'z kręgu odzyskiwania, jeśli go masz: profil, znajomych, '
-                  'grupy, ustawienia, piramidę, hasła, notatki, a także '
-                  'teksty rozmów. Nie mogą jej odczytać. Po odzyskaniu konta '
-                  'Zen sam ją pobierze.',
+                text: passwords
+                    ? t(
+                        'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, '
+                        'którzy są Twoimi skrzynkami, i bliscy znajomi) oraz '
+                        'osoby z kręgu odzyskiwania, jeśli go masz: profil, '
+                        'znajomych, grupy, ustawienia, piramidę, hasła, '
+                        'notatki, a także teksty rozmów. Nie mogą jej '
+                        'odczytać. Po odzyskaniu konta Zen sam ją pobierze.',
+                      )
+                    : t(
+                        'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, '
+                        'którzy są Twoimi skrzynkami, i bliscy znajomi) oraz '
+                        'osoby z kręgu odzyskiwania, jeśli go masz: profil, '
+                        'znajomych, grupy, ustawienia, piramidę, notatki, a '
+                        'także teksty rozmów — bez haseł. Nie mogą jej '
+                        'odczytać. Po odzyskaniu konta Zen sam ją pobierze.',
+                      ),
+              ),
+              SwitchListTile(
+                key: const Key('circle-backup-passwords'),
+                contentPadding: EdgeInsets.zero,
+                value: passwords,
+                onChanged: (bool value) => unawaited(
+                  ref
+                      .read(appSettingsControllerProvider.notifier)
+                      .setPasswordsInCircleBackup(value),
+                ),
+                title: Text(t('Hasła w kopii u znajomych')),
+                subtitle: Text(
+                  passwords
+                      ? t(
+                          'Zamknięte. Otworzy je tylko ten, kto ma klucz '
+                          'Twojego konta: kartkę z kluczem albo kawałki '
+                          'klucza od bliskich znajomych i hasło konta. Dzięki '
+                          'temu hasła wrócą po odzyskaniu konta z samego '
+                          'klucza. Ustawienie jest takie samo na wszystkich '
+                          'Twoich urządzeniach.',
+                        )
+                      : t(
+                          'Wyłączone: nowa kopia bez haseł od razu zastępuje '
+                          'tę u znajomych, którzy są w sieci (u pozostałych, '
+                          'gdy się połączą). Po odzyskaniu konta z samego '
+                          'klucza hasła nie wrócą; z innego urządzenia albo '
+                          'z pliku kopii — tak. Ustawienie jest takie samo na '
+                          'wszystkich Twoich urządzeniach.',
+                        ),
                 ),
               ),
               SwitchListTile(

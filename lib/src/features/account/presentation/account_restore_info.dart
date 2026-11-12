@@ -79,7 +79,8 @@ List<AccountRestoreRow> accountRestoreRows() => <AccountRestoreRow>[
       AccountRestoreMethod.device: _yes,
       // Always with the key, whatever else is ticked.
       AccountRestoreMethod.backupFile: _yes,
-      AccountRestoreMethod.circle: _yes,
+      // From the copy with friends, unless they were taken out of it.
+      AccountRestoreMethod.circle: _partly(7),
       AccountRestoreMethod.paperKey: _partly(7),
       AccountRestoreMethod.keyFile: _partly(7),
     },
@@ -113,8 +114,9 @@ Map<int, String> accountRestoreNotes() => <int, String>{
     'powiadomienia, pamięć) zostają na nim.',
   ),
   7: t(
-    'Hasła i notatki wracają z kopii u znajomych, także bez kręgu; kto nie '
-    'ma żadnego znajomego w Zen, po samym kluczu ich nie odzyska.',
+    'Hasła i notatki wracają z kopii u znajomych, także bez kręgu; hasła '
+    'tylko wtedy, gdy ich tam nie wyłączysz („Hasła w kopii u znajomych”). '
+    'Kto nie ma żadnego znajomego w Zen, po samym kluczu ich nie odzyska.',
   ),
 };
 

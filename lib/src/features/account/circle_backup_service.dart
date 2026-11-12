@@ -391,8 +391,20 @@ final class CircleBackupService {
   Future<void> setIncludeChats(bool include) async {
     status.value = status.value.copyWith(includeChats: include);
     await _saveStatus();
+    contentChanged();
+  }
+
+  /// What goes into the copy changed (a part put in or taken out, such as
+  /// the passwords): a new copy is made at once, whatever [changeInterval]
+  /// says, and offered to the holders. Each takes it in place of the copy it
+  /// kept and deletes the chunks the new one does not use (as soon as it is
+  /// reachable: one that is not gets the offer again every [tickInterval]).
+  void contentChanged() {
     changed();
     _builtAt = 0;
+    if (_timer != null) {
+      _enqueue(tick);
+    }
   }
 
   /// Marks [disk] as the new device of a recovered account: at the next

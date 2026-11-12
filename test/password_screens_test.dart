@@ -16,6 +16,9 @@ import 'package:zen/src/features/passwords/presentation/password_import.dart';
 import 'package:zen/src/features/passwords/presentation/password_vault_screen.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -89,6 +92,7 @@ Future<void> _pump(
   PasswordFilePicker? picker,
   String search = '',
   Size size = const Size(420, 900),
+  AppSettings? settings,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -102,6 +106,12 @@ Future<void> _pump(
         ),
         if (picker != null)
           passwordFilePickerProvider.overrideWithValue(picker),
+        if (settings != null) ...[
+          appSettingsInitialStateProvider.overrideWithValue(settings),
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(settings),
+          ),
+        ],
       ],
       child: MaterialApp(
         theme: ZenTheme.dark(),
@@ -216,6 +226,41 @@ void main() {
       find.textContaining('Skopiowane hasło znika ze schowka po 30 sekundach'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('empty and in "Jak to działa", it says the passwords travel '
+      'sealed to the chosen friends, or that they do not when switched '
+      'off', (WidgetTester tester) async {
+    await _pump(tester, vault: _vault(MemoryLedgerDisk()));
+    await _open(tester);
+    expect(find.textContaining('tylko na Twoich urządzeniach'), findsNothing);
+    expect(
+      find.textContaining('zamkniętą kopię trzymają też wybrani znajomi'),
+      findsOneWidget,
+    );
+    await _tap(tester, 'passwords-menu');
+    await _tap(tester, 'passwords-menu-help');
+    expect(find.byKey(const Key('passwords-help-friends')), findsOneWidget);
+    expect(
+      find.textContaining('otworzy ją tylko ten, kto ma klucz Twojego konta'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Hasła w kopii u znajomych'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _pump(
+      tester,
+      vault: _vault(MemoryLedgerDisk()),
+      settings: const AppSettings(passwordsInCircleBackup: false),
+    );
+    await _open(tester);
+    expect(
+      find.textContaining('w kopii u znajomych ich nie ma'),
+      findsOneWidget,
+    );
+    await _tap(tester, 'passwords-menu');
+    await _tap(tester, 'passwords-menu-help');
+    expect(find.byKey(const Key('passwords-help-devices')), findsOneWidget);
   });
 
   testWidgets('the list: a row per entry with its letter, name and login, a '

@@ -17,6 +17,17 @@ import 'package:zen/src/features/passwords/presentation/password_vault_widgets.d
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+
+/// Whether the passwords go, sealed, into the copy with friends ("Hasła w
+/// kopii u znajomych" in "Konto i odzyskiwanie"): what "Hasła" says about
+/// where they are follows it.
+bool _inCircleBackup(WidgetRef ref) => ref.watch(
+  appSettingsControllerProvider.select(
+    (AppSettings s) => s.passwordsInCircleBackup,
+  ),
+);
 
 /// "Hasła": the account's passwords as a list to search, each with a
 /// one-tap copy of its password, and the way to add, import and open them.
@@ -205,6 +216,9 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
   }
 
   void _howItWorks() {
+    final bool withFriends = ref
+        .read(appSettingsControllerProvider)
+        .passwordsInCircleBackup;
     unawaited(
       showDialog<void>(
         context: context,
@@ -214,15 +228,30 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
           key: const Key('passwords-help'),
           title: Text(t('Jak to działa')),
           content: Text(
-            t(
-              'Hasła są zaszyfrowane na Twoich urządzeniach, a kilkoro '
-              'Twoich znajomych trzyma ich zamkniętą kopię, której nie '
-              'otworzą. Zen przenosi je między Twoimi urządzeniami, '
-              'przywraca z kopią konta, a po odzyskaniu konta z samego '
-              'klucza — z kopii u znajomych; bez żadnego znajomego wtedy '
-              'nie wrócą. Skopiowane hasło znika ze schowka po 30 '
-              'sekundach.',
-            ),
+            withFriends
+                ? t(
+                    'Hasła są zaszyfrowane na Twoich urządzeniach, a kilkoro '
+                    'wybranych znajomych trzyma ich zamkniętą kopię w kopii '
+                    'u znajomych. Sami jej nie otworzą: otworzy ją tylko '
+                    'ten, kto ma klucz Twojego konta (kartkę z kluczem albo '
+                    'kawałki klucza od bliskich znajomych i hasło konta). '
+                    'Zen przenosi hasła między Twoimi urządzeniami, '
+                    'przywraca z kopią konta, a po odzyskaniu konta z samego '
+                    'klucza — z kopii u znajomych; bez żadnego znajomego '
+                    'wtedy nie wrócą. Wyłączysz to w „Konto i odzyskiwanie” '
+                    '(„Hasła w kopii u znajomych”). Skopiowane hasło znika '
+                    'ze schowka po 30 sekundach.',
+                  )
+                : t(
+                    'Hasła są zaszyfrowane na Twoich urządzeniach. W kopii u '
+                    'znajomych ich nie ma: wyłączono to w „Konto '
+                    'i odzyskiwanie” („Hasła w kopii u znajomych”). Zen '
+                    'przenosi je między Twoimi urządzeniami i przywraca '
+                    'z kopią konta, ale po odzyskaniu konta z samego klucza '
+                    'nie wrócą. Skopiowane hasło znika ze schowka po 30 '
+                    'sekundach.',
+                  ),
+            key: Key('passwords-help-${withFriends ? 'friends' : 'devices'}'),
           ),
           actions: <Widget>[
             FilledButton(
@@ -315,10 +344,17 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
         icon: Icons.key_rounded,
         tone: zen.tone(ZenTone.privacy),
         title: t('Tu zapiszesz swoje hasła'),
-        text: t(
-          'Zaszyfrowane i tylko na Twoich urządzeniach. Dodaj pierwsze albo '
-          'zaimportuj je z przeglądarki.',
-        ),
+        text: _inCircleBackup(ref)
+            ? t(
+                'Zaszyfrowane na Twoich urządzeniach; zamkniętą kopię trzymają '
+                'też wybrani znajomi w kopii u znajomych (wyłączysz to '
+                'w „Konto i odzyskiwanie”). Dodaj pierwsze albo zaimportuj je '
+                'z przeglądarki.',
+              )
+            : t(
+                'Zaszyfrowane na Twoich urządzeniach; w kopii u znajomych ich '
+                'nie ma. Dodaj pierwsze albo zaimportuj je z przeglądarki.',
+              ),
         action: Wrap(
           alignment: WrapAlignment.center,
           spacing: 8,

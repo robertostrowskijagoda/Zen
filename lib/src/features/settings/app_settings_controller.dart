@@ -265,6 +265,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(showLastOpened: value));
   }
 
+  /// "Hasła w kopii u znajomych" (the account's copy with friends).
+  Future<void> setPasswordsInCircleBackup(bool value) async {
+    await _save(state.copyWith(passwordsInCircleBackup: value));
+  }
+
   /// The setup (as of [kSetupRevision]) was gone through or skipped.
   ///
   /// Set only once it is on the disk: the gate leaves the setup as soon as
