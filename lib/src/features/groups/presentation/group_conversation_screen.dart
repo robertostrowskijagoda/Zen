@@ -527,8 +527,9 @@ class _GroupConversationScreenState
         content: Text(
           t(
             'Przestaniesz dostawać wiadomości z tej grupy, a pozostali '
-            'zobaczą, że wyszedłeś. Czat grupy i jej pliki znikną z tego '
-            'telefonu.',
+            'zobaczą, że wyszedłeś. Grupę opuszczą też Twoje inne '
+            'urządzenia, a czat grupy i jej pliki znikną ze wszystkich '
+            'Twoich urządzeń.',
           ),
         ),
         actions: <Widget>[

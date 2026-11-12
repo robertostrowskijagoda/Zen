@@ -3156,7 +3156,9 @@ void _showGroupActionSheet(BuildContext context, GroupProfile group) {
                         content: Text(
                           t(
                             'Czy na pewno chcesz opuścić i usunąć grupę '
-                            '{group}?',
+                            '{group}? Opuścisz ją na wszystkich swoich '
+                            'urządzeniach, a jej czat i pliki znikną z '
+                            'każdego z nich.',
                             {'group': group.name},
                           ),
                         ),
