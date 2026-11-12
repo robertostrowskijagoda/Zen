@@ -13,9 +13,11 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 
 /// Answers another app's autofill request ([PasswordAutofillBridge]): asks
-/// who the person is (as opening "Hasła" does, every time), shows the
-/// picker ([PasswordAutofillScreen]) and hands over the entry tapped there,
-/// or ends the request with nothing filled.
+/// who the person is once (as opening "Hasła" does, every time; when Zen
+/// was locked and the lock screen was passed while the request waited, that
+/// unlock was the question, [AutofillUnlockPass]), shows the picker
+/// ([PasswordAutofillScreen]) and hands over the entry tapped there, or
+/// ends the request with nothing filled.
 ///
 /// In the app's first screen, which is only built past the lock screen and
 /// the first-start setup: a request that came while Zen was locked waits
@@ -109,6 +111,10 @@ class _PasswordAutofillHostState extends ConsumerState<PasswordAutofillHost> {
             _answer(pending),
             context: 'Answering an autofill request failed',
           );
+        } else {
+          // Nothing to take up: an unlock passed for a request that ended
+          // meanwhile is left to nobody.
+          ref.read(autofillUnlockPassProvider).forget();
         }
       } while (_again && mounted);
     } finally {
@@ -121,13 +127,17 @@ class _PasswordAutofillHostState extends ConsumerState<PasswordAutofillHost> {
 
   Future<void> _answer(PasswordAutofillRequest request) async {
     _active = request;
-    // Once per request, as for opening "Hasła": a confirmation a moment
-    // ago (or the unlock itself) does not count.
+    // Once per request. Zen was locked when it came and the lock screen was
+    // passed for it: that was the question. Otherwise it is asked here, as
+    // for opening "Hasła": a confirmation a moment ago (or an unlock for
+    // anything else) does not count.
     ref.read(sensitiveAccessClockProvider).forget();
-    final bool confirmed = await confirmSensitiveAccess(
-      context,
-      reason: t('Hasła są chronione. Potwierdź, że to Ty.'),
-    );
+    final bool confirmed =
+        ref.read(autofillUnlockPassProvider).take(request.id) ||
+        await confirmSensitiveAccess(
+          context,
+          reason: t('Hasła są chronione. Potwierdź, że to Ty.'),
+        );
     if (!_still(request)) {
       return;
     }

@@ -12,7 +12,14 @@ import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/passwords/presentation/password_autofill_host.dart';
 import 'package:zen/src/features/passwords/presentation/password_vault_screen.dart';
+import 'package:zen/src/features/security/app_security_gate.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/platform_key_vault.dart';
+import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/app_settings_store.dart';
 
 // Filling another app's login form (Android's autofill): the request waits
 // for the app password, the picker lists only the entries saved for that
@@ -53,6 +60,10 @@ final class _Android {
   final List<MethodCall> calls = <MethodCall>[];
   PasswordAutofillState state = PasswordAutofillState.off;
 
+  /// The open request ends (its time ran out) once it was asked for this
+  /// many more times.
+  int? endsAfterAsked;
+
   List<MethodCall> named(String method) =>
       calls.where((MethodCall c) => c.method == method).toList();
 
@@ -60,7 +71,16 @@ final class _Android {
     calls.add(call);
     switch (call.method) {
       case 'pending':
-        return pending;
+        final Map<String, Object?>? open = pending;
+        final int? left = endsAfterAsked;
+        if (left != null) {
+          endsAfterAsked = left - 1;
+          if (left <= 1) {
+            pending = null;
+            endsAfterAsked = null;
+          }
+        }
+        return open;
       case 'fill':
       case 'cancel':
         final bool open =
@@ -201,6 +221,73 @@ Future<void> _tap(WidgetTester tester, String key) async {
 }
 
 final Finder _picker = find.byKey(const Key('autofill-screen'));
+final Finder _question = find.byKey(const Key('sensitive-access-dialog'));
+
+/// The app as it runs: the lock screen ([AppSecurityGate]) over the host.
+/// [wipe] stands in for erasing the device (the emergency wipe password).
+Future<void> _pumpGated(
+  WidgetTester tester, {
+  required PasswordVaultService vault,
+  required AppSecurityService security,
+  Future<void> Function(WidgetRef ref)? wipe,
+}) async {
+  tester.view.physicalSize = const Size(700, 1600);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        appSettingsStoreProvider.overrideWithValue(
+          MemoryAppSettingsStore(const AppSettings()),
+        ),
+        appSecurityServiceProvider.overrideWithValue(security),
+        otherAccountThrottleProvider.overrideWithValue(
+          UnlockThrottle.otherAccounts(store: MemorySecurityCredentialsStore()),
+        ),
+        passwordVaultServiceProvider.overrideWithValue(vault),
+        passwordAutofillBridgeProvider.overrideWithValue(
+          PasswordAutofillBridge(supported: true),
+        ),
+        if (wipe != null) zenLocalDataResetProvider.overrideWithValue(wipe),
+      ],
+      child: MaterialApp(
+        theme: ZenTheme.dark(),
+        builder: (BuildContext context, Widget? child) =>
+            AppSecurityGate(child: child!),
+        home: PasswordAutofillHost(
+          child: Scaffold(
+            body: Builder(
+              builder: (BuildContext context) => Center(
+                child: TextButton(
+                  key: const Key('open-vault'),
+                  onPressed: () => unawaited(PasswordVaultScreen.open(context)),
+                  child: const Text('home'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await _frames(tester);
+}
+
+/// A password typed on the lock screen.
+Future<void> _unlockWith(WidgetTester tester, String password) async {
+  await tester.enterText(
+    find.byKey(const Key('app-unlock-password-field')),
+    password,
+  );
+  await tester.tap(find.byKey(const Key('app-unlock-submit-button')));
+  await _frames(tester);
+}
+
+AutofillUnlockPass _passOf(WidgetTester tester) => ProviderScope.containerOf(
+  tester.element(find.byType(MaterialApp)),
+).read(autofillUnlockPassProvider);
+
+final Finder _lockScreen = find.byKey(const Key('app-unlock-password-field'));
 
 void main() {
   testWidgets('an app\'s request: the app password first, then only the '
@@ -454,5 +541,282 @@ void main() {
     await _tap(tester, 'autofill-open-settings');
     expect(android.named('openSettings'), hasLength(1));
     expect(find.byKey(const Key('autofill-info')), findsNothing);
+  });
+
+  group('one question per request', () {
+    /// Zen with an app password and the bank's login, locked.
+    Future<(MemoryAppSecurityService, PasswordVaultService, String)>
+    lockedWithBank({PlatformKeyVault? keys, String? panic}) async {
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        passwordIterations: 10,
+        keyVault: keys,
+      );
+      await security.setPassword('sekret12');
+      if (panic != null) {
+        await security.setPanicPassword(panic);
+      }
+      if (keys != null) {
+        expect(await security.setBiometricUnlockEnabled(true), isTrue);
+      }
+      final PasswordVaultService vault = _vault(security);
+      final PasswordEntry bank = await vault.add(_bankApp);
+      security.lock();
+      vault.forget();
+      return (security, vault, bank.id);
+    }
+
+    testWidgets('Zen locked when the request came: the lock screen is the '
+        'one question, the picker follows, and "Hasła" still asks', (
+      WidgetTester tester,
+    ) async {
+      final (
+        MemoryAppSecurityService security,
+        PasswordVaultService vault,
+        String bank,
+      ) = await lockedWithBank();
+      final _Android android = _android(_appRequest());
+      await _pumpGated(tester, vault: vault, security: security);
+      expect(_lockScreen, findsOneWidget);
+      expect(_picker, findsNothing);
+
+      await _unlockWith(tester, 'sekret12');
+      expect(_question, findsNothing);
+      expect(_picker, findsOneWidget);
+      await _tap(tester, 'autofill-row-$bank');
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r1',
+        'login': 'ania',
+        'password': 'bank-haslo',
+      });
+
+      // The unlock went to that picker alone: the passwords ask.
+      await _tap(tester, 'open-vault');
+      expect(_question, findsOneWidget);
+    });
+
+    testWidgets('a fingerprint at the lock screen counts the same: one '
+        'prompt in all', (WidgetTester tester) async {
+      final MemoryKeyVault keys = MemoryKeyVault();
+      final (MemoryAppSecurityService security, PasswordVaultService vault, _) =
+          await lockedWithBank(keys: keys);
+      _android(_appRequest());
+      // The lock screen asks for the fingerprint at once.
+      await _pumpGated(tester, vault: vault, security: security);
+      expect(security.isLocked, isFalse);
+      expect(_question, findsNothing);
+      expect(_picker, findsOneWidget);
+      expect(keys.prompts, 1);
+    });
+
+    testWidgets('Zen already unlocked when the request came: asked exactly '
+        'once', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      await vault.add(_bankApp);
+      final _Android android = _android(null);
+      await _pumpGated(tester, vault: vault, security: security);
+      expect(_lockScreen, findsNothing);
+
+      android.pending = _appRequest();
+      await _changed(tester);
+      expect(_question, findsOneWidget);
+      await _confirm(tester, 'sekret12');
+      expect(_question, findsNothing);
+      expect(_picker, findsOneWidget);
+    });
+
+    testWidgets('an unlock older than the request does not count', (
+      WidgetTester tester,
+    ) async {
+      final (MemoryAppSecurityService security, PasswordVaultService vault, _) =
+          await lockedWithBank();
+      final _Android android = _android(null);
+      await _pumpGated(tester, vault: vault, security: security);
+      await _unlockWith(tester, 'sekret12');
+      expect(_lockScreen, findsNothing);
+
+      android.pending = _appRequest();
+      await _changed(tester);
+      expect(_question, findsOneWidget);
+      expect(_picker, findsNothing);
+    });
+
+    testWidgets('the unlock counts once: the next request asks', (
+      WidgetTester tester,
+    ) async {
+      final (MemoryAppSecurityService security, PasswordVaultService vault, _) =
+          await lockedWithBank();
+      final _Android android = _android(_appRequest());
+      await _pumpGated(tester, vault: vault, security: security);
+      await _unlockWith(tester, 'sekret12');
+      expect(_picker, findsOneWidget);
+      await tester.pageBack();
+      await _frames(tester);
+      expect(_picker, findsNothing);
+      expect(android.named('cancel').single.arguments, <Object?, Object?>{
+        'id': 'r1',
+        'back': true,
+      });
+
+      android.pending = _webRequest();
+      await _changed(tester);
+      expect(_question, findsOneWidget);
+      expect(_picker, findsNothing);
+    });
+
+    testWidgets('Zen locking while the picker is up still ends the request', (
+      WidgetTester tester,
+    ) async {
+      final (MemoryAppSecurityService security, PasswordVaultService vault, _) =
+          await lockedWithBank();
+      final _Android android = _android(_appRequest());
+      await _pumpGated(tester, vault: vault, security: security);
+      await _unlockWith(tester, 'sekret12');
+      expect(_picker, findsOneWidget);
+
+      security.lock();
+      vault.forget();
+      await _frames(tester);
+      expect(_picker, findsNothing);
+      expect(_lockScreen, findsOneWidget);
+      expect(android.named('fill'), isEmpty);
+      expect(android.named('cancel').single.arguments, <Object?, Object?>{
+        'id': 'r1',
+        'back': false,
+      });
+      // Unlocked again: the request is gone, nothing waits for it.
+      await _unlockWith(tester, 'sekret12');
+      expect(_picker, findsNothing);
+      expect(_question, findsNothing);
+    });
+
+    testWidgets('wrong passwords count as before and pass nothing; the right '
+        'one then opens the picker', (WidgetTester tester) async {
+      final (MemoryAppSecurityService security, PasswordVaultService vault, _) =
+          await lockedWithBank();
+      _android(_appRequest());
+      await _pumpGated(tester, vault: vault, security: security);
+      await _unlockWith(tester, 'zle-haslo');
+      expect(find.text('Nieprawidłowe hasło.'), findsOneWidget);
+      expect(
+        await security.credentialsStore.read(
+          appSecurityUnlockFailuresStorageKey,
+        ),
+        startsWith('1;'),
+      );
+      expect(_passOf(tester).take('r1'), isFalse);
+
+      await _unlockWith(tester, 'sekret12');
+      expect(_question, findsNothing);
+      expect(_picker, findsOneWidget);
+      expect(
+        await security.credentialsStore.read(
+          appSecurityUnlockFailuresStorageKey,
+        ),
+        isNull,
+      );
+    });
+
+    testWidgets('the emergency wipe password passes nothing', (
+      WidgetTester tester,
+    ) async {
+      final (MemoryAppSecurityService security, PasswordVaultService vault, _) =
+          await lockedWithBank(panic: 'panika99');
+      final Completer<void> wiping = Completer<void>();
+      _android(_appRequest());
+      await _pumpGated(
+        tester,
+        vault: vault,
+        security: security,
+        wipe: (WidgetRef ref) async {
+          await security.reset();
+          await wiping.future;
+        },
+      );
+      await _unlockWith(tester, 'panika99');
+      expect(security.hasPassword, isFalse);
+      expect(_passOf(tester).take('r1'), isFalse);
+      wiping.complete();
+      await _frames(tester);
+    });
+
+    testWidgets('a request whose time ran out before the picker leaves no '
+        'unlock behind', (WidgetTester tester) async {
+      final (MemoryAppSecurityService security, PasswordVaultService vault, _) =
+          await lockedWithBank();
+      // Open when the lock screen checks the password, gone right after.
+      final _Android android = _android(_appRequest())..endsAfterAsked = 1;
+      await _pumpGated(tester, vault: vault, security: security);
+      await _unlockWith(tester, 'sekret12');
+      expect(_picker, findsNothing);
+      expect(_question, findsNothing);
+      expect(android.named('pending'), hasLength(2));
+      expect(_passOf(tester).take('r1'), isFalse);
+    });
+
+    test('the pass: only for the request seen before a check that opened '
+        'Zen, once, and within the request\'s minute', () {
+      DateTime now = DateTime.utc(2026, 11, 12, 12);
+      final AutofillUnlockPass pass = AutofillUnlockPass(now: () => now);
+
+      // Nothing was waiting, or the check did not open Zen.
+      pass.unlocked();
+      expect(pass.take('r1'), isFalse);
+      pass
+        ..waiting(null)
+        ..unlocked();
+      expect(pass.take('r1'), isFalse);
+      pass
+        ..waiting('r1')
+        ..forget()
+        ..unlocked();
+      expect(pass.take('r1'), isFalse);
+      pass.waiting('r1');
+      expect(pass.take('r1'), isFalse);
+
+      // Another request gets nothing, and the pass is gone after it.
+      pass
+        ..waiting('r1')
+        ..unlocked();
+      expect(pass.take('r2'), isFalse);
+      expect(pass.take('r1'), isFalse);
+
+      pass
+        ..waiting('r1')
+        ..unlocked();
+      expect(pass.take('r1'), isTrue);
+      expect(pass.take('r1'), isFalse);
+
+      // The minute counts from when the request was seen open.
+      pass.waiting('r1');
+      now = now.add(const Duration(seconds: 50));
+      pass.unlocked();
+      now = now.add(const Duration(seconds: 9));
+      expect(pass.take('r1'), isTrue);
+      pass.waiting('r1');
+      now = now.add(const Duration(seconds: 59));
+      pass.unlocked();
+      now = now.add(const Duration(seconds: 1));
+      expect(pass.take('r1'), isFalse);
+    });
+
+    test(
+      'locking (as opening another account does) forgets the pass',
+      () async {
+        final MemoryAppSecurityService security = await _withPassword();
+        final ProviderContainer container = ProviderContainer(
+          overrides: [appSecurityServiceProvider.overrideWithValue(security)],
+        );
+        addTearDown(container.dispose);
+        final AutofillUnlockPass pass = container.read(
+          autofillUnlockPassProvider,
+        );
+        pass
+          ..waiting('r1')
+          ..unlocked();
+        security.lock();
+        expect(pass.take('r1'), isFalse);
+      },
+    );
   });
 }
