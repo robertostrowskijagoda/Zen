@@ -25,7 +25,9 @@ import 'package:zen/src/features/security/sensitive_access.dart';
 /// takes this screen away, and with it any request it was answering, which
 /// then ends with nothing filled. A request the Android side ended (its
 /// time ran out, the person went back to the app, a newer one came) closes
-/// the picker.
+/// the picker; but while a new login for it is being typed, the form stays
+/// open: saved, the login is kept, and the person is told the form was not
+/// filled.
 class PasswordAutofillHost extends ConsumerStatefulWidget {
   const PasswordAutofillHost({required this.child, super.key});
 
@@ -48,6 +50,7 @@ class _PasswordAutofillHostState extends ConsumerState<PasswordAutofillHost> {
   String? _answeredId;
 
   Route<PasswordEntry>? _picker;
+  PasswordAutofillSession? _session;
   NavigatorState? _navigator;
   bool _checking = false;
   bool _again = false;
@@ -101,10 +104,19 @@ class _PasswordAutofillHostState extends ConsumerState<PasswordAutofillHost> {
         }
         final PasswordAutofillRequest? active = _active;
         if (active != null && pending?.id != active.id) {
-          // Ended on the Android side: the picker goes.
           _active = null;
           _answeredId = active.id;
-          _closePicker();
+          final PasswordAutofillSession? session = _session;
+          _session = null;
+          if (session != null && session.editing) {
+            // Ended while a new login for it is typed: the form stays, and
+            // the picker under it goes once the form is done.
+            session.ended = true;
+            _picker = null;
+          } else {
+            // Ended on the Android side: the picker goes.
+            _closePicker();
+          }
         }
         if (pending != null && _active == null && pending.id != _answeredId) {
           unawaitedLogged(
@@ -146,28 +158,39 @@ class _PasswordAutofillHostState extends ConsumerState<PasswordAutofillHost> {
       await _end(request, null);
       return;
     }
+    final PasswordAutofillSession session = PasswordAutofillSession();
     final Route<PasswordEntry> route = MaterialPageRoute<PasswordEntry>(
       settings: const RouteSettings(name: kPasswordVaultRouteName),
       builder: (BuildContext context) =>
-          PasswordAutofillScreen(request: request),
+          PasswordAutofillScreen(request: request, session: session),
     );
     _picker = route;
+    _session = session;
     final PasswordEntry? chosen = await navigator.push(route);
     if (identical(_picker, route)) {
       _picker = null;
     }
+    if (identical(_session, session)) {
+      _session = null;
+    }
     if (!_still(request)) {
       return;
     }
-    await _end(request, chosen);
+    await _end(
+      request,
+      chosen,
+      added: chosen != null && session.addedId == chosen.id,
+    );
   }
 
   /// Hands [chosen] (read again from the vault: as it is now, and nothing
   /// while Zen is locked) to [request], or ends it with nothing filled.
+  /// [added]: [chosen] was made for this request just now.
   Future<void> _end(
     PasswordAutofillRequest request,
-    PasswordEntry? chosen,
-  ) async {
+    PasswordEntry? chosen, {
+    bool added = false,
+  }) async {
     _active = null;
     _answeredId = request.id;
     final bool locked = ref.read(appSecurityServiceProvider).isLocked;
@@ -191,10 +214,12 @@ class _PasswordAutofillHostState extends ConsumerState<PasswordAutofillHost> {
       messenger?.showSnackBar(
         SnackBar(
           content: Text(
-            t(
-              'Czas na wypełnienie minął. Spróbuj jeszcze raz w tamtej '
-              'aplikacji.',
-            ),
+            added
+                ? passwordAutofillSavedNotFilledText()
+                : t(
+                    'Czas na wypełnienie minął. Spróbuj jeszcze raz w tamtej '
+                    'aplikacji.',
+                  ),
           ),
         ),
       );

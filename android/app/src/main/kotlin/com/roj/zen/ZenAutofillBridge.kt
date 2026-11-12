@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.service.autofill.Dataset
 import android.service.autofill.Field
@@ -20,6 +21,27 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.UUID
 
+/** How long the person has to unlock Zen and pick an entry. */
+internal const val AUTOFILL_TIMEOUT_MS = 60_000L
+
+/**
+ * The longest a request stays open, counted from when it opened, while a
+ * new login for it is typed in Zen: long enough to type one, short enough
+ * that the form it fills is still the one the person left.
+ */
+internal const val AUTOFILL_HOLD_MS = 5 * 60_000L
+
+/**
+ * How long from [now] the request opened at [openedAt] still waits.
+ * [holding]: a new login for it is being typed, until [AUTOFILL_HOLD_MS]
+ * after it opened. Otherwise a fresh [AUTOFILL_TIMEOUT_MS] to pick, but
+ * never past that same end: going in and out of the form adds nothing.
+ */
+internal fun autofillTimeoutAfter(openedAt: Long, now: Long, holding: Boolean): Long {
+    val left = openedAt + AUTOFILL_HOLD_MS - now
+    return (if (holding) left else minOf(AUTOFILL_TIMEOUT_MS, left)).coerceAtLeast(0L)
+}
+
 /**
  * The autofill request between [ZenAutofillActivity] and the picker in
  * Dart (`zen/autofill`, the app's engine only; password_autofill_bridge.dart).
@@ -29,28 +51,29 @@ import java.util.UUID
  * browser reported it, and the ids of the login field, the password field
  * or both; never a password. Dart is told `changed` whenever a request
  * opens or ends, and asks:
- * * `pending` → {id, package, label, webDomain, webScheme, username} or null;
+ * * `pending` → {id, package, label, webDomain, webScheme, username,
+ *   password} or null (username, password: whether the form has that field);
  * * `fill` {id, login, password}: fills the form of the open request [id]
  *   with exactly that login and password (each only where the form has its
  *   field), ends it and goes back to the app; false when [id] is no longer
  *   open or nothing would be filled;
  * * `cancel` {id, back}: ends the request with nothing filled (back: return
  *   to the app, when the person closed the picker);
+ * * `hold` {id, on}: a new login for the open request [id] is being typed in
+ *   Zen (on) or no longer (off): its time runs as [autofillTimeoutAfter]
+ *   says, never past [AUTOFILL_HOLD_MS] after it opened;
  * * `guard` {on}: drops touches that come through another app's window
  *   drawn over Zen while the picker is up;
  * * `status` → {supported, enabled}; `openSettings`: Android's page to pick
  *   the autofill service (Zen preselected), or the settings when Zen is it.
  *
  * Everything runs on the main thread (the channel's and the activity's).
- * A request left open for [TIMEOUT_MS] is cancelled. Nothing about the
- * app, the page or the entry goes to the log.
+ * A request left open for [AUTOFILL_TIMEOUT_MS] is cancelled. Nothing about
+ * the app, the page or the entry goes to the log.
  */
 object ZenAutofillBridge {
     private const val TAG = "ZenAutofill"
     private const val CHANNEL = "zen/autofill"
-
-    /** How long the person has to unlock Zen and pick an entry. */
-    private const val TIMEOUT_MS = 60_000L
 
     /**
      * One open autofill request (no values). The form has the login field,
@@ -65,6 +88,9 @@ object ZenAutofillBridge {
         val passwordId: AutofillId?,
     ) {
         val id: String = UUID.randomUUID().toString()
+
+        /** When it opened, on the clock the main thread's timers use. */
+        val openedAt: Long = SystemClock.uptimeMillis()
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -81,7 +107,7 @@ object ZenAutofillBridge {
         end(null, notify = false)
         request = next
         host = activity
-        main.postDelayed(timeout, TIMEOUT_MS)
+        main.postDelayed(timeout, AUTOFILL_TIMEOUT_MS)
         changed()
     }
 
@@ -183,6 +209,21 @@ object ZenAutofillBridge {
                             result.success(false)
                         }
                     }
+                    "hold" -> {
+                        val id = call.argument<String>("id")
+                        val on = call.argument<Boolean>("on") ?: false
+                        val open = request
+                        if (open != null && open.id == id) {
+                            main.removeCallbacks(timeout)
+                            main.postDelayed(
+                                timeout,
+                                autofillTimeoutAfter(open.openedAt, SystemClock.uptimeMillis(), on),
+                            )
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
                     "guard" -> {
                         val on = call.argument<Boolean>("on") ?: false
                         activity.window?.decorView?.filterTouchesWhenObscured = on
@@ -211,6 +252,7 @@ object ZenAutofillBridge {
             "webDomain" to it.webDomain,
             "webScheme" to it.webScheme,
             "username" to (it.usernameId != null),
+            "password" to (it.passwordId != null),
         )
     }
 

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -9,6 +11,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/passwords/password_autofill_bridge.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
+import 'package:zen/src/features/passwords/password_match.dart';
 import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/passwords/presentation/password_autofill_host.dart';
 import 'package:zen/src/features/passwords/presentation/password_vault_screen.dart';
@@ -93,6 +96,9 @@ final class _Android {
           'supported': state != PasswordAutofillState.unsupported,
           'enabled': state == PasswordAutofillState.on,
         };
+      case 'hold':
+        return pending != null &&
+            (call.arguments as Map<Object?, Object?>)['id'] == pending!['id'];
       case 'guard':
       case 'openSettings':
         return true;
@@ -108,19 +114,58 @@ Map<String, Object?> _appRequest() => <String, Object?>{
   'username': true,
 };
 
-Map<String, Object?> _webRequest() => <String, Object?>{
-  'id': 'r2',
-  'package': 'com.android.chrome',
-  'label': 'Chrome',
-  'webDomain': 'example.com',
-  'webScheme': 'https',
-  'username': true,
-};
+Map<String, Object?> _webRequest({bool username = true, bool? password}) =>
+    <String, Object?>{
+      'id': 'r2',
+      'package': 'com.android.chrome',
+      'label': 'Chrome',
+      'webDomain': 'example.com',
+      'webScheme': 'https',
+      'username': username,
+      'password': ?password,
+    };
 
-PasswordVaultService _vault(AppSecurityService security) {
+/// A login entry for example.com without a login: it can fill a password
+/// field only.
+const PasswordFields _passwordOnly = PasswordFields(
+  name: 'Bez loginu',
+  password: 'tylko-haslo',
+  address: 'https://example.com',
+);
+
+/// A login entry for example.com without a password (a note instead): it
+/// can fill a login field only.
+const PasswordFields _loginOnly = PasswordFields(
+  name: 'Sam login',
+  login: 'jan',
+  note: 'hasło na kartce',
+  address: 'https://example.com',
+);
+
+/// A store that takes nothing: every write fails.
+final class _FailingDisk implements LedgerDisk {
+  final MemoryLedgerDisk _disk = MemoryLedgerDisk();
+  bool failing = false;
+
+  @override
+  Future<Uint8List?> read(String key) => _disk.read(key);
+
+  @override
+  Future<void> write(String key, Uint8List data) async {
+    if (failing) {
+      throw const FileSystemException('disk full');
+    }
+    await _disk.write(key, data);
+  }
+
+  @override
+  Future<void> delete(String key) => _disk.delete(key);
+}
+
+PasswordVaultService _vault(AppSecurityService security, {LedgerDisk? disk}) {
   int t = 1760000000000;
   return PasswordVaultService(
-    disk: MemoryLedgerDisk(),
+    disk: disk ?? MemoryLedgerDisk(),
     now: () => t += 60000,
     random: Random(3),
     isLocked: () => security.isLocked,
@@ -536,7 +581,11 @@ void main() {
     await _tap(tester, 'passwords-menu');
     await _tap(tester, 'passwords-menu-autofill');
     expect(find.byKey(const Key('autofill-info')), findsOneWidget);
-    expect(find.textContaining('najpierw odblokowujesz Zen'), findsOneWidget);
+    // One question in all: the unlock, or the confirmation when Zen is open.
+    expect(
+      find.textContaining('najpierw odblokowujesz Zen albo potwierdzasz'),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('autofill-status-off')), findsOneWidget);
     await _tap(tester, 'autofill-open-settings');
     expect(android.named('openSettings'), hasLength(1));
@@ -818,5 +867,645 @@ void main() {
         expect(pass.take('r1'), isFalse);
       },
     );
+  });
+
+  group('forms with one field', () {
+    test('the Android side says which fields the form has; an answer '
+        'without the password\'s had one', () {
+      PasswordAutofillRequest r(Map<String, Object?> fields) =>
+          PasswordAutofillRequest.fromMap(<String, Object?>{
+            'id': 'x',
+            'package': 'com.example.app',
+            ...fields,
+          })!;
+      expect(r(const <String, Object?>{}).hasPasswordField, isTrue);
+      expect(
+        r(const <String, Object?>{'password': true}).hasPasswordField,
+        isTrue,
+      );
+      expect(
+        r(const <String, Object?>{'password': 'no'}).hasPasswordField,
+        isTrue,
+      );
+
+      final PasswordAutofillRequest loginOnly = r(const <String, Object?>{
+        'username': true,
+        'password': false,
+      });
+      expect(loginOnly.hasPasswordField, isFalse);
+      expect(loginOnly.canFillWith(login: 'jan', password: ''), isTrue);
+      expect(loginOnly.canFillWith(login: '', password: 'haslo'), isFalse);
+
+      final PasswordAutofillRequest passwordOnly = r(const <String, Object?>{
+        'username': false,
+        'password': true,
+      });
+      expect(passwordOnly.canFillWith(login: 'jan', password: ''), isFalse);
+      expect(passwordOnly.canFillWith(login: '', password: 'haslo'), isTrue);
+    });
+
+    testWidgets('the first page of a login in two steps: only entries with a '
+        'login, a line that says only the login goes in; the one tapped goes '
+        'over', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      final PasswordEntry shop = await vault.add(_shop);
+      final PasswordEntry noLogin = await vault.add(_passwordOnly);
+      final PasswordEntry noPassword = await vault.add(_loginOnly);
+      final _Android android = _android(_webRequest(password: false));
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+
+      expect(find.byKey(const Key('autofill-login-only')), findsOneWidget);
+      expect(find.byKey(Key('autofill-row-${shop.id}')), findsOneWidget);
+      expect(find.byKey(Key('autofill-row-${noPassword.id}')), findsOneWidget);
+      // It would fill nothing here.
+      expect(find.byKey(Key('autofill-row-${noLogin.id}')), findsNothing);
+
+      await _tap(tester, 'autofill-row-${shop.id}');
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r2',
+        'login': 'ola',
+        'password': 'sklep-haslo',
+      });
+    });
+
+    testWidgets('a page with the password field alone: only entries with a '
+        'password', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      final PasswordEntry shop = await vault.add(_shop);
+      final PasswordEntry noLogin = await vault.add(_passwordOnly);
+      final PasswordEntry noPassword = await vault.add(_loginOnly);
+      final _Android android = _android(_webRequest(username: false));
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+
+      expect(find.byKey(const Key('autofill-login-only')), findsNothing);
+      expect(find.byKey(Key('autofill-row-${shop.id}')), findsOneWidget);
+      expect(find.byKey(Key('autofill-row-${noLogin.id}')), findsOneWidget);
+      expect(find.byKey(Key('autofill-row-${noPassword.id}')), findsNothing);
+      // Not past the warning either.
+      await _tap(tester, 'autofill-search-all');
+      await _tap(tester, 'autofill-warning-continue');
+      expect(find.byKey(Key('autofill-any-row-${noLogin.id}')), findsOneWidget);
+      expect(
+        find.byKey(Key('autofill-any-row-${noPassword.id}')),
+        findsNothing,
+      );
+
+      await _tap(tester, 'autofill-any-row-${noLogin.id}');
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r2',
+        'login': '',
+        'password': 'tylko-haslo',
+      });
+    });
+  });
+
+  testWidgets('past the warning, a search that finds nothing says so', (
+    WidgetTester tester,
+  ) async {
+    final MemoryAppSecurityService security = await _withPassword();
+    final PasswordVaultService vault = _vault(security);
+    final PasswordEntry other = await vault.add(_other);
+    _android(_webRequest());
+    await _pump(tester, vault: vault, security: security);
+    await _confirm(tester, 'sekret12');
+    await _tap(tester, 'autofill-search-all');
+    await _tap(tester, 'autofill-warning-continue');
+    expect(find.byKey(Key('autofill-any-row-${other.id}')), findsOneWidget);
+    expect(find.byKey(const Key('autofill-search-empty')), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('autofill-search')), 'zzz');
+    await tester.pump();
+    expect(find.byKey(Key('autofill-any-row-${other.id}')), findsNothing);
+    expect(find.text('Nic nie pasuje do „zzz”.'), findsOneWidget);
+  });
+
+  group('a new login right in the picker', () {
+    final Finder form = find.byKey(const Key('password-form-screen'));
+
+    TextField field(WidgetTester tester, String key) =>
+        tester.widget<TextField>(find.byKey(Key(key)));
+
+    Future<void> type(
+      WidgetTester tester, {
+      String login = 'nowy@example.com',
+      String password = 'Nowe-haslo-1',
+    }) async {
+      await tester.enterText(
+        find.byKey(const Key('password-field-login')),
+        login,
+      );
+      await tester.enterText(
+        find.byKey(const Key('password-field-password')),
+        password,
+      );
+      await tester.pump();
+    }
+
+    PasswordEntry? saved(PasswordVaultService vault, String login) {
+      for (final PasswordEntry e in vault.entries) {
+        if (e.login == login) {
+          return e;
+        }
+      }
+      return null;
+    }
+
+    test('it is saved under the address the matching finds the same request '
+        'by, exactly: a page by its scheme, host and port, an app by its '
+        'package', () {
+      PasswordAutofillRequest r(Map<String, Object?> fields) =>
+          PasswordAutofillRequest.fromMap(<String, Object?>{
+            'id': 'x',
+            'package': 'com.android.chrome',
+            'label': 'Chrome',
+            ...fields,
+          })!;
+      final List<(PasswordAutofillRequest, String, String)> cases =
+          <(PasswordAutofillRequest, String, String)>[
+            (
+              r(const <String, Object?>{
+                'webDomain': 'example.com',
+                'webScheme': 'https',
+              }),
+              'https://example.com',
+              'example.com',
+            ),
+            (
+              r(const <String, Object?>{
+                'webDomain': 'example.com',
+                'webScheme': 'http',
+              }),
+              'http://example.com',
+              'example.com',
+            ),
+            // No scheme reported: the matching takes the page as http.
+            (
+              r(const <String, Object?>{'webDomain': 'example.com'}),
+              'http://example.com',
+              'example.com',
+            ),
+            (
+              r(const <String, Object?>{
+                'webDomain': 'Login.Example.COM.:8443',
+                'webScheme': 'https',
+              }),
+              'https://login.example.com:8443',
+              'login.example.com',
+            ),
+            (
+              PasswordAutofillRequest.fromMap(_appRequest())!,
+              'android-app://com.bank.app',
+              'Mój Bank',
+            ),
+            (
+              r(const <String, Object?>{'label': null}),
+              'android-app://com.android.chrome',
+              'com.android.chrome',
+            ),
+          ];
+      for (final (PasswordAutofillRequest request, String address, String name)
+          in cases) {
+        expect(request.newEntryAddress, address);
+        expect(request.newEntryName, name);
+        final PasswordEntry entry = PasswordEntry(
+          id: 'e0000001',
+          versionKey: 'v0000001',
+          fields: PasswordFields(
+            name: request.newEntryName,
+            login: 'a',
+            password: 'b',
+            address: request.newEntryAddress!,
+          ),
+          createdAtMillis: 1,
+          changedAtMillis: 1,
+        );
+        final List<PasswordMatch> found = matchPasswordEntries(
+          <PasswordEntry>[entry],
+          packageName: request.packageName,
+          webDomain: request.webDomain,
+          webScheme: request.webScheme,
+        );
+        expect(found, hasLength(1), reason: address);
+        expect(found.single.kind, PasswordMatchKind.exact, reason: address);
+      }
+      // A page that is no host gets no address (and no new login).
+      expect(
+        r(const <String, Object?>{'webDomain': 'not a host'}).newEntryAddress,
+        isNull,
+      );
+    });
+
+    testWidgets('nothing saved for the page: the new login is the main '
+        'action; it opens prefilled, and saved it is in the vault and fills '
+        'the form at once', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      await vault.add(_bankApp);
+      await vault.add(_other);
+      int edits = 0;
+      vault.edits.addListener(() => edits++);
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+
+      expect(find.byKey(const Key('autofill-none')), findsOneWidget);
+      expect(
+        tester.widget(find.byKey(const Key('autofill-add'))),
+        isA<FilledButton>(),
+      );
+      expect(find.text('Nowy login dla tej strony'), findsOneWidget);
+
+      await _tap(tester, 'autofill-add');
+      expect(form, findsOneWidget);
+      expect(
+        field(tester, 'password-field-name').controller!.text,
+        'example.com',
+      );
+      final TextField address = field(tester, 'password-field-address');
+      expect(address.controller!.text, 'https://example.com');
+      expect(address.readOnly, isTrue);
+      expect(find.text('Zapisz i użyj'), findsOneWidget);
+      // The request waits longer while the login is typed.
+      expect(
+        android.named('hold').map((MethodCall c) => c.arguments),
+        <Object?>[
+          <Object?, Object?>{'id': 'r2', 'on': true},
+        ],
+      );
+
+      await type(tester);
+      await _tap(tester, 'password-save');
+      expect(form, findsNothing);
+      expect(_picker, findsNothing);
+      final PasswordEntry entry = saved(vault, 'nowy@example.com')!;
+      expect(entry.name, 'example.com');
+      expect(entry.password, 'Nowe-haslo-1');
+      expect(entry.address, 'https://example.com');
+      // Saved as any other entry is: the sync and the copies look then.
+      expect(edits, 1);
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r2',
+        'login': 'nowy@example.com',
+        'password': 'Nowe-haslo-1',
+      });
+      expect(android.named('cancel'), isEmpty);
+      // The next request from the page finds it as its own.
+      final List<PasswordMatch> next = vault.matchesFor(
+        webDomain: 'example.com',
+        webScheme: 'https',
+      );
+      expect(next.single.entry.id, entry.id);
+      expect(next.single.kind, PasswordMatchKind.exact);
+    });
+
+    testWidgets('with a login saved for the page it is there as a plain '
+        'button; back from the untouched form asks nothing and the request '
+        'gets its usual time again', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      await vault.add(_shop);
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+      expect(
+        tester.widget(find.byKey(const Key('autofill-add'))),
+        isA<OutlinedButton>(),
+      );
+
+      await _tap(tester, 'autofill-add');
+      expect(form, findsOneWidget);
+      await tester.pageBack();
+      await _frames(tester);
+      expect(find.byKey(const Key('password-discard-dialog')), findsNothing);
+      expect(form, findsNothing);
+      expect(_picker, findsOneWidget);
+      expect(
+        android.named('hold').map((MethodCall c) => c.arguments),
+        <Object?>[
+          <Object?, Object?>{'id': 'r2', 'on': true},
+          <Object?, Object?>{'id': 'r2', 'on': false},
+        ],
+      );
+      expect(android.named('fill'), isEmpty);
+      expect(vault.entries, hasLength(1));
+    });
+
+    testWidgets('an app: named as the app calls itself, saved for its '
+        'package', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      await vault.add(_shop);
+      final _Android android = _android(_appRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+      expect(find.text('Nowy login dla tej aplikacji'), findsOneWidget);
+
+      await _tap(tester, 'autofill-add');
+      expect(field(tester, 'password-field-name').controller!.text, 'Mój Bank');
+      expect(
+        field(tester, 'password-field-address').controller!.text,
+        'android-app://com.bank.app',
+      );
+      await type(tester, login: 'ania2', password: 'bank-2');
+      await _tap(tester, 'password-save');
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r1',
+        'login': 'ania2',
+        'password': 'bank-2',
+      });
+      final PasswordEntry entry = saved(vault, 'ania2')!;
+      expect(
+        vault.matchesFor(packageName: 'com.bank.app').single.entry.id,
+        entry.id,
+      );
+    });
+
+    testWidgets('the first page of a login in two steps: the login is saved '
+        'whole and handed over', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      final _Android android = _android(_webRequest(password: false));
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+      expect(find.byKey(const Key('autofill-login-only')), findsOneWidget);
+
+      await _tap(tester, 'autofill-add');
+      await type(tester);
+      await _tap(tester, 'password-save');
+      expect(saved(vault, 'nowy@example.com')!.password, 'Nowe-haslo-1');
+      // The Android side puts in only the login: the form has no other field.
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r2',
+        'login': 'nowy@example.com',
+        'password': 'Nowe-haslo-1',
+      });
+    });
+
+    testWidgets('a new login with nothing the form takes is saved, said so, '
+        'and the picker stays', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      final _Android android = _android(_webRequest(username: false));
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+
+      await _tap(tester, 'autofill-add');
+      await tester.enterText(
+        find.byKey(const Key('password-field-login')),
+        'jan',
+      );
+      await tester.enterText(
+        find.byKey(const Key('password-field-note')),
+        'hasło na kartce',
+      );
+      await tester.pump();
+      await _tap(tester, 'password-save');
+      expect(saved(vault, 'jan'), isNotNull);
+      expect(
+        find.text(
+          'Login zapisany w Hasłach, ale nie ma w nim nic do wpisania w tym '
+          'formularzu.',
+        ),
+        findsOneWidget,
+      );
+      expect(form, findsNothing);
+      expect(_picker, findsOneWidget);
+      expect(android.named('fill'), isEmpty);
+      expect(android.named('hold').last.arguments, <Object?, Object?>{
+        'id': 'r2',
+        'on': false,
+      });
+    });
+
+    testWidgets('a full vault is said plainly; the form stays as typed and '
+        'nothing goes over', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final Map<String, Object?> versions = <String, Object?>{
+        for (int i = 0; i < kMaxPasswordEntries; i++)
+          'v${i.toString().padLeft(9, '0')}': <String, Object?>{
+            'i': 'e${i.toString().padLeft(9, '0')}',
+            'a': 1000 + i,
+            'n': 'Strona $i',
+            'p': 'haslo-$i',
+          },
+      };
+      final MemoryLedgerDisk disk = MemoryLedgerDisk()
+        ..files[kPasswordVaultKey] = Uint8List.fromList(
+          utf8.encode(jsonEncode(<String, Object?>{'v': 1, 'e': versions})),
+        );
+      final PasswordVaultService vault = _vault(security, disk: disk);
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+
+      await _tap(tester, 'autofill-add');
+      await type(tester);
+      await _tap(tester, 'password-save');
+      expect(
+        find.text(
+          'Brak miejsca na nowe hasła. Usuń te, których nie potrzebujesz.',
+        ),
+        findsOneWidget,
+      );
+      expect(form, findsOneWidget);
+      expect(
+        field(tester, 'password-field-login').controller!.text,
+        'nowy@example.com',
+      );
+      expect(android.named('fill'), isEmpty);
+    });
+
+    testWidgets('a write that fails is said; saved again, it fills', (
+      WidgetTester tester,
+    ) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final _FailingDisk disk = _FailingDisk();
+      final PasswordVaultService vault = _vault(security, disk: disk);
+      await vault.load();
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+
+      await _tap(tester, 'autofill-add');
+      await type(tester);
+      disk.failing = true;
+      await _tap(tester, 'password-save');
+      expect(find.text('Nie udało się. Spróbuj jeszcze raz.'), findsOneWidget);
+      expect(form, findsOneWidget);
+      expect(android.named('fill'), isEmpty);
+      expect(saved(vault, 'nowy@example.com'), isNull);
+
+      disk.failing = false;
+      await _tap(tester, 'password-save');
+      expect(form, findsNothing);
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r2',
+        'login': 'nowy@example.com',
+        'password': 'Nowe-haslo-1',
+      });
+    });
+
+    testWidgets('a vault of a newer Zen takes nothing: no new login is '
+        'offered, and the picker says why', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final MemoryLedgerDisk disk = MemoryLedgerDisk()
+        ..files[kPasswordVaultKey] = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode(<String, Object?>{'v': 99, 'e': <String, Object?>{}}),
+          ),
+        );
+      _android(_webRequest());
+      await _pump(
+        tester,
+        vault: _vault(security, disk: disk),
+        security: security,
+      );
+      await _confirm(tester, 'sekret12');
+      expect(find.byKey(const Key('autofill-newer')), findsOneWidget);
+      expect(find.byKey(const Key('autofill-add')), findsNothing);
+    });
+
+    testWidgets('the request ends while the login is typed: the form stays; '
+        'saved, the login is kept and the person is told the form was not '
+        'filled', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+      await _tap(tester, 'autofill-add');
+      await type(tester);
+
+      android.pending = null;
+      await _changed(tester);
+      expect(form, findsOneWidget);
+      expect(
+        field(tester, 'password-field-login').controller!.text,
+        'nowy@example.com',
+      );
+
+      await _tap(tester, 'password-save');
+      expect(form, findsNothing);
+      expect(_picker, findsNothing);
+      expect(saved(vault, 'nowy@example.com'), isNotNull);
+      expect(
+        find.text(
+          'Login zapisany w Hasłach, ale czas na wypełnienie minął. Spróbuj '
+          'jeszcze raz w tamtej aplikacji.',
+        ),
+        findsOneWidget,
+      );
+      expect(android.named('fill'), isEmpty);
+      expect(android.named('cancel'), isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the request ends while the login is typed and the form is '
+        'left: the picker goes with it, nothing is saved', (
+      WidgetTester tester,
+    ) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+      await _tap(tester, 'autofill-add');
+      await type(tester);
+      android.pending = null;
+      await _changed(tester);
+
+      await tester.pageBack();
+      await _frames(tester);
+      await _tap(tester, 'password-discard');
+      expect(form, findsNothing);
+      expect(_picker, findsNothing);
+      expect(vault.entries, isEmpty);
+      expect(android.named('fill'), isEmpty);
+      expect(android.named('guard').last.arguments, <Object?, Object?>{
+        'on': false,
+      });
+    });
+
+    testWidgets('a newer request while the form is kept is answered over it; '
+        'the form and its picker stay until left, and touches through other '
+        'windows stay dropped while any picker is up', (
+      WidgetTester tester,
+    ) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final PasswordVaultService vault = _vault(security);
+      final PasswordEntry bank = await vault.add(_bankApp);
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+      await _tap(tester, 'autofill-add');
+      await type(tester);
+      android.pending = null;
+      await _changed(tester);
+
+      android.pending = _appRequest();
+      await _changed(tester);
+      await _confirm(tester, 'sekret12');
+      await _tap(tester, 'autofill-row-${bank.id}');
+      expect(android.named('fill').single.arguments, <Object?, Object?>{
+        'id': 'r1',
+        'login': 'ania',
+        'password': 'bank-haslo',
+      });
+      expect(
+        android.named('guard').map((MethodCall c) => c.arguments),
+        <Object?>[
+          <Object?, Object?>{'on': true},
+        ],
+      );
+      // Back in Zen: what was typed is still there.
+      expect(form, findsOneWidget);
+      expect(
+        field(tester, 'password-field-login').controller!.text,
+        'nowy@example.com',
+      );
+
+      await _tap(tester, 'password-save');
+      expect(form, findsNothing);
+      expect(_picker, findsNothing);
+      expect(saved(vault, 'nowy@example.com'), isNotNull);
+      expect(android.named('fill'), hasLength(1));
+      expect(android.named('guard').last.arguments, <Object?, Object?>{
+        'on': false,
+      });
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Zen locking while the login is typed closes it all; nothing '
+        'is saved and nothing goes over', (WidgetTester tester) async {
+      final MemoryAppSecurityService security = await _withPassword();
+      final MemoryLedgerDisk disk = MemoryLedgerDisk();
+      final PasswordVaultService vault = _vault(security, disk: disk);
+      final _Android android = _android(_webRequest());
+      await _pump(tester, vault: vault, security: security);
+      await _confirm(tester, 'sekret12');
+      await _tap(tester, 'autofill-add');
+      await type(tester);
+
+      security.lock();
+      vault.forget();
+      await _frames(tester);
+      expect(form, findsNothing);
+      expect(_picker, findsNothing);
+      expect(android.named('fill'), isEmpty);
+      expect(android.named('cancel').single.arguments, <Object?, Object?>{
+        'id': 'r2',
+        'back': false,
+      });
+      final Uint8List? stored = disk.files[kPasswordVaultKey];
+      expect(
+        stored == null ? '' : utf8.decode(stored),
+        isNot(contains('nowy@example.com')),
+      );
+      expect(tester.takeException(), isNull);
+    });
   });
 }

@@ -9,9 +9,31 @@ import 'package:zen/src/features/passwords/password_autofill_bridge.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/passwords/password_match.dart';
 import 'package:zen/src/features/passwords/password_vault_service.dart';
+import 'package:zen/src/features/passwords/presentation/password_form_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_vault_widgets.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+
+/// What the picker's host (password_autofill_host.dart) and the picker
+/// know of one request between them.
+final class PasswordAutofillSession {
+  /// A new login for the request is being typed: when the request ends
+  /// meanwhile, the form stays open, so what was typed can still be saved.
+  bool editing = false;
+
+  /// The request ended on the Android side while [editing].
+  bool ended = false;
+
+  /// The entry the picker closed with was made for this request just now.
+  String? addedId;
+}
+
+/// A new login was saved, but the form it was for could no longer be
+/// filled.
+String passwordAutofillSavedNotFilledText() => t(
+  'Login zapisany w Hasłach, ale czas na wypełnienie minął. Spróbuj jeszcze '
+  'raz w tamtej aplikacji.',
+);
 
 /// The autofill's picker: which login goes into the form of another app or
 /// a browser ([request]). It closes with the entry the person tapped, or
@@ -19,14 +41,22 @@ import 'package:zen/src/features/security/secure_screen.dart';
 ///
 /// Who asked is at the top: the page's host in a browser, or the app's
 /// package (with the name it gives itself). The list holds only the entries
-/// saved for that app or page ([PasswordVaultService.matchesFor]). Every
+/// saved for that app or page ([PasswordVaultService.matchesFor]) that have
+/// something the form takes ([PasswordAutofillRequest.canFillWith]). Every
 /// other entry is shown only after "Szukaj w hasłach" and a warning: a
 /// password given to an app or page it was not saved for is how phishing
-/// works. Like every page of "Hasła", locking Zen closes it.
+/// works. A new login for that app or page is made right here, saved under
+/// its address ([PasswordAutofillRequest.newEntryAddress]) and used at once.
+/// Like every page of "Hasła", locking Zen closes it.
 class PasswordAutofillScreen extends ConsumerStatefulWidget {
-  const PasswordAutofillScreen({required this.request, super.key});
+  const PasswordAutofillScreen({
+    required this.request,
+    this.session,
+    super.key,
+  });
 
   final PasswordAutofillRequest request;
+  final PasswordAutofillSession? session;
 
   @override
   ConsumerState<PasswordAutofillScreen> createState() =>
@@ -101,10 +131,149 @@ class _PasswordAutofillScreenState
     }
   }
 
-  /// Whether [e] has anything this form can take.
+  /// Whether [e] has anything this form can take. Entries that have not
+  /// are left out of the lists: tapping one would fill nothing.
   bool _fills(PasswordEntry e) =>
-      e.password.isNotEmpty ||
-      (widget.request.hasUsernameField && e.login.isNotEmpty);
+      widget.request.canFillWith(login: e.login, password: e.password);
+
+  bool get _readOnly => _vault.damaged || _vault.newerFormat;
+
+  /// A new login for this page or app: the entry form, with the name and
+  /// the address the request gives; saved, it is used for the request at
+  /// once.
+  Future<void> _add() async {
+    final PasswordAutofillRequest r = widget.request;
+    final String? address = r.newEntryAddress;
+    final PasswordAutofillSession session =
+        widget.session ?? PasswordAutofillSession();
+    if (address == null || session.editing) {
+      return;
+    }
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
+    session.editing = true;
+    unawaited(_bridge.hold(r, on: true));
+    final String? id = await pushPasswordPage<String>(
+      context,
+      PasswordFormScreen(
+        initial: PasswordFields(name: r.newEntryName, address: address),
+        fixedAddress: true,
+        saveLabel: t('Zapisz i użyj'),
+      ),
+    );
+    session.editing = false;
+    if (!mounted || _security.isLocked || _closing) {
+      return;
+    }
+    final PasswordEntry? entry = id == null ? null : _vault.entry(id);
+    if (session.ended) {
+      // The request ended while the login was typed: it is saved all the
+      // same, and the person is told the form was not filled.
+      if (entry != null) {
+        messenger?.showSnackBar(
+          SnackBar(content: Text(passwordAutofillSavedNotFilledText())),
+        );
+      }
+      _closeEnded();
+      return;
+    }
+    if (entry != null && _fills(entry)) {
+      session.addedId = entry.id;
+      Navigator.of(context).pop(entry);
+      return;
+    }
+    unawaited(_bridge.hold(r, on: false));
+    if (entry != null) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            t(
+              'Login zapisany w Hasłach, ale nie ma w nim nic do wpisania '
+              'w tym formularzu.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  /// The picker of a request that ended: it goes, even under a page that
+  /// opened over it meanwhile (a newer request's).
+  void _closeEnded() {
+    _closing = true;
+    final ModalRoute<Object?>? route = ModalRoute.of(context);
+    final NavigatorState? navigator = _navigator;
+    if (route == null || navigator == null || !route.isActive) {
+      return;
+    }
+    if (route.isCurrent) {
+      navigator.pop();
+    } else {
+      navigator.removeRoute(route);
+    }
+  }
+
+  Widget _addButton({required bool main}) {
+    final bool web = widget.request.isWeb;
+    final String label = web
+        ? t('Nowy login dla tej strony')
+        : t('Nowy login dla tej aplikacji');
+    const Icon icon = Icon(Icons.add_rounded);
+    void onPressed() => unawaited(_add());
+    return Center(
+      child: main
+          ? FilledButton.icon(
+              key: const Key('autofill-add'),
+              onPressed: onPressed,
+              icon: icon,
+              label: Text(label),
+            )
+          : OutlinedButton.icon(
+              key: const Key('autofill-add'),
+              onPressed: onPressed,
+              icon: icon,
+              label: Text(label),
+            ),
+    );
+  }
+
+  /// Under the requester: what only a login form gets, and why nothing new
+  /// can be saved in a store that is read-only.
+  List<Widget> _notices(ZenColors zen) {
+    final PasswordAutofillRequest r = widget.request;
+    return <Widget>[
+      if (r.hasUsernameField && !r.hasPasswordField)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: ZenInfo(
+            key: const Key('autofill-login-only'),
+            icon: Icons.person_outline_rounded,
+            text: t('Tu jest tylko pole loginu: Zen wpisze sam login.'),
+          ),
+        ),
+      if (_vault.damaged)
+        ZenInfo(
+          key: const Key('autofill-damaged'),
+          icon: Icons.report_gmailerrorred_rounded,
+          tone: zen.danger,
+          title: t('Zapisanych haseł nie da się odczytać'),
+          text: t('Zen zostawia je bez zmian i nic do nich nie dopisuje.'),
+        )
+      else if (_vault.newerFormat)
+        ZenInfo(
+          key: const Key('autofill-newer'),
+          icon: Icons.system_update_rounded,
+          tone: zen.warning,
+          title: t('Hasła z nowszej wersji Zen'),
+          text: t('Zostają bez zmian. Zaktualizuj Zen, żeby z nich korzystać.'),
+        ),
+    ];
+  }
+
+  /// Whether a new login can be made here: the store takes it and the
+  /// request has an address to save it under.
+  bool get _canAdd => !_readOnly && widget.request.newEntryAddress != null;
 
   Future<void> _showAll() async {
     final bool go =
@@ -250,11 +419,12 @@ class _PasswordAutofillScreenState
     final List<PasswordMatch> found = r.isWeb
         ? _vault.matchesFor(webDomain: r.webDomain, webScheme: r.webScheme)
         : _vault.matchesFor(packageName: r.packageName);
+    final bool none = !found.any((PasswordMatch m) => _fills(m.entry));
     return <Widget>[
       for (final PasswordMatch m in found)
         if (_fills(m.entry))
           _row(zen, m.entry, showAddress: m.kind == PasswordMatchKind.sameSite),
-      if (!found.any((PasswordMatch m) => _fills(m.entry)))
+      if (none)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Text(
@@ -267,6 +437,12 @@ class _PasswordAutofillScreenState
           ),
         ),
       const SizedBox(height: 8),
+      // Nothing saved for it: a new login is what the person most likely
+      // came for.
+      if (_canAdd) ...<Widget>[
+        _addButton(main: none),
+        const SizedBox(height: 8),
+      ],
       Center(
         child: OutlinedButton.icon(
           key: const Key('autofill-search-all'),
@@ -278,30 +454,54 @@ class _PasswordAutofillScreenState
     ];
   }
 
-  List<Widget> _everything(ZenColors zen) => <Widget>[
-    ZenInfo(
-      key: const Key('autofill-all-notice'),
-      icon: Icons.gpp_maybe_rounded,
-      tone: zen.warning,
-      text: t('To nie jest login zapisany dla tej aplikacji ani strony'),
-    ),
-    const SizedBox(height: 8),
-    TextField(
-      key: const Key('autofill-search'),
-      controller: _search,
-      onChanged: (_) => setState(() {}),
-      autocorrect: false,
-      enableIMEPersonalizedLearning: false,
-      textInputAction: TextInputAction.search,
-      decoration: InputDecoration(
-        hintText: t('Szukaj'),
-        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+  List<Widget> _everything(ZenColors zen) {
+    final List<PasswordEntry> found = <PasswordEntry>[
+      for (final PasswordEntry e in _vault.search(_search.text))
+        if (_fills(e)) e,
+    ];
+    final String query = _search.text.trim();
+    return <Widget>[
+      ZenInfo(
+        key: const Key('autofill-all-notice'),
+        icon: Icons.gpp_maybe_rounded,
+        tone: zen.warning,
+        text: t('To nie jest login zapisany dla tej aplikacji ani strony'),
       ),
-    ),
-    const SizedBox(height: 4),
-    for (final PasswordEntry e in _vault.search(_search.text))
-      if (_fills(e)) _row(zen, e, showAddress: true),
-  ];
+      const SizedBox(height: 8),
+      TextField(
+        key: const Key('autofill-search'),
+        controller: _search,
+        onChanged: (_) => setState(() {}),
+        autocorrect: false,
+        enableIMEPersonalizedLearning: false,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: t('Szukaj'),
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+        ),
+      ),
+      const SizedBox(height: 4),
+      for (final PasswordEntry e in found) _row(zen, e, showAddress: true),
+      if (found.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Text(
+            query.isEmpty
+                ? t('Brak wyników')
+                : t('Nic nie pasuje do „{query}”.', <String, Object?>{
+                    'query': query,
+                  }),
+            key: const Key('autofill-search-empty'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: zen.textSecondary),
+          ),
+        ),
+      if (_canAdd) ...<Widget>[
+        const SizedBox(height: 8),
+        _addButton(main: false),
+      ],
+    ];
+  }
 
   Widget _body(ZenColors zen) {
     if (_security.isLocked) {
@@ -340,6 +540,7 @@ class _PasswordAutofillScreenState
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       children: <Widget>[
         _requester(zen),
+        ..._notices(zen),
         ...(_all ? _everything(zen) : _matching(zen)),
       ],
     );
@@ -374,67 +575,66 @@ Future<void> showPasswordAutofillInfo(BuildContext context) {
     routeSettings: const RouteSettings(name: kPasswordVaultRouteName),
     builder: (BuildContext context) => FutureBuilder<PasswordAutofillState>(
       future: state,
-      builder:
-          (BuildContext context, AsyncSnapshot<PasswordAutofillState> snap) {
-            final PasswordAutofillState? state = snap.data;
-            return AlertDialog(
-              key: const Key('autofill-info'),
-              scrollable: true,
-              title: Text(t('Wypełnianie w innych aplikacjach')),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    t(
-                      'Zen może podpowiadać loginy zapisane w Hasłach w innych '
-                      'aplikacjach i w przeglądarkach. Nic nie wypełnia sam: '
-                      'najpierw odblokowujesz Zen i potwierdzasz, że to Ty, a '
-                      'potem sam wybierasz login. Zen pokazuje tylko loginy '
-                      'zapisane dla tej aplikacji albo strony; inne dopiero po '
-                      'ostrzeżeniu.',
-                    ),
-                  ),
-                  if (state != null) ...<Widget>[
-                    const SizedBox(height: 12),
-                    Text(
-                      switch (state) {
-                        PasswordAutofillState.unsupported => t(
-                          'Ten telefon tego nie obsługuje. Potrzebny jest '
-                          'Android 9 lub nowszy.',
-                        ),
-                        PasswordAutofillState.off => t(
-                          'Włączysz to w ustawieniach Androida: wybierz Zen '
-                          'jako usługę autouzupełniania.',
-                        ),
-                        PasswordAutofillState.on => t(
-                          'Zen jest usługą autouzupełniania na tym telefonie. '
-                          'Wyłączysz to w ustawieniach Androida.',
-                        ),
-                      },
-                      key: Key('autofill-status-${state.name}'),
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ],
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text(t('Zamknij')),
+      builder: (BuildContext context, AsyncSnapshot<PasswordAutofillState> snap) {
+        final PasswordAutofillState? state = snap.data;
+        return AlertDialog(
+          key: const Key('autofill-info'),
+          scrollable: true,
+          title: Text(t('Wypełnianie w innych aplikacjach')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                t(
+                  'Zen może podpowiadać loginy zapisane w Hasłach w innych '
+                  'aplikacjach i w przeglądarkach. Nic nie wypełnia sam: '
+                  'najpierw odblokowujesz Zen albo potwierdzasz, że to '
+                  'Ty, a potem sam wybierasz login. Zen pokazuje tylko loginy '
+                  'zapisane dla tej aplikacji albo strony; inne dopiero po '
+                  'ostrzeżeniu.',
                 ),
-                if (state != null && state != PasswordAutofillState.unsupported)
-                  FilledButton(
-                    key: const Key('autofill-open-settings'),
-                    onPressed: () {
-                      unawaited(bridge.openSettings());
-                      Navigator.of(context).pop();
-                    },
-                    child: Text(t('Otwórz ustawienia Androida')),
-                  ),
+              ),
+              if (state != null) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(
+                  switch (state) {
+                    PasswordAutofillState.unsupported => t(
+                      'Ten telefon tego nie obsługuje. Potrzebny jest '
+                      'Android 9 lub nowszy.',
+                    ),
+                    PasswordAutofillState.off => t(
+                      'Włączysz to w ustawieniach Androida: wybierz Zen '
+                      'jako usługę autouzupełniania.',
+                    ),
+                    PasswordAutofillState.on => t(
+                      'Zen jest usługą autouzupełniania na tym telefonie. '
+                      'Wyłączysz to w ustawieniach Androida.',
+                    ),
+                  },
+                  key: Key('autofill-status-${state.name}'),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
               ],
-            );
-          },
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(t('Zamknij')),
+            ),
+            if (state != null && state != PasswordAutofillState.unsupported)
+              FilledButton(
+                key: const Key('autofill-open-settings'),
+                onPressed: () {
+                  unawaited(bridge.openSettings());
+                  Navigator.of(context).pop();
+                },
+                child: Text(t('Otwórz ustawienia Androida')),
+              ),
+          ],
+        );
+      },
     ),
   );
 }

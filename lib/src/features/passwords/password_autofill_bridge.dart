@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/passwords/password_entry.dart';
+import 'package:zen/src/features/passwords/password_match.dart';
 
 /// A login form in another app or a browser that asked Zen for a login
 /// (Android's autofill, ZenAutofillService.kt). It holds who asked, never
@@ -17,6 +19,7 @@ final class PasswordAutofillRequest {
     this.webDomain,
     this.webScheme,
     this.hasUsernameField = false,
+    this.hasPasswordField = true,
   });
 
   /// The request as the Android side describes it; null when anything in
@@ -48,6 +51,8 @@ final class PasswordAutofillRequest {
           ? scheme as String
           : null,
       hasUsernameField: raw['username'] == true,
+      // An answer from before the login-only forms always had one.
+      hasPasswordField: raw['password'] != false,
     );
   }
 
@@ -82,11 +87,67 @@ final class PasswordAutofillRequest {
   final String? webDomain;
   final String? webScheme;
 
-  /// Whether the form has a login field to fill besides the password.
+  /// Whether the form has a login field.
   final bool hasUsernameField;
+
+  /// Whether the form has a password field (the first page of a login in
+  /// two steps has none).
+  final bool hasPasswordField;
 
   /// A page in a browser (matched by its address), not an app.
   bool get isWeb => webDomain != null;
+
+  /// Whether an entry of [login] and [password] has anything this form
+  /// takes: the Android side fills only the fields the form has.
+  bool canFillWith({required String login, required String password}) =>
+      (hasPasswordField && password.isNotEmpty) ||
+      (hasUsernameField && login.isNotEmpty);
+
+  /// The page as the matching reads it: its host and port, with the scheme
+  /// the browser reported (http when it gave none, as the matching takes
+  /// it). Null for an app, or when the page's address is not a host.
+  ({String scheme, String host, int? port})? get _page {
+    final String domain = webDomain?.trim() ?? '';
+    if (domain.isEmpty) {
+      return null;
+    }
+    final String scheme = webScheme ?? 'http';
+    final Uri? uri = Uri.tryParse(
+      domain.contains('://') ? domain : '$scheme://$domain',
+    );
+    final String? host = uri == null ? null : normalizePasswordHost(uri.host);
+    if (host == null) {
+      return null;
+    }
+    return (scheme: scheme, host: host, port: uri!.hasPort ? uri.port : null);
+  }
+
+  /// The address a new entry for this form is saved under, so that the
+  /// next request from the same page or app finds it as an exact match
+  /// ([matchPasswordEntries]): the page's scheme, host and port as the
+  /// browser reported them, or the app's package. Taken from the request
+  /// alone, never from anything the page or app wrote. Null when the page's
+  /// address is not a host.
+  String? get newEntryAddress {
+    if (!isWeb) {
+      return 'android-app://$packageName';
+    }
+    final ({String scheme, String host, int? port})? page = _page;
+    if (page == null) {
+      return null;
+    }
+    final int? port = page.port;
+    return '${page.scheme}://${page.host}${port == null ? '' : ':$port'}';
+  }
+
+  /// The name a new entry for this form starts with: the page's host, or
+  /// the app's name (its package when it gives none).
+  String get newEntryName {
+    final String name = _page?.host ?? appLabel ?? packageName;
+    return name.length > kMaxPasswordNameChars
+        ? name.substring(0, kMaxPasswordNameChars)
+        : name;
+  }
 
   /// Says nothing of who asked: this may end up in a log.
   @override
@@ -185,11 +246,27 @@ final class PasswordAutofillBridge {
     });
   }
 
-  /// [on]: touches that come through another app's window drawn over Zen
-  /// are dropped (the picker is up).
-  Future<void> guard({required bool on}) async {
-    await _call<bool>('guard', <String, Object?>{'on': on});
+  /// [on]: a new login for [request] is being typed, so the Android side
+  /// keeps it open a few minutes from when it opened instead of one; off:
+  /// back to the picker, a minute to pick (never past those few minutes).
+  /// Zen locking or the person leaving still ends it.
+  Future<void> hold(PasswordAutofillRequest request, {required bool on}) async {
+    await _call<bool>('hold', <String, Object?>{'id': request.id, 'on': on});
   }
+
+  /// [on]: a picker is up, and touches that come through another app's
+  /// window drawn over Zen are dropped; off: that picker went. They pass
+  /// again only once no picker is up (an older one, under a page kept open
+  /// for a new login, can go while a newer one is up).
+  Future<void> guard({required bool on}) async {
+    final bool was = _guards > 0;
+    _guards = on ? _guards + 1 : (_guards > 0 ? _guards - 1 : 0);
+    if (was != _guards > 0) {
+      await _call<bool>('guard', <String, Object?>{'on': on});
+    }
+  }
+
+  int _guards = 0;
 
   /// Whether Zen can fill other apps here and is switched on for it.
   Future<PasswordAutofillState> state() async {
