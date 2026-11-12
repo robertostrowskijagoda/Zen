@@ -21,7 +21,6 @@ import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
-import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -36,7 +35,6 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
-import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -65,13 +63,10 @@ final class AppAccountArchiveSource implements AccountArchiveSource {
   Map<String, dynamic> contacts() => _hub.contactsBackup();
 
   @override
-  Map<String, String> levels() => <String, String>{
+  Map<String, Object> levels() => node.levelsForCopy(<String>[
     for (final FriendProfile f in _social.friends.values)
-      if (f.status == FriendRelationshipStatus.accepted)
-        PeerShareCodec.normalizeAddress(f.address): node
-            .levelOf(f.address)
-            .name,
-  };
+      if (f.status == FriendRelationshipStatus.accepted) f.address,
+  ]);
 
   @override
   List<String> conversationKeys() => _hub.conversationKeys();
@@ -284,17 +279,9 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       groups = (contacts['groups'] as List?)?.length ?? 0;
     }
     step();
-    final Object? levels = s[CircleBackupSections.levels];
-    if (levels is Map) {
-      for (final MapEntry<dynamic, dynamic> e in levels.entries) {
-        final FriendLevel? level = FriendLevel.values
-            .where((FriendLevel l) => l.name == e.value)
-            .firstOrNull;
-        if (e.key is String && level != null) {
-          await node.setLevel(e.key as String, level);
-        }
-      }
-    }
+    // Merged by time: a level changed here (or on another device of the
+    // account) after the copy was made stays.
+    await node.takeLevels(s[CircleBackupSections.levels]);
     step();
     final Object? pyramid = s[CircleBackupSections.pyramid];
     if (pyramid is Map<String, dynamic>) {

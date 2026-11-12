@@ -382,10 +382,9 @@ final class AppCircleBackupData implements CircleBackupData {
       sections: <String, Object?>{
         CircleBackupSections.profile: profile,
         CircleBackupSections.contacts: _hub.contactsBackup(),
-        CircleBackupSections.levels: <String, String>{
-          for (final String address in _acceptedFriends(state))
-            address: node.levelOf(address).name,
-        },
+        CircleBackupSections.levels: node.levelsForCopy(
+          _acceptedFriends(state),
+        ),
         CircleBackupSections.settings: ref
             .read(appSettingsControllerProvider)
             .toJson(),
@@ -459,17 +458,9 @@ final class AppCircleBackupData implements CircleBackupData {
       await _hub.importContactsBackup(contacts);
     }
     step();
-    final Object? levels = content.sections[CircleBackupSections.levels];
-    if (levels is Map) {
-      for (final MapEntry<dynamic, dynamic> e in levels.entries) {
-        final FriendLevel? level = FriendLevel.values
-            .where((FriendLevel l) => l.name == e.value)
-            .firstOrNull;
-        if (e.key is String && level != null) {
-          await node.setLevel(e.key as String, level);
-        }
-      }
-    }
+    // Merged by time: a level changed on another device of the account
+    // after the copy was made stays.
+    await node.takeLevels(content.sections[CircleBackupSections.levels]);
     step();
     final Object? pyramid = content.sections[CircleBackupSections.pyramid];
     if (pyramid is Map<String, dynamic>) {

@@ -108,7 +108,9 @@ const String kChatHistoryKind = 'chat_history';
 const String kLedgerPushType = 'lg_push';
 
 /// Own devices share their audience keys and friend levels:
-/// `{type, own, levels}`.
+/// `{type, own, levels}`; `levels` carries the time of each level under
+/// [LedgerNode.levelTimesKey], and the newest change of a friend's level
+/// wins on every device.
 const String kLedgerSiblingType = 'lg_sibling';
 
 /// One device of an account, as this node knows it.
@@ -321,6 +323,12 @@ final class LedgerNode {
 
   /// Private level of each friend (normalised address); default "Znajomy".
   final Map<String, FriendLevel> _levels = <String, FriendLevel>{};
+
+  /// When each level in [_levels] was set, on whichever device of the
+  /// account ([setLevel]): the newest change wins on every device. A level
+  /// without one was set before levels carried a time (counts as
+  /// [Hlc.zero]).
+  final Map<String, Hlc> _levelAt = <String, Hlc>{};
 
   /// Decrypted bodies of sealed entries, by entry id.
   final Map<String, Map<String, dynamic>> _opened =
@@ -715,6 +723,7 @@ final class LedgerNode {
       return;
     }
     _levels[normalized] = level;
+    _levelAt[normalized] = _nextLevelStamp(normalized);
     await _saveLevels();
     final Set<Audience> lost = audiencesFor(
       old,
@@ -727,6 +736,160 @@ final class LedgerNode {
       _sendKeysToAll();
     } else {
       _sendKeys(normalized);
+    }
+  }
+
+  /// The time of a level set here now for [normalized]: later than any
+  /// change of it this device knows of, whatever the clocks of the devices
+  /// that made those, so a change made after seeing another one wins.
+  Hlc _nextLevelStamp(String normalized) {
+    final Hlc now = _clock.now();
+    final Hlc? had = _levelAt[normalized];
+    if (had == null || now > had) {
+      return now;
+    }
+    return had.counter < 0xFFFF
+        ? Hlc(had.millis, had.counter + 1)
+        : Hlc(had.millis + 1, 0);
+  }
+
+  /// Key of the levels' times in [levelsForCopy], in the levels the
+  /// account's devices send each other and in the stored file: a friend's
+  /// address never looks like it, and Zen 1.16.5 skips it (no level name).
+  static const String levelTimesKey = '@at';
+
+  /// The levels of [addresses] (normalised address → level name), with the
+  /// time of each set here or on another device under [levelTimesKey]: for
+  /// a copy of the account, whose levels then come back by [takeLevels].
+  Map<String, Object> levelsForCopy(Iterable<String> addresses) {
+    final Map<String, Object> out = <String, Object>{};
+    final Map<String, int> times = <String, int>{};
+    for (final String a in addresses) {
+      final String normalized = PeerShareCodec.normalizeAddress(a);
+      out[normalized] = levelOf(normalized).name;
+      final Hlc? at = _levels.containsKey(normalized)
+          ? _levelAt[normalized]
+          : null;
+      if (at != null) {
+        times[normalized] = at.toInt();
+      }
+    }
+    if (times.isNotEmpty) {
+      out[levelTimesKey] = times;
+    }
+    return out;
+  }
+
+  /// Every level held here, with its time (as [levelsForCopy] writes them).
+  Map<String, Object> _levelsJson() => <String, Object>{
+    for (final MapEntry<String, FriendLevel> e in _levels.entries)
+      e.key: e.value.name,
+    if (_levelAt.isNotEmpty)
+      levelTimesKey: <String, int>{
+        for (final MapEntry<String, Hlc> e in _levelAt.entries)
+          if (_levels.containsKey(e.key)) e.key: e.value.toInt(),
+      },
+  };
+
+  /// Takes the levels of a copy of the account ([levelsForCopy]; a copy of
+  /// Zen 1.16.5 has no times): a friend's level here changed later than the
+  /// copy's stays, and what changes has the effects of [setLevel].
+  Future<void> takeLevels(Object? levels) async {
+    await start();
+    await _applyLevels(_mergeLevels(levels));
+  }
+
+  /// Merges [theirs] (levels as [_levelsJson] writes them, from another
+  /// device of this account or a copy) into [_levels]: per friend the
+  /// newer change wins ([_levelWins]). Only friends' levels (by the list,
+  /// or a friend this device knows the account of): a stale device must
+  /// not bring back the level of a friend removed here.
+  _LevelMerge _mergeLevels(Object? theirs) {
+    final _LevelMerge out = _LevelMerge();
+    if (theirs is! Map) {
+      return out;
+    }
+    final Object? rawTimes = theirs[levelTimesKey];
+    final Map<String, Hlc> times = <String, Hlc>{
+      if (rawTimes is Map)
+        for (final MapEntry<Object?, Object?> e in rawTimes.entries)
+          if (e.key is String && e.value is int && (e.value! as int) >= 0)
+            PeerShareCodec.normalizeAddress(e.key! as String): Hlc.fromInt(
+              e.value! as int,
+            ),
+    };
+    final Set<String> listed = friendAddresses()
+        .map(PeerShareCodec.normalizeAddress)
+        .toSet();
+    for (final MapEntry<Object?, Object?> e in theirs.entries) {
+      final Object? key = e.key;
+      final FriendLevel? level = friendLevelByName(e.value);
+      if (key is! String || key == levelTimesKey || level == null) {
+        continue;
+      }
+      final String address = PeerShareCodec.normalizeAddress(key);
+      if (!listed.contains(address) && !_accounts.containsKey(address)) {
+        continue;
+      }
+      final Hlc at = times[address] ?? Hlc.zero;
+      if (!_levelWins(address, level, at)) {
+        continue;
+      }
+      final FriendLevel old = levelOf(address);
+      _levels[address] = level;
+      if (at > Hlc.zero) {
+        _levelAt[address] = at;
+      } else {
+        _levelAt.remove(address);
+      }
+      out.changed = true;
+      out.lost.addAll(audiencesFor(old).difference(audiencesFor(level)));
+      if (level.index > old.index) {
+        out.gained = true;
+      }
+    }
+    return out;
+  }
+
+  /// Whether [level], set at [at] elsewhere, replaces this device's level
+  /// of [address]: the later change; at the same time (two levels from
+  /// before levels carried one) the lower level, so both devices settle on
+  /// the same one and neither keeps trusting more than the other.
+  bool _levelWins(String address, FriendLevel level, Hlc at) {
+    final FriendLevel? mine = _levels[address];
+    if (mine == null) {
+      // Nothing set here: anything but the default with no time.
+      return at > Hlc.zero || level != FriendLevel.friend;
+    }
+    final int byTime = at.compareTo(_levelAt[address] ?? Hlc.zero);
+    if (byTime != 0) {
+      return byTime > 0;
+    }
+    return level.index < mine.index;
+  }
+
+  /// What a level taken from elsewhere does, as [setLevel] does it here:
+  /// an audience a friend lost gets a new key on this device too (the old
+  /// one may have gone to them from here, and this device's newest key is
+  /// the one it writes with), and friends get the keys their levels give
+  /// now. [keysAdded]: own keys came with the levels (taken after them, so
+  /// no key goes out by a level about to change).
+  Future<void> _applyLevels(_LevelMerge m, {int keysAdded = 0}) async {
+    if (m.changed) {
+      await _saveLevels();
+    }
+    for (final Audience a in m.lost) {
+      keyring.rotate(a, _clock.wallMillis());
+    }
+    if (m.lost.isNotEmpty || keysAdded > 0) {
+      await _saveKeyring();
+    }
+    if (keysAdded > 0) {
+      await _open(_sealedEntries(ofAccount: account));
+    }
+    if (m.lost.isNotEmpty || m.gained || keysAdded > 0) {
+      // Friends may read what the other device wrote with its keys.
+      _sendKeysToAll();
     }
   }
 
@@ -1165,6 +1328,7 @@ final class LedgerNode {
     for (final String address in gone) {
       lost.addAll(audiencesFor(levelOf(address)));
       _levels.remove(address);
+      _levelAt.remove(address);
       _addressDevices.remove(address);
       _unlinked.remove(address);
       _certificateKnownBy.remove(address);
@@ -2679,10 +2843,8 @@ final class LedgerNode {
       'type': kLedgerSiblingType,
       if (answer) 'ack': true,
       'own': keyring.toJson()['own'],
-      'levels': <String, String>{
-        for (final MapEntry<String, FriendLevel> e in _levels.entries)
-          e.key: e.value.name,
-      },
+      // With the time of each ([levelTimesKey]): the newest change wins.
+      'levels': _levelsJson(),
     });
   }
 
@@ -2690,31 +2852,17 @@ final class LedgerNode {
     if (!_isSibling(from)) {
       return;
     }
+    // The levels first: the keys that came with them (a key the other
+    // device made when it took a friend down) go out to friends only by
+    // the levels as they are now.
+    final _LevelMerge levels = _mergeLevels(m['levels']);
+    final int added = keyring.mergeOwn(m['own']);
+    await _applyLevels(levels, keysAdded: added);
     // Ours may have reached them before they could prove who we are (and
-    // been dropped): answer once with our own, never an answer to an answer.
+    // been dropped): answer once with our own, as merged now, never an
+    // answer to an answer.
     if (m['ack'] != true) {
       _sendSiblingSync(from, answer: true);
-    }
-    final int added = keyring.mergeOwn(m['own']);
-    bool levels = false;
-    final Object? theirs = m['levels'];
-    if (theirs is Map) {
-      theirs.forEach((Object? k, Object? v) {
-        final FriendLevel? level = friendLevelByName(v);
-        if (k is String && level != null && !_levels.containsKey(k)) {
-          _levels[k] = level;
-          levels = true;
-        }
-      });
-    }
-    if (added > 0) {
-      await _saveKeyring();
-      await _open(_sealedEntries(ofAccount: account));
-      // Friends may read what the other device wrote with these.
-      _sendKeysToAll();
-    }
-    if (levels) {
-      await _saveLevels();
     }
   }
 
@@ -3615,6 +3763,15 @@ final class LedgerNode {
               _levels[k] = level;
             }
           });
+          // Times of the levels (none in a file of Zen 1.16.5).
+          final Object? times = json[levelTimesKey];
+          if (times is Map) {
+            times.forEach((Object? k, Object? v) {
+              if (k is String && v is int && v > 0 && _levels.containsKey(k)) {
+                _levelAt[k] = Hlc.fromInt(v);
+              }
+            });
+          }
         }
       } on FormatException {
         logZenWarning('Friend levels are damaged.');
@@ -3629,14 +3786,7 @@ final class LedgerNode {
 
   Future<void> _saveLevels() => disk.write(
     _levelsKey,
-    Uint8List.fromList(
-      utf8.encode(
-        jsonEncode(<String, String>{
-          for (final MapEntry<String, FriendLevel> e in _levels.entries)
-            e.key: e.value.name,
-        }),
-      ),
-    ),
+    Uint8List.fromList(utf8.encode(jsonEncode(_levelsJson()))),
   );
 
   void _shareBridges(String friend) {
@@ -3963,6 +4113,17 @@ final class _ReachWait {
   final Set<String> answered = <String>{};
   final Completer<ReachResult> done = Completer<ReachResult>();
   int noes = 0;
+}
+
+/// What merging levels from elsewhere changed here.
+final class _LevelMerge {
+  bool changed = false;
+
+  /// A friend went up a level.
+  bool gained = false;
+
+  /// Audiences some friend can no longer read.
+  final Set<Audience> lost = <Audience>{};
 }
 
 /// This phone's clock, pulled back to its friends' when it runs more than

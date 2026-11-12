@@ -175,9 +175,14 @@ final class AudienceKeyring {
   }
 
   /// New generation for [audience]: those who lost access keep only the
-  /// old keys, so they cannot read anything written from now on.
+  /// old keys, so they cannot read anything written from now on. Dated
+  /// after every generation held (another device's clock may run ahead):
+  /// the new one is the one written with ([current]), here and on the
+  /// account's other devices, which order the generations by that date.
   void rotate(Audience audience, int now) {
-    (_own[audience] ??= <AudienceKey>[]).add(_newKey(audience, now));
+    final List<AudienceKey> list = _own[audience] ??= <AudienceKey>[];
+    final int newest = list.isEmpty ? now : list.last.created + 1;
+    list.add(_newKey(audience, now > newest ? now : newest));
   }
 
   /// Every generation of the audiences a friend of [level] may read.

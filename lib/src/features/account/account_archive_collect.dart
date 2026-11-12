@@ -36,8 +36,9 @@ abstract interface class AccountArchiveSource {
   /// Friends and groups ([CircleBackupSections.contacts]).
   Map<String, dynamic> contacts();
 
-  /// Friend address → friendship level.
-  Map<String, String> levels();
+  /// Friend address → friendship level (with the levels' times, as
+  /// `LedgerNode.levelsForCopy` writes them).
+  Map<String, Object> levels();
 
   /// The conversations (friends' addresses, `group:<id>`).
   List<String> conversationKeys();
