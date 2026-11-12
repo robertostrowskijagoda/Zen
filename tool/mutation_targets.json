@@ -416,6 +416,31 @@
     ]
   },
   {
+    "file": "lib/src/features/passwords/password_setup.dart",
+    "tests": [
+      "test/password_manager_setup_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_setup_screen.dart",
+    "tests": [
+      "test/password_manager_setup_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/security/sensitive_access.dart",
+    "tests": [
+      "test/password_autofill_test.dart",
+      "test/security_hardening_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/settings/presentation/first_run_setup.dart",
+    "tests": [
+      "test/onboarding_first_run_setup_test.dart"
+    ]
+  },
+  {
     "file": "lib/src/features/runtime/android_background_runtime.dart",
     "tests": [
       "test/android_background_runtime_test.dart"
