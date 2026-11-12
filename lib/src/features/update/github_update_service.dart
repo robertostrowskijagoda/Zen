@@ -219,7 +219,17 @@ final class GithubUpdateService extends ChangeNotifier {
   DateTime? _nextCheckAt;
   Timer? _retry;
   bool _unreachableDismissed = false;
+
+  /// The version whose banner was closed, as kept ([noticeStore]): only a
+  /// version its signed sums vouch for ([githubReleaseSigned]).
   String? _dismissedVersion;
+
+  /// The version whose banner the person closed in this run: hidden at
+  /// once, and only that version (it is kept once its signature holds up).
+  String? _closedNow;
+
+  /// Versions whose signed sums held up in this run ([_signed]).
+  final Set<String> _signedVersions = <String>{};
   Future<void>? _checking;
   bool _asking = false;
   bool _started = false;
@@ -316,6 +326,7 @@ final class GithubUpdateService extends ChangeNotifier {
     final GithubRelease? r = newer;
     final String? dismissed = _dismissedVersion;
     return r != null &&
+        r.version != _closedNow &&
         (dismissed == null || compareAppVersions(r.version, dismissed) > 0);
   }
 
@@ -504,12 +515,9 @@ final class GithubUpdateService extends ChangeNotifier {
   Future<UpdateNoticeState> _readKept() async {
     final UpdateNoticeState kept = await noticeStore.read();
     _kept = kept;
-    final String? dismissed = kept.dismissedVersion;
-    if (dismissed != null &&
-        (_dismissedVersion == null ||
-            compareAppVersions(dismissed, _dismissedVersion!) > 0)) {
-      _dismissedVersion = dismissed;
-    }
+    // As kept: a closed version found not to be published is forgotten
+    // there ([forgetWithdrawnUpdateVersions]), and so here.
+    _dismissedVersion = kept.dismissedVersion;
     final String? found = kept.newestVersion;
     final GithubRelease? release = found == null
         ? null
@@ -541,19 +549,49 @@ final class GithubUpdateService extends ChangeNotifier {
     UpdateNoticeState Function(UpdateNoticeState state) change,
   ) async {
     _kept = await noticeStore.update(change);
+    _dismissedVersion = _kept.dismissedVersion;
   }
 
-  /// Closes the banner for this version, also after a restart.
+  /// Whether the signed sums of release [version] hold up
+  /// ([githubReleaseSigned]); a version that held up once in this run is
+  /// not fetched again.
+  Future<bool?> _signed(String version) async {
+    if (_signedVersions.contains(version)) {
+      return true;
+    }
+    final bool? signed = await githubReleaseSigned(
+      version,
+      fetchText: _fetchSums,
+      keys: releaseKeys,
+    );
+    if (signed == true) {
+      _signedVersions.add(version);
+    }
+    return signed;
+  }
+
+  /// Closes the banner for this version at once; kept, also after a
+  /// restart, once the release's signed sums vouch for the version (a
+  /// version GitHub's unsigned answer named but nobody signed must not hide
+  /// the banner of the real versions below it).
   void dismissNewer() {
     final String? version = newer?.version;
-    _dismissedVersion = version;
+    _closedNow = version;
     _notify();
     if (version != null) {
       unawaitedLogged(
-        _keep((UpdateNoticeState s) => s.copyWith(dismissedVersion: version)),
+        _keepDismissal(version),
         context: 'Keeping the closed update banner',
       );
     }
+  }
+
+  Future<void> _keepDismissal(String version) async {
+    if (await _signed(version) != true) {
+      return;
+    }
+    await _keep((UpdateNoticeState s) => s.copyWith(dismissedVersion: version));
+    _notify();
   }
 
   void dismissUnreachable() {
@@ -625,20 +663,37 @@ final class GithubUpdateService extends ChangeNotifier {
 
   /// A check got a real answer: kept for the Android background service
   /// (which then waits before it asks), and a newer version announced,
-  /// once, with its note.
+  /// once, with its note, when its signed sums vouch for it: the notice
+  /// that is kept holds back every version up to it. An announced or closed
+  /// version newer than the answer whose signed sums are gone is forgotten
+  /// first.
   Future<void> _keepAnswer() async {
     final int now = _now().millisecondsSinceEpoch;
     final GithubRelease? release = newer;
     final String? found = release?.version;
     await _keep((UpdateNoticeState s) => s.answered(at: now, newest: found));
+    _kept = await forgetWithdrawnUpdateVersions(
+      store: noticeStore,
+      newest: found,
+      currentVersion: currentVersion,
+      signed: (String version) => githubReleaseSigned(
+        version,
+        fetchText: _fetchSums,
+        keys: releaseKeys,
+      ),
+    );
+    _dismissedVersion = _kept.dismissedVersion;
     if (release == null) {
+      _notify();
       return;
     }
     // The banner at once; its note when it comes.
     _notify();
     await _fetchWhatsNew(release);
     final RuntimeSystemNotificationService? notices = notifications;
-    if (notices != null) {
+    if (notices != null &&
+        updateNoticeDue(_kept, release.version) &&
+        await _signed(release.version) == true) {
       await announceUpdateOnce(
         store: noticeStore,
         notices: notices,
@@ -1064,6 +1119,87 @@ final class GithubUpdateService extends ChangeNotifier {
     _hintLater?.cancel();
     super.dispose();
   }
+}
+
+/// Whether release [version] is vouched for by what this build trusts: its
+/// [kSignedSumsAssetName] is signed by one of [keys] for that very version.
+/// True also while [keys] is empty (a build that trusts no key has nothing
+/// better than GitHub's word). False when it is not: the file is missing
+/// (the release was withdrawn, or never was), damaged, of another version
+/// or signed by nobody known. Null when that cannot be told now (github.com
+/// not reached, another error answer): asked again later.
+///
+/// What the update notice remembers ([UpdateNoticeState.notifiedVersion],
+/// [UpdateNoticeState.dismissedVersion]) holds back the notice of every
+/// version up to it, so it is taken only from a version this vouches for,
+/// never from the unsigned answer naming the newest release.
+Future<bool?> githubReleaseSigned(
+  String version, {
+  required Sha256SumsFetcher fetchText,
+  required List<String> keys,
+}) async {
+  if (keys.isEmpty) {
+    return true;
+  }
+  final GithubRelease? release = GithubRelease.fromTag('v$version');
+  if (release == null) {
+    return false;
+  }
+  final String text;
+  try {
+    text = await fetchText(release.assetUri(kSignedSumsAssetName));
+  } on Object catch (error) {
+    if (isMissingGithubFile(error)) {
+      return false;
+    }
+    logZenWarning('Signed sums of $version: $error');
+    return null;
+  }
+  final SignedSums? signed = SignedSums.decode(text);
+  return signed != null &&
+      signed.version == version &&
+      await countMaintainerSignatures(
+            message: signed.signedBytes(),
+            signatures: signed.signatures,
+            maintainers: keys,
+          ) >=
+          1;
+}
+
+/// Forgets the announced or closed version kept in [store] when it is
+/// newer than both [newest] (the newest release GitHub names now; null:
+/// none newer than this build) and [currentVersion], and [signed] says it
+/// is no release (false; its signed sums are gone): a version that was
+/// withdrawn (a tag set by mistake) or never published (a forged answer)
+/// would otherwise hold back the notice of every real version below it
+/// until Zen itself is that new. One that cannot be checked now (null) is
+/// kept. Returns what is kept.
+Future<UpdateNoticeState> forgetWithdrawnUpdateVersions({
+  required UpdateNoticeStore store,
+  required String? newest,
+  required String currentVersion,
+  required Future<bool?> Function(String version) signed,
+}) async {
+  final UpdateNoticeState kept = await store.read();
+  final String floor =
+      newest != null && compareAppVersions(newest, currentVersion) > 0
+      ? newest
+      : currentVersion;
+  final Set<String> gone = <String>{};
+  for (final String version in <String>{
+    ?kept.notifiedVersion,
+    ?kept.dismissedVersion,
+  }) {
+    if (compareAppVersions(version, floor) > 0 &&
+        await signed(version) == false) {
+      gone.add(version);
+    }
+  }
+  if (gone.isEmpty) {
+    return kept;
+  }
+  logZenWarning('Update notice: ${gone.join(', ')} is not published');
+  return store.update((UpdateNoticeState s) => s.forgetting(gone));
 }
 
 /// Whether this build looks at GitHub by itself; overridden in tests.

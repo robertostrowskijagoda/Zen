@@ -343,15 +343,21 @@ void main() {
         reason: 'fetched once per version',
       );
 
-      final LedgerKeyPair other = await LedgerKeyPair.generate();
-      final _Release forged = _Release(key: other);
-      final _Notices forgedNotices = _Notices();
+      // A note other than the one the release signed: the version alone.
+      final _Release swapped = _Release(
+        key: key,
+        note: contract.whatsNewJson(_version, <String, List<String>>{
+          'en': <String>['Something else.'],
+        }),
+        signedNote: contract.whatsNewJson(_version, _lines),
+      );
+      final _Notices swappedNotices = _Notices();
       final GithubUpdateService f = GithubUpdateService(
         installer: _Installer(),
-        fetchJson: (Uri uri) async => forged.json(),
-        fetchSums: forged.text,
+        fetchJson: (Uri uri) async => swapped.json(),
+        fetchSums: swapped.text,
         noticeStore: MemoryUpdateNoticeStore(),
-        notifications: forgedNotices,
+        notifications: swappedNotices,
         currentVersion: '1.11.0',
         releaseKeys: <String>[key.hybridId],
       );
@@ -360,9 +366,31 @@ void main() {
       expect(f.newer?.version, _version);
       expect(f.whatsNewLines, isEmpty);
       expect(
-        forgedNotices.shown.single.body,
+        swappedNotices.shown.single.body,
         'Wersja 1.12.0 — warto zaktualizować',
       );
+
+      // A release signed by a key this build does not trust: the banner
+      // names it, but it is not announced (nor kept, which would hold back
+      // the notice of every version up to it).
+      final LedgerKeyPair other = await LedgerKeyPair.generate();
+      final _Release forged = _Release(key: other);
+      final _Notices forgedNotices = _Notices();
+      final GithubUpdateService g = GithubUpdateService(
+        installer: _Installer(),
+        fetchJson: (Uri uri) async => forged.json(),
+        fetchSums: forged.text,
+        noticeStore: MemoryUpdateNoticeStore(),
+        notifications: forgedNotices,
+        currentVersion: '1.11.0',
+        releaseKeys: <String>[key.hybridId],
+      );
+      addTearDown(g.dispose);
+      await g.check();
+      expect(g.newer?.version, _version);
+      expect(g.showNewerBanner, isTrue);
+      expect(g.whatsNewLines, isEmpty);
+      expect(forgedNotices.shown, isEmpty);
     });
 
     test('by the Android background service, in the app\'s language; '

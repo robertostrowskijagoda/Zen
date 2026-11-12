@@ -411,6 +411,8 @@ void main() {
         notifications: notices,
         now: now,
         currentVersion: '1.11.0',
+        // The releases here are unsigned: no maintainer key pinned.
+        releaseKeys: const <String>[],
         // The hour these steps were written for; the default is below.
         checkEvery: const Duration(hours: 1),
       );
@@ -656,6 +658,8 @@ void main() {
         store: store,
         now: () => now,
         currentVersion: '1.11.0',
+        // The release here is unsigned: no maintainer key pinned.
+        releaseKeys: const <String>[],
         every: const Duration(hours: 2),
         firstAfter: const Duration(days: 1),
         fetchJson: (Uri uri) async {

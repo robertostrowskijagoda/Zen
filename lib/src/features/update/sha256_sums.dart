@@ -70,6 +70,12 @@ final Provider<Sha256SumsFetcher> sha256SumsFetcherProvider =
 /// The most a `SHA256SUMS` file may be (a few lines in reality).
 const int kMaxSha256SumsBytes = 64 * 1024;
 
+/// Whether [error] of [fetchSha256Sums] says the file is not there (GitHub
+/// answered 404): a release's file that was never uploaded, or a release
+/// that was deleted.
+bool isMissingGithubFile(Object error) =>
+    error is HttpException && error.message == 'HTTP ${HttpStatus.notFound}';
+
 /// Fetches [uri] over HTTPS from GitHub (it redirects to its file servers,
 /// which is followed, but to no other host), refusing anything larger than
 /// [kMaxSha256SumsBytes]. Throws on any error. Also fetches a release's
