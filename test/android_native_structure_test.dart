@@ -221,9 +221,14 @@ void main() {
     test('a suggestion carries no value, only the authentication, in an '
         'immutable intent the requesting app cannot change', () {
       final String service = _source('ZenAutofillService.kt');
-      expect(service, contains('setValue(passwordId, null)'));
-      expect(service, contains('setValue(it, null)'));
+      // The fields the entry will fill, each named without a value, on
+      // both ways of building a suggestion (Android 13+ and before).
+      expect(service, contains('ids.forEach { setField(it, null) }'));
+      expect(service, contains('ids.forEach { setValue(it, null) }'));
+      expect(RegExp(r'setField\(').allMatches(service), hasLength(1));
+      expect(RegExp(r'setValue\(').allMatches(service), hasLength(1));
       expect(service, isNot(contains('AutofillValue')));
+      expect(service, isNot(contains('Field.Builder')));
       expect(service, contains('setAuthentication(sender)'));
       expect(
         service,
