@@ -1959,6 +1959,18 @@ class _FriendCorner extends ConsumerWidget {
                         icon: const Icon(Icons.map_rounded),
                         onPressed: () => unawaited(openMap(d.lat!, d.lon!)),
                       ),
+                    // Once the deadline has passed the watcher may end it
+                    // by hand: a date nobody confirms would wait days.
+                    if (d.remindedAt != null)
+                      IconButton(
+                        key: Key('dating-safe-end-${d.id}'),
+                        tooltip: t('Zakończ'),
+                        color: cardTone,
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => unawaited(
+                          _endWatching(context, dating, d.id, name(d.friend)),
+                        ),
+                      ),
                   ],
                 ),
               );
@@ -2036,6 +2048,40 @@ Future<void> _askLocation(
       ),
     ),
   );
+}
+
+Future<void> _endWatching(
+  BuildContext context,
+  DatingService dating,
+  String id,
+  String name,
+) async {
+  final bool? ok = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: Text(t('Zakończyć czuwanie?')),
+      content: Text(
+        t(
+          'Zrób to, gdy wiesz już, że {name} jest bezpieczny(-a). Ostatnie '
+          'położenie zniknie z tego telefonu.',
+          {'name': name},
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(t('Anuluj')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(t('Zakończ')),
+        ),
+      ],
+    ),
+  );
+  if (ok == true) {
+    await dating.endWatching(id);
+  }
 }
 
 String _clock(int millis) {

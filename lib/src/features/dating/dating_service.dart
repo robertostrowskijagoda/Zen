@@ -98,6 +98,18 @@ const Duration kDatingProfileLife = Duration(days: 16);
 /// Routes and seen lanterns are kept this long.
 const Duration kDatingRouteLife = Duration(days: 30);
 
+/// "Idę na randkę": the watcher counts the deadline on its own clock from
+/// the time left that the dater's phone sent, so clocks set apart do not
+/// ring early. A word that waited in a mailbox would push that deadline
+/// back by the wait; it is never later than the dater's own deadline plus
+/// this much, which also is how far apart the two clocks may be before the
+/// watcher's alarm comes early.
+const Duration kDatingSafeClockMargin = Duration(minutes: 30);
+
+/// The longest time left a watcher takes from a dater's word (the screen
+/// offers 12 hours, and each "+1 h" adds one).
+const Duration kDatingSafeLongest = Duration(days: 2);
+
 /// Reports of a minor that switch a dating profile off on a phone which never
 /// reported it itself: from this many of the person's own friends (different
 /// accounts, each by the one dating key their phone told this one). A dating
@@ -656,13 +668,18 @@ final class DatingService extends ChangeNotifier {
         ..sort((OpinionAsk a, OpinionAsk b) => b.at.compareTo(a.at));
 
   /// Dates I watch for friends, and my own.
-  List<SafeDate> get safeDates =>
-      _safe.values.where((SafeDate s) => !s.isOver).toList()
-        ..sort((SafeDate a, SafeDate b) => a.until.compareTo(b.until));
+  List<SafeDate> get safeDates {
+    final int t = _now();
+    return _safe.values
+        .where((SafeDate s) => !s.isOver && !s.isStale(t))
+        .toList()
+      ..sort((SafeDate a, SafeDate b) => a.until.compareTo(b.until));
+  }
 
   SafeDate? get mySafeDate {
+    final int t = _now();
     for (final SafeDate s in _safe.values) {
-      if (s.mine && !s.isOver) {
+      if (s.mine && !s.isOver && !s.isStale(t)) {
         return s;
       }
     }
@@ -999,7 +1016,8 @@ final class DatingService extends ChangeNotifier {
           !_matches.containsKey(k),
     );
     _safe.removeWhere(
-      (String _, SafeDate s) => s.isOver && t - s.okAt! > 2 * 24 * 3600 * 1000,
+      (String _, SafeDate s) =>
+          (s.isOver && t - s.okAt! > 2 * 24 * 3600 * 1000) || s.isStale(t),
     );
     _lanterns.removeWhere((String id, _OwnLantern _) => !_own.containsKey(id));
     _answers.removeWhere(
@@ -2203,10 +2221,13 @@ final class DatingService extends ChangeNotifier {
     return d;
   }
 
+  // `until` is on this phone's clock; `left` lets the watcher count the
+  // deadline on its own ([_onSafe]). A 1.16.5 watcher reads only `until`.
   Future<void> _sendSafe(SafeDate d) => _send(d.friend, <String, dynamic>{
     'type': DatingTypes.safe,
     'id': d.id,
     'until': d.until,
+    'left': d.until - _now(),
     'note': d.note,
     if (d.lat != null) 'lat': d.lat,
     if (d.lon != null) 'lon': d.lon,
@@ -2327,6 +2348,26 @@ final class DatingService extends ChangeNotifier {
     await _sendSafe(d);
   }
 
+  /// "Zakończ" on a watched date, once its deadline has passed: the
+  /// watcher knows the person is safe (or the phone is gone and someone
+  /// else looks for them). The last place goes from this phone at once;
+  /// later words about the same date are ignored. Before the deadline the
+  /// person relies on the watcher and has not been told, so it is refused.
+  Future<bool> endWatching(String id) async {
+    final SafeDate? d = _safe[id];
+    final int t = _now();
+    if (d == null || d.mine || d.isOver || t < d.until) {
+      return false;
+    }
+    d
+      ..okAt = t
+      ..lat = null
+      ..lon = null
+      ..locatedAt = null;
+    await _save();
+    return true;
+  }
+
   /// "Wszystko OK".
   Future<void> safeOk() async {
     final SafeDate? d = mySafeDate;
@@ -2390,8 +2431,11 @@ final class DatingService extends ChangeNotifier {
     final int now = _now();
     final List<SafeDate> remind = <SafeDate>[];
     final List<SafeDate> alarm = <SafeDate>[];
+    // A date nobody confirmed goes, with its last place, days after its
+    // alarm ([SafeDate.isStale]).
+    final bool stale = _safe.values.any((SafeDate d) => d.isStale(now));
     for (final SafeDate d in _safe.values) {
-      if (d.isOver || now < d.until) {
+      if (d.isOver || now < d.until || d.isStale(now)) {
         continue;
       }
       if (d.remindedAt == null) {
@@ -2407,6 +2451,9 @@ final class DatingService extends ChangeNotifier {
       }
     }
     if (remind.isEmpty && alarm.isEmpty) {
+      if (stale) {
+        await _save();
+      }
       return;
     }
     // Written down first, so the other side (app or background service)
@@ -3777,6 +3824,27 @@ final class DatingService extends ChangeNotifier {
     );
   }
 
+  /// A watched date's deadline on this phone's clock, from the dater's
+  /// [until] (on the dater's clock) and the time [left] the dater's phone
+  /// counted when it sent the word. Counted from the arrival, the two
+  /// clocks need not agree; a word that waited in a mailbox would count
+  /// from too late, so the deadline is never later than [until] plus
+  /// [kDatingSafeClockMargin]. A word without [left] (a 1.16.5 phone)
+  /// keeps its own clock's [until], as before.
+  int _watchedDeadline(int until, Object? left) {
+    final int arrived = _now();
+    final int longest = kDatingSafeLongest.inMilliseconds;
+    final int latest = arrived + longest;
+    if (left is! int) {
+      return min(until, latest);
+    }
+    final int counted = arrived + left.clamp(-longest, longest);
+    return min(
+      counted,
+      min(until + kDatingSafeClockMargin.inMilliseconds, latest),
+    );
+  }
+
   Future<void> _onSafe(String from, Map<String, dynamic> p) async {
     final Object? id = p['id'];
     final Object? until = p['until'];
@@ -3786,26 +3854,40 @@ final class DatingService extends ChangeNotifier {
     final Object? lat = p['lat'];
     final Object? lon = p['lon'];
     final SafeDate? had = _safe[id];
-    if (had != null && (had.mine || had.friend != from)) {
+    // A date that is over (confirmed, or ended here by hand) takes no new
+    // place.
+    if (had != null && (had.mine || had.friend != from || had.isOver)) {
       return;
     }
     final Object? note = p['note'];
+    final int deadline = _watchedDeadline(until, p['left']);
     final SafeDate d =
         had ??
         SafeDate(
           id: id,
           friend: from,
-          until: until,
+          until: deadline,
+          sentUntil: until,
           mine: false,
           note: note is String
               ? (note.length > 200 ? note.substring(0, 200) : note)
               : '',
         );
-    if (had != null && until > had.until) {
+    if (had == null && d.isStale(_now())) {
+      return;
+    }
+    final int known = had?.sentUntil ?? had?.until ?? until;
+    if (had != null && until > known) {
+      // An extension.
       d
-        ..until = until
+        ..until = deadline
+        ..sentUntil = until
         ..remindedAt = null
         ..alarmedAt = null;
+    } else if (had != null && until == known && deadline < d.until) {
+      // The same deadline again, in a word that came quicker than the one
+      // before: it tells this phone's deadline more exactly.
+      d.until = deadline;
     }
     if (lat is num && lon is num) {
       d

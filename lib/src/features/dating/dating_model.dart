@@ -1199,6 +1199,7 @@ final class SafeDate {
     this.autoShare = false,
     this.askedAt,
     this.requestedAt,
+    this.sentUntil,
   });
 
   final String id;
@@ -1206,8 +1207,16 @@ final class SafeDate {
   /// The watching friend (when [mine]) or the one on a date.
   final String friend;
 
-  /// "Daj znać do": after it a reminder, 15 minutes later an alarm.
+  /// "Daj znać do": after it a reminder, 15 minutes later an alarm. Always
+  /// a time on this phone's own clock: a watched date's deadline is counted
+  /// here from what the dater's phone said was left, so the two clocks
+  /// need not agree.
   int until;
+
+  /// Watched date: the deadline as the dater's phone wrote it, on its own
+  /// clock. Only compared with later words from the same phone, to tell an
+  /// extension from a repeat.
+  int? sentUntil;
   final bool mine;
   final String note;
   double? lat;
@@ -1240,7 +1249,15 @@ final class SafeDate {
 
   bool get isOver => okAt != null;
 
+  /// A date nobody confirmed is dropped, with its last place, this long
+  /// after the alarm: time enough to look for the person, no longer.
+  bool isStale(int now) =>
+      !isOver && now - until > grace.inMilliseconds + kept.inMilliseconds;
+
   static const Duration grace = Duration(minutes: 15);
+
+  /// How long an unconfirmed date stays after its alarm ([isStale]).
+  static const Duration kept = Duration(days: 7);
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
@@ -1257,6 +1274,7 @@ final class SafeDate {
     if (autoShare) 'as': true,
     if (askedAt != null) 'ask': askedAt,
     if (requestedAt != null) 'req': requestedAt,
+    if (sentUntil != null) 'su': sentUntil,
   };
 
   static SafeDate? fromJson(Object? json) {
@@ -1283,6 +1301,7 @@ final class SafeDate {
       autoShare: json['as'] == true,
       askedAt: i(json['ask']),
       requestedAt: i(json['req']),
+      sentUntil: i(json['su']),
     );
   }
 }
