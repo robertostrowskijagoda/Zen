@@ -7,9 +7,11 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_link.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/account/presentation/account_replace_dialog.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -17,6 +19,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_takeover.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_link_router.dart';
@@ -975,8 +978,17 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
       return;
     }
     final LedgerKeyPair key = await LedgerKeyPair.fromSeed(got.seed);
+    if (!mounted) {
+      return;
+    }
     if (key.id != got.account) {
       setState(() => _message = t('Otrzymany klucz nie pasuje do konta.'));
+      return;
+    }
+    // Never in place of an account that holds something (the same rule as
+    // a copy, a backup and a key): the person chooses what to do.
+    if (!await mayTakeAccountHere(context, ref, incoming: got.account) ||
+        !mounted) {
       return;
     }
     await node.rememberDeviceAddresses(got.siblings);
@@ -988,6 +1000,7 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
       deviceName: thisDeviceName,
       wrapped: got.wrapped,
     );
+    await takeCarriedPasswords(() => ref.read(passwordVaultServiceProvider));
     await _receiver.confirm(got);
     setState(() {
       _done = true;
@@ -1031,9 +1044,9 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
               icon: Icons.warning_amber_rounded,
               tone: zen.warning,
               text: t(
-                'Uwaga: jeśli to urządzenie miało już swoje konto, przejdzie na '
-                'konto z drugiego urządzenia, a dotychczasowe przestanie być '
-                'używane.',
+                'Jeśli na tym urządzeniu jest już konto z danymi, Zen go nie '
+                'zastąpi: zapyta, czy dodać to konto obok, czy najpierw '
+                'usunąć tamto.',
               ),
             ),
             const SizedBox(height: 12),

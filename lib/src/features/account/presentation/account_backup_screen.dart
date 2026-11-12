@@ -12,8 +12,10 @@ import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_archive_collect.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
 import 'package:zen/src/features/account/account_backup_places.dart';
+import 'package:zen/src/features/account/account_holdings.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/presentation/account_copy_common.dart';
+import 'package:zen/src/features/account/presentation/account_replace_dialog.dart';
 import 'package:zen/src/features/account/presentation/account_restore_info.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -674,6 +676,29 @@ class _AccountBackupRestoreScreenState
         return;
       }
       if (result.outcome == AccountImportOutcome.cancelled) {
+        return;
+      }
+      final String? other = result.account;
+      final Future<AccountHoldings> Function()? holdings = ref.read(
+        accountHoldingsProvider,
+      );
+      if (result.outcome == AccountImportOutcome.otherAccount &&
+          other != null &&
+          holdings != null) {
+        // Another account's copy on a device whose account holds
+        // something: never taken in its place; the person chooses.
+        final AccountHoldings here = await holdings();
+        if (!mounted) {
+          return;
+        }
+        setState(() => _message = refused);
+        await offerAccountReplace(
+          context,
+          ref,
+          here: here,
+          incoming: other,
+          incomingName: result.name ?? '',
+        );
         return;
       }
       setState(() {
