@@ -2818,12 +2818,13 @@ final class LedgerNode {
     return result;
   }
 
-  /// Saves [snapshot] (friends and groups) sealed for this account's own
-  /// devices, unless it equals the newest one; then starts this device's
+  /// Saves [whole] (friends and groups) sealed for this account's own
+  /// devices, made to fit ([fitContacts]), unless it equals the newest one;
+  /// then starts this device's
   /// private log over when it holds too much that no longer counts
   /// ([kPrivateLogSlackBytes]). Returns whether anything was written. A
   /// failure is logged and reported ([ContactsBackupNotice]).
-  Future<bool> publishContacts(Map<String, dynamic> snapshot) async {
+  Future<bool> publishContacts(Map<String, dynamic> whole) async {
     await start();
     final Uint8List? key = identity.selfKey;
     if (key == null || _suspended) {
@@ -2831,6 +2832,12 @@ final class LedgerNode {
     }
     return _privateWrite(() async {
       try {
+        // One friend or group too big for a part is trimmed (or left out),
+        // never the reason the whole backup is not saved.
+        final ({Map<String, dynamic> snapshot, int trimmed}) fit = fitContacts(
+          whole,
+        );
+        final Map<String, dynamic> snapshot = fit.snapshot;
         final Map<String, dynamic>? latest = latestContacts();
         final bool same =
             latest != null && jsonEncode(latest) == jsonEncode(snapshot);
@@ -2841,7 +2848,7 @@ final class LedgerNode {
         if (over) {
           await _startPrivateOver(snapshot, key);
         }
-        ContactsBackupNotice.instance.saved();
+        ContactsBackupNotice.instance.savedTrimmed(fit.trimmed);
         return !same || over;
       } on Object catch (error) {
         ContactsBackupNotice.instance.fail(

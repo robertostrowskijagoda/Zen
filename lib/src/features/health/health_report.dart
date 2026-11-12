@@ -67,6 +67,7 @@ class HealthInputs {
     this.storage,
     this.contactsBackupFailing = false,
     this.friendLogsFull = 0,
+    this.contactsBackupTrimmed = 0,
   });
 
   final HealthNetState net;
@@ -98,6 +99,10 @@ class HealthInputs {
   /// Friends whose posts or reactions this phone takes no more of: it keeps
   /// as much of each friend as its limits allow (`LedgerRoomNotice`).
   final int friendLogsFull;
+
+  /// Friends or groups saved without some of what they hold, or left out,
+  /// to fit the newest backup (`ContactsBackupNotice.trimmed`).
+  final int contactsBackupTrimmed;
 }
 
 @immutable
@@ -146,7 +151,10 @@ HealthReport buildHealthReport(HealthInputs i) {
     if (i.isAndroid) _battery(i),
     _clock(i),
     _storage(i),
-    if (i.contactsBackupFailing) _contactsBackup(),
+    if (i.contactsBackupFailing)
+      _contactsBackup()
+    else if (i.contactsBackupTrimmed > 0)
+      _contactsBackupTrimmed(i.contactsBackupTrimmed),
     if (i.friendLogsFull > 0) _friendLogsFull(i.friendLogsFull),
   ]);
 }
@@ -453,6 +461,27 @@ HealthItem _friendLogsFull(int friends) => HealthItem(
         'Wpisy {n} znajomych zajęły całe miejsce, jakie telefon na nie '
         'daje: ich nowe posty i reakcje tu nie docierają. To, co już jest, '
         'zostaje. Zwykle pomaga, gdy te osoby zaktualizują Zen.',
+  ),
+);
+
+HealthItem _contactsBackupTrimmed(int n) => HealthItem(
+  id: 'contacts',
+  level: HealthLevel.warn,
+  title: t('Kopia listy znajomych'),
+  detail: tn(
+    n,
+    one:
+        'Kopia listy znajomych i grup u znajomych jest zapisana, ale {n} '
+        'pozycja była za duża: zapisano ją bez nazw członków, opisu albo '
+        'listy osób, które odeszły (lub pominięto).',
+    few:
+        'Kopia listy znajomych i grup u znajomych jest zapisana, ale {n} '
+        'pozycje były za duże: zapisano je bez nazw członków, opisu albo '
+        'listy osób, które odeszły (lub pominięto).',
+    many:
+        'Kopia listy znajomych i grup u znajomych jest zapisana, ale {n} '
+        'pozycji było za dużych: zapisano je bez nazw członków, opisu albo '
+        'listy osób, które odeszły (lub pominięto).',
   ),
 );
 

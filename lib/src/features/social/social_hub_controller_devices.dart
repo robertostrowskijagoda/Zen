@@ -666,7 +666,12 @@ Map<String, dynamic> contactsBackupOf(SocialHubState state) =>
                     'by': g.createdById,
                     'at': g.createdAtMillis,
                     'm': g.memberAddresses,
-                    if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
+                    // The names of the members only (everyone who ever
+                    // wrote there is not), within half an item's room.
+                    if (contactsMemberNames(g.memberNames, g.memberAddresses)
+                        case final Map<String, String> names
+                        when names.isNotEmpty)
+                      'mn': names,
                   },
                   kGroupLeftKey,
                   g.departedAt,

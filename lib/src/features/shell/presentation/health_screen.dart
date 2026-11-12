@@ -130,6 +130,7 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
         storage: _storage,
         contactsBackupFailing: ContactsBackupNotice.instance.failing,
         friendLogsFull: LedgerRoomNotice.instance.full,
+        contactsBackupTrimmed: ContactsBackupNotice.instance.trimmed,
       ),
     );
   }
