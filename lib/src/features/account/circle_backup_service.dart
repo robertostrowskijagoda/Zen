@@ -99,7 +99,13 @@ final class CircleBackupStatus {
     this.includeChats = true,
     this.droppedMessages = 0,
     this.candidates = -1,
+    this.blocked = 0,
   });
+
+  /// How many holders have refused every new copy as older than the one
+  /// they keep for more than [CircleBackupService.blockedAfter]: a copy
+  /// dated ahead (a device whose clock ran ahead) stands in the way there.
+  final int blocked;
 
   /// How many people the copy is offered to now (the circle and the chosen
   /// friends); 0: nobody can keep it (no friend yet); -1: not looked yet.
@@ -125,6 +131,7 @@ final class CircleBackupStatus {
     bool? includeChats,
     int? droppedMessages,
     int? candidates,
+    int? blocked,
   }) => CircleBackupStatus(
     lastAt: lastAt ?? this.lastAt,
     bytes: bytes ?? this.bytes,
@@ -132,6 +139,7 @@ final class CircleBackupStatus {
     includeChats: includeChats ?? this.includeChats,
     droppedMessages: droppedMessages ?? this.droppedMessages,
     candidates: candidates ?? this.candidates,
+    blocked: blocked ?? this.blocked,
   );
 }
 
@@ -142,15 +150,24 @@ enum CircleBackupRestorePhase {
   downloading,
   applying,
   done,
+
+  /// Nothing found within [CircleBackupService.restoreWindow]: still
+  /// looked for, once in [CircleBackupService.lateAskInterval].
   failed,
 
-  /// The copy found was made by a newer Zen: update the app and try again.
+  /// The newest copy found was made by a newer Zen: update the app; it is
+  /// still looked for (and taken after the update).
   newer,
 }
 
 @immutable
 final class CircleBackupRestore {
-  const CircleBackupRestore(this.phase, {this.done = 0, this.total = 0});
+  const CircleBackupRestore(
+    this.phase, {
+    this.done = 0,
+    this.total = 0,
+    this.freshCopy = false,
+  });
 
   static const CircleBackupRestore idle = CircleBackupRestore(
     CircleBackupRestorePhase.idle,
@@ -159,6 +176,10 @@ final class CircleBackupRestore {
   final CircleBackupRestorePhase phase;
   final int done;
   final int total;
+
+  /// The person said this device may make its own copy while the old one
+  /// is still looked for ([CircleBackupService.allowFreshCopy]).
+  final bool freshCopy;
 }
 
 /// Makes this account's copy with friends, keeps the copies of others,
@@ -209,6 +230,8 @@ final class CircleBackupService {
          disk: disk,
          isInCircle: isInCircle,
          isFriend: isFriend,
+         isRevoked: isRevoked,
+         clock: clock,
        );
 
   static Iterable<String> _none() => const <String>[];
@@ -260,8 +283,16 @@ final class CircleBackupService {
   static const String _statusKey = 'circle-backup/status';
   static const String _restoreKey = 'circle-backup/restore';
 
-  /// How long after a recovery the copy is looked for.
+  /// How long after a recovery the copy is looked for at every tick; after
+  /// that once in [lateAskInterval], until it comes. Nothing ends the
+  /// search but the copy taken back: a device that gave up would make its
+  /// own nearly empty copy, and the friends keep only the newest.
   static const Duration restoreWindow = Duration(days: 30);
+  static const Duration lateAskInterval = Duration(days: 1);
+
+  /// How long a holder may refuse every new copy as older than its own
+  /// before the person is told ([CircleBackupStatus.blocked]).
+  static const Duration blockedAfter = Duration(days: 3);
 
   StreamSubscription<SignalTransportFrame>? _frames;
   Timer? _timer;
@@ -279,8 +310,20 @@ final class CircleBackupService {
   /// Friend address → until when it is passed over (it refused).
   final Map<String, int> _refused = <String, int>{};
 
+  /// Holder address → since when it refuses this account's copies as older
+  /// than its own (cleared by its next confirmation).
+  final Map<String, int> _staleSince = <String, int>{};
+
   // After a recovery.
   int? _restoreSince;
+
+  /// The person allowed this device's own copy while the old one is still
+  /// looked for ([allowFreshCopy]).
+  bool _freshAllowed = false;
+
+  /// The newest copy seen that this build cannot open (made by a newer
+  /// Zen): nothing older is taken instead while it is there.
+  int _newerAt = 0;
   final Set<String> _restoreHelpers = <String>{};
   CircleBackupManifest? _target;
   String? _targetFrom;
@@ -376,13 +419,55 @@ final class CircleBackupService {
   /// Whether this device is still looking for its copy after a recovery.
   bool get restoring => _restoreSince != null;
 
+  /// Whether the person allowed this device's own copy while the old one
+  /// is still looked for.
+  bool get freshCopyAllowed => _freshAllowed;
+
+  /// The person's word, while the copy is still looked for after a
+  /// recovery: this device makes its own copy now, and the friends' copy
+  /// is replaced by it (each keeps the whole one before it for
+  /// [kCircleBackupPreviousKept] when the new one is much smaller). The old
+  /// copy is still looked for, its own copies passed over, and taken in
+  /// when it comes.
+  Future<void> allowFreshCopy() async {
+    final int? since = _restoreSince;
+    if (since == null || _freshAllowed) {
+      return;
+    }
+    _freshAllowed = true;
+    await _saveRestore();
+    final CircleBackupRestore r = restore.value;
+    restore.value = CircleBackupRestore(
+      r.phase,
+      done: r.done,
+      total: r.total,
+      freshCopy: true,
+    );
+    _enqueue(() => refresh(force: true));
+  }
+
+  Future<void> _saveRestore() => disk.write(
+    _restoreKey,
+    Uint8List.fromList(
+      utf8.encode(
+        jsonEncode(<String, dynamic>{
+          'since': _restoreSince,
+          'helpers': _restoreHelpers.toList(),
+          if (_freshAllowed) 'fresh': true,
+        }),
+      ),
+    ),
+  );
+
   /// The periodic work: the kept copies of those who left, the restore
   /// after a recovery, this account's own copy.
   Future<void> tick() async {
     await holder.prune();
     if (restoring) {
       await _askForCopy();
-      return;
+      if (!_freshAllowed) {
+        return;
+      }
     }
     await refresh();
   }
@@ -413,9 +498,16 @@ final class CircleBackupService {
     if (status.value.candidates != circle.length) {
       status.value = status.value.copyWith(candidates: circle.length);
     }
-    if (id == null || circle.isEmpty || restoring) {
-      // While the copy is looked for after a recovery, none is made: an
-      // emptier one would replace the friends' whole copy.
+    final int staleBefore = _staleSince.length;
+    _staleSince.removeWhere((String h, int _) => !circle.contains(h));
+    if (_staleSince.length != staleBefore ||
+        status.value.blocked != _blockedNow()) {
+      await _updateBlocked();
+    }
+    if (id == null || circle.isEmpty || (restoring && !_freshAllowed)) {
+      // While the copy is looked for after a recovery, none is made unless
+      // the person said so: an emptier one would replace the friends'
+      // whole copy.
       return;
     }
     final int now = _clock();
@@ -534,6 +626,8 @@ final class CircleBackupService {
         'type': CircleBackupMessages.no,
         'a': m.account,
         'why': result.name,
+        if (result == CircleBackupOfferResult.stale)
+          'at': ?holder.manifestOf(m.account)?.createdAt,
       });
       return;
     }
@@ -575,16 +669,21 @@ final class CircleBackupService {
   /// signed by a device the account certified, and fresh.
   Future<void> _onFetch(String from, Map<String, dynamic> p) async {
     final String? account = await _checkRequest(p['r']);
-    final CircleBackupManifest? m = account == null
-        ? null
-        : holder.manifestOf(account);
-    if (m == null) {
+    if (account == null) {
       return;
     }
-    await _send(from, <String, dynamic>{
-      'type': CircleBackupMessages.manifest,
-      'm': m.json,
-    });
+    // The kept copy, then the one kept before it (a much bigger one that a
+    // new phone's own copy replaced): a build before 1.17.0 takes only the
+    // newest of what one holder sends.
+    for (final CircleBackupManifest m in <CircleBackupManifest>[
+      ?holder.manifestOf(account),
+      ?holder.previousOf(account),
+    ]) {
+      await _send(from, <String, dynamic>{
+        'type': CircleBackupMessages.manifest,
+        'm': m.json,
+      });
+    }
   }
 
   Future<void> _onGet(String from, Map<String, dynamic> p) async {
@@ -642,17 +741,38 @@ final class CircleBackupService {
   /// copies, no room there, or not a friend there. Passed over for
   /// [refusedRest] (not a helper of the circle: its refusal is only
   /// logged); the next friend is offered the copy at once.
+  ///
+  /// A copy refused as older than the holder's own is not passed over (a
+  /// newer one from another device of the account is kept there), but a
+  /// holder that keeps refusing for [blockedAfter] is counted in
+  /// [CircleBackupStatus.blocked]: a copy dated ahead is in the way there.
   Future<void> _onNo(String from, Map<String, dynamic> p) async {
     final Object? why = p['why'];
     logZenWarning('Circle backup refused: $why');
     final CircleBackupBuild? build = _build;
+    if (build == null || p['a'] != build.manifest.account) {
+      return;
+    }
+    if (why == CircleBackupOfferResult.stale.name) {
+      final Object? at = p['at'];
+      final int now = _clock();
+      // The holder's copy is dated ahead of this clock: it is in the way
+      // at once, not only after a while.
+      final bool ahead =
+          at is int && at > now + kCircleBackupClockSlack.inMilliseconds;
+      final int since = _staleSince[from] ?? now;
+      _staleSince[from] = ahead && since > now - blockedAfter.inMilliseconds
+          ? now - blockedAfter.inMilliseconds
+          : since;
+      if (status.value.blocked != _blockedNow() || since == now) {
+        await _updateBlocked();
+      }
+      return;
+    }
     final bool helper = holders()
         .map(PeerShareCodec.normalizeAddress)
         .contains(from);
-    if (helper ||
-        build == null ||
-        p['a'] != build.manifest.account ||
-        why == CircleBackupOfferResult.stale.name) {
+    if (helper) {
       return;
     }
     _refused[from] = _clock() + refusedRest.inMilliseconds;
@@ -703,11 +823,26 @@ final class CircleBackupService {
       return;
     }
     _confirmed[from] = at as int;
+    _staleSince.remove(from);
     status.value = status.value.copyWith(
       lastAt: at,
       bytes: build.manifest.totalBytes,
       holders: _confirmed.values.where((int x) => x == at).length,
+      blocked: _blockedNow(),
     );
+    await _saveStatus();
+  }
+
+  /// Holders that have refused every copy as older for [blockedAfter].
+  int _blockedNow() {
+    final int now = _clock();
+    return _staleSince.values
+        .where((int since) => now - since >= blockedAfter.inMilliseconds)
+        .length;
+  }
+
+  Future<void> _updateBlocked() async {
+    status.value = status.value.copyWith(blocked: _blockedNow());
     await _saveStatus();
   }
 
@@ -720,10 +855,6 @@ final class CircleBackupService {
       return;
     }
     final int now = _clock();
-    if (now - since > restoreWindow.inMilliseconds) {
-      await _endRestore(CircleBackupRestorePhase.failed);
-      return;
-    }
     final CircleBackupManifest? target = _target;
     final String? from = _targetFrom;
     if (target != null && from != null) {
@@ -756,10 +887,18 @@ final class CircleBackupService {
         return;
       }
     }
-    if (restore.value.phase == CircleBackupRestorePhase.idle) {
-      restore.value = const CircleBackupRestore(
-        CircleBackupRestorePhase.searching,
-      );
+    if (now - since > restoreWindow.inMilliseconds) {
+      // Not found in the window (the friends who keep it may be away for
+      // long): said so, and still asked for, less often. Never given up.
+      if (restore.value.phase != CircleBackupRestorePhase.newer &&
+          restore.value.phase != CircleBackupRestorePhase.failed) {
+        _setPhase(CircleBackupRestorePhase.failed);
+      }
+      if (now - _askedAt < lateAskInterval.inMilliseconds) {
+        return;
+      }
+    } else if (restore.value.phase == CircleBackupRestorePhase.idle) {
+      _setPhase(CircleBackupRestorePhase.searching);
     }
     _askedAt = now;
     final Map<String, dynamic> request = await _request(id);
@@ -802,13 +941,24 @@ final class CircleBackupService {
     final DeviceCertificate? signer = DeviceCertificate.fromJson(
       m.json['cert'],
     );
-    if (signer == null || isRevoked(signer.account, signer.device)) {
+    if (signer == null ||
+        isRevoked(signer.account, signer.device) ||
+        signer.device == id.certificate.device) {
+      // This device's own copy (made after the person allowed it) holds
+      // nothing of what is looked for.
       return;
     }
     if (m.version > kCircleBackupVersion) {
       // Made by a newer Zen: this build cannot open it. Said so, instead
-      // of a download that ends in "damaged".
-      await _endRestore(CircleBackupRestorePhase.newer);
+      // of a download that ends in "damaged"; still looked for, so the
+      // update takes it, and nothing older is taken meanwhile.
+      if (m.createdAt > _newerAt) {
+        _newerAt = m.createdAt;
+      }
+      final CircleBackupManifest? had = _target;
+      if (had == null || had.createdAt < m.createdAt) {
+        _setPhase(CircleBackupRestorePhase.newer);
+      }
       return;
     }
     _offered[from] = m;
@@ -829,12 +979,25 @@ final class CircleBackupService {
     _targetFrom = from;
     _lastPartAt = _clock();
     _got.removeWhere((String k, Uint8List _) => !m.chunks.containsKey(k));
-    restore.value = CircleBackupRestore(
+    _setPhase(
       CircleBackupRestorePhase.downloading,
       done: _got.length,
       total: m.chunks.length,
     );
     await _requestChunks(from, m);
+  }
+
+  void _setPhase(
+    CircleBackupRestorePhase phase, {
+    int done = 0,
+    int total = 0,
+  }) {
+    restore.value = CircleBackupRestore(
+      phase,
+      done: done,
+      total: total,
+      freshCopy: _freshAllowed,
+    );
   }
 
   /// The gathering is over: a copy that came whole meanwhile is taken.
@@ -909,7 +1072,7 @@ final class CircleBackupService {
     }
     _got[chunkId] = bytes;
     _lastPartAt = _clock();
-    restore.value = CircleBackupRestore(
+    _setPhase(
       CircleBackupRestorePhase.downloading,
       done: _got.length,
       total: m.chunks.length,
@@ -931,6 +1094,12 @@ final class CircleBackupService {
       // when they all did or the gathering is over ([_afterGather]).
       return;
     }
+    if (_newerAt > m.createdAt) {
+      // A newer copy is there that only an update opens: this older one
+      // would end the search without it.
+      _setPhase(CircleBackupRestorePhase.newer);
+      return;
+    }
     final CircleBackupOpened opened = await openCircleBackup(
       manifest: m,
       chunks: _got,
@@ -949,21 +1118,18 @@ final class CircleBackupService {
       _pickNewest();
       return;
     }
-    restore.value = const CircleBackupRestore(
-      CircleBackupRestorePhase.applying,
-    );
+    _setPhase(CircleBackupRestorePhase.applying);
     await data.restore(content, (int done, int total) {
-      restore.value = CircleBackupRestore(
-        CircleBackupRestorePhase.applying,
-        done: done,
-        total: total,
-      );
+      _setPhase(CircleBackupRestorePhase.applying, done: done, total: total);
     });
     await _endRestore(CircleBackupRestorePhase.done);
   }
 
+  /// The copy was taken back: the search ends (the only way it ends).
   Future<void> _endRestore(CircleBackupRestorePhase phase) async {
     _restoreSince = null;
+    _freshAllowed = false;
+    _newerAt = 0;
     _restoreHelpers.clear();
     _target = null;
     _targetFrom = null;
@@ -1003,10 +1169,20 @@ final class CircleBackupService {
         includeChats: s['chats'] != false,
         droppedMessages: s['dropped'] is int ? s['dropped'] as int : 0,
       );
+      final Object? stale = s['stale'];
+      if (stale is Map) {
+        for (final MapEntry<Object?, Object?> e in stale.entries.take(64)) {
+          if (e.key is String && e.value is int) {
+            _staleSince[e.key! as String] = e.value! as int;
+          }
+        }
+      }
+      status.value = status.value.copyWith(blocked: _blockedNow());
     }
     final Object? r = await _read(_restoreKey);
     if (r is Map && r['since'] is int) {
       _restoreSince = r['since'] as int;
+      _freshAllowed = r['fresh'] == true;
       final Object? helpers = r['helpers'];
       if (helpers is List) {
         _restoreHelpers.addAll(helpers.whereType<String>().take(64));
@@ -1024,6 +1200,7 @@ final class CircleBackupService {
           'h': status.value.holders,
           'chats': status.value.includeChats,
           'dropped': status.value.droppedMessages,
+          if (_staleSince.isNotEmpty) 'stale': _staleSince,
         }),
       ),
     ),

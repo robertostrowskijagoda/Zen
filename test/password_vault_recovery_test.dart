@@ -894,7 +894,9 @@ void main() {
       circle: false,
     );
     await holder.stop();
-    bool revoked = true;
+    // The device asking for the copy is cut off (not the one that made it:
+    // a copy signed by a device cut off goes from the holder).
+    String? cutOff;
     final CircleBackupService cautious = CircleBackupService(
       transport: await _started('200::b'),
       disk: holder.disk,
@@ -903,12 +905,13 @@ void main() {
       holders: () => const <String>[],
       isInCircle: (_) => false,
       isFriend: (String a) => a == me.account,
-      isRevoked: (String account, String device) => revoked,
+      isRevoked: (String account, String device) => device == cutOff,
       restoreCandidates: () => const <String>[],
     );
-    await cautious.start();
     final MemoryLedgerDisk newDisk = MemoryLedgerDisk();
     final LedgerIdentity thief = await _byPaper(me, newDisk, friend: '200::b');
+    cutOff = thief.certificate.device;
+    await cautious.start();
     final _Linked tThief = _Linked('200::c');
     await tThief.start();
     final CircleBackupService fetching = CircleBackupService(
@@ -931,7 +934,7 @@ void main() {
       isEmpty,
     );
     // The same device, not cut off: it gets the copy.
-    revoked = false;
+    cutOff = null;
     await fetching.tick();
     await _settleCircle(<CircleBackupService>[fetching, cautious]);
     expect(fetching.restore.value.phase, CircleBackupRestorePhase.done);

@@ -120,15 +120,50 @@ class CircleBackupCard extends ConsumerWidget {
                   ),
                 ),
               ),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(
-                  key: const Key('circle-backup-now'),
-                  onPressed: () => unawaited(service.refresh(force: true)),
-                  icon: const Icon(Icons.sync_rounded),
-                  label: Text(t('Zrób kopię teraz')),
+              if (status.blocked > 0) ...<Widget>[
+                ZenInfo(
+                  key: const Key('circle-backup-blocked'),
+                  icon: Icons.schedule_rounded,
+                  tone: zen.warning,
+                  text: tn(
+                    status.blocked,
+                    one:
+                        '{n} osoba od kilku dni nie przyjmuje nowych kopii: '
+                        'ma kopię Twojego konta z późniejszą datą. Sprawdź '
+                        'datę i godzinę na swoich urządzeniach.',
+                    few:
+                        '{n} osoby od kilku dni nie przyjmują nowych kopii: '
+                        'mają kopię Twojego konta z późniejszą datą. Sprawdź '
+                        'datę i godzinę na swoich urządzeniach.',
+                    many:
+                        '{n} osób od kilku dni nie przyjmuje nowych kopii: '
+                        'mają kopię Twojego konta z późniejszą datą. Sprawdź '
+                        'datę i godzinę na swoich urządzeniach.',
+                  ),
                 ),
-              ),
+                const SizedBox(height: 8),
+              ],
+              if (!service.restoring || restore.freshCopy)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    key: const Key('circle-backup-now'),
+                    onPressed: () => unawaited(service.refresh(force: true)),
+                    icon: const Icon(Icons.sync_rounded),
+                    label: Text(t('Zrób kopię teraz')),
+                  ),
+                )
+              else
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    key: const Key('circle-backup-fresh'),
+                    onPressed: () =>
+                        unawaited(_confirmFreshCopy(context, service)),
+                    icon: const Icon(Icons.sync_problem_rounded),
+                    label: Text(t('Zrób nową kopię z tego urządzenia')),
+                  ),
+                ),
               if (restore.phase != CircleBackupRestorePhase.idle)
                 _RestoreProgress(restore: restore),
               ..._held(context, service),
@@ -137,6 +172,44 @@ class CircleBackupCard extends ConsumerWidget {
         );
       },
     );
+  }
+
+  /// While the old copy is still looked for after a recovery, this device
+  /// makes none of its own unless the person says so here, knowing that
+  /// it replaces the copy at the friends.
+  Future<void> _confirmFreshCopy(
+    BuildContext context,
+    CircleBackupService service,
+  ) async {
+    final bool? yes = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Zastąpić kopię u znajomych?')),
+        content: Text(
+          t(
+            'Zen wciąż szuka kopii z Twojego poprzedniego urządzenia. Nowa '
+            'kopia z tego telefonu zastąpi ją u znajomych, którzy ją mają: '
+            'hasła, notatki i rozmowy, których tu nie ma, przepadną, gdy '
+            'nikt nie odda starej kopii w ciągu 30 dni. Zen nadal będzie '
+            'jej szukać.',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('circle-backup-fresh-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Wiem, że stara kopia zostanie zastąpiona')),
+          ),
+        ],
+      ),
+    );
+    if (yes == true) {
+      await service.allowFreshCopy();
+    }
   }
 
   List<Widget> _held(BuildContext context, CircleBackupService service) {
@@ -195,9 +268,13 @@ class _RestoreProgress extends StatelessWidget {
         {'done': restore.done, 'total': restore.total},
       ),
       CircleBackupRestorePhase.done => t('Dane z kopii przywrócone.'),
-      CircleBackupRestorePhase.failed => t('Nie znaleziono kopii u znajomych.'),
+      CircleBackupRestorePhase.failed => t(
+        'Nie znaleziono jeszcze kopii u znajomych. Zen szuka dalej, raz '
+        'dziennie: osoby, które ją mają, mogą być długo poza siecią.',
+      ),
       CircleBackupRestorePhase.newer => t(
-        'Kopię zrobiła nowsza wersja Zen. Zaktualizuj aplikację.',
+        'Kopię zrobiła nowsza wersja Zen. Zaktualizuj aplikację: kopia '
+        'czeka u znajomych i wróci po aktualizacji.',
       ),
       CircleBackupRestorePhase.idle => '',
     };
