@@ -1597,7 +1597,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       }
       return;
     }
-    if (ownNew) {
+    // Not under a finger or a fling: the list would jump out from under it.
+    if (ownNew && !_scrollController.touched) {
       _scrollController.showLatest(reason: 'own-new');
     }
   }

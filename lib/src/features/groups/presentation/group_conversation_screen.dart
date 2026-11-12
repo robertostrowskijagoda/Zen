@@ -1344,10 +1344,13 @@ class _GroupConversationScreenState
                           // to the bottom.
                           final String newest = messages.last.id;
                           final int newestAt = messages.last.sentAtMillis;
+                          // Not under a finger or a fling: the list would
+                          // jump out from under it.
                           if (_newestShownId != null &&
                               newest != _newestShownId &&
                               newestAt > _newestShownAt &&
-                              messages.last.isOutgoing) {
+                              messages.last.isOutgoing &&
+                              !_scrollController.touched) {
                             _scrollController.showLatest(reason: 'own-new');
                           }
                           _newestShownId = newest;

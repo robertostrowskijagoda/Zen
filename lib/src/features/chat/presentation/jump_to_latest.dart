@@ -40,6 +40,10 @@ void _logChatMove(String reason, double distance) {
 /// reversed: in a list laid out from its oldest message, a message going in
 /// or out among the older ones (one that came late, one that expired) moves
 /// everything after it by a height the list does not know.
+///
+/// While a finger is on the list or a fling runs, only the finger moves it:
+/// the bubbles on screen are kept in place then also at the newest message
+/// (what comes in waits below, counted on the button), and nothing jumps.
 class ChatScrollController extends ScrollController {
   ChatScrollController({this.reversed = false});
 
@@ -49,6 +53,13 @@ class ChatScrollController extends ScrollController {
 
   /// The list is kept at its newest message.
   bool get followsLatest => _following;
+
+  /// A finger is on the list (holding or dragging it) or a fling still
+  /// moves it: nothing but that may move it now.
+  bool get touched => positions.any(
+    (ScrollPosition position) =>
+        position is _ChatScrollPosition && position._touched,
+  );
 
   /// Shows the newest message and stays with it: at once where the list
   /// is laid out, and again after the frame being built (which may add the
@@ -123,22 +134,34 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
 
   final ChatScrollController owner;
 
-  /// Away from the newest message: a bubble on screen and where it stood in
-  /// the list after the last frame. A message coming in below it (a
-  /// reversed list) or a bubble before it growing moves it; the list moves
-  /// with it, in the same frame, so what is read stays where it is.
-  RenderBox? _anchor;
-  double _anchorOffset = 0;
+  /// The bubbles on screen, nearest the list's leading edge first, and where
+  /// each stood in the list after the last frame. A message coming in below
+  /// them (a reversed list) or a bubble before them growing moves them; the
+  /// list moves with the first one still there, in the same frame, so what
+  /// is read stays where it is. All of them: the first may be the one that
+  /// goes (the typing line ending, a message deleted or expired), and a
+  /// large change (a long message, a picture measured) moves those nearest
+  /// the edge out of what the list keeps built before it is put right.
+  final List<_Anchor> _anchors = <_Anchor>[];
   bool _anchorPending = false;
 
+  /// The list moves by itself (an animation to a message) or by the user.
   bool get _userScrolling => activity?.isScrolling ?? false;
+
+  /// A finger holds or drags the list, or a fling it started still runs.
+  bool get _touched {
+    final ScrollActivity? current = activity;
+    return current is HoldScrollActivity ||
+        current is DragScrollActivity ||
+        current is BallisticScrollActivity;
+  }
 
   double _latest(double min, double max) => owner.reversed ? min : max;
 
-  /// Puts the list at [latest] while it follows the newest message and the
-  /// user is not scrolling it; `false` when the layout has to run again.
+  /// Puts the list at [latest] while it follows the newest message and
+  /// nothing else moves it; `false` when the layout has to run again.
   bool _keepLatest(double latest, {bool log = true}) {
-    if (!owner._following || _userScrolling) {
+    if (!owner._following || _userScrolling || _touched) {
       return true;
     }
     if (nearEqual(pixels, latest, Tolerance.defaultTolerance.distance)) {
@@ -151,36 +174,51 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
     return false;
   }
 
-  /// Moves the list by as much as [_anchor] moved in it; `false` when the
-  /// layout has to run again.
+  /// Moves the list by as much as the first of [_anchors] still in it moved;
+  /// `false` when the layout has to run again. Also while a finger is on
+  /// the list or a fling runs: the finger moves the list by how far it
+  /// went, not to a place, so what came in under it does not move what it
+  /// holds; a fling goes on from the place kept.
   bool _keepPlace() {
-    final RenderBox? anchor = _anchor;
-    if (anchor == null || owner._following || _userScrolling) {
+    if (_anchors.isEmpty || (owner._following && !_touched)) {
       return true;
     }
-    final Object? data = anchor.parentData;
-    final double? offset =
-        anchor.attached && data is SliverMultiBoxAdaptorParentData
-        ? data.layoutOffset
-        : null;
-    if (offset == null) {
-      _anchor = null;
+    double? moved;
+    for (final _Anchor anchor in _anchors) {
+      final double? offset = anchor.offsetNow;
+      if (offset != null) {
+        moved = offset - anchor.offset;
+        break;
+      }
+    }
+    if (moved == null) {
+      _anchors.clear();
       return true;
     }
-    final double moved = offset - _anchorOffset;
-    _anchorOffset = offset;
+    for (final _Anchor anchor in _anchors) {
+      anchor.offset = anchor.offsetNow ?? anchor.offset + moved;
+    }
     if (nearEqual(moved, 0, Tolerance.defaultTolerance.distance)) {
       return true;
     }
+    final double target = (pixels + moved)
+        .clamp(minScrollExtent, maxScrollExtent)
+        .toDouble();
+    if (nearEqual(target, pixels, Tolerance.defaultTolerance.distance)) {
+      return true;
+    }
     _logChatMove('keep-place', moved);
-    correctPixels(
-      (pixels + moved).clamp(minScrollExtent, maxScrollExtent).toDouble(),
-    );
+    // As a correction (not a jump): a running fling starts again from the
+    // place kept, with its speed, instead of going on from the old one.
+    super.correctBy(target - pixels);
+    // Held at the newest message, what came in waits below: the list no
+    // longer follows it unless it stays within the margin.
+    owner._moved(this);
     return false;
   }
 
-  /// After this frame: the bubble on screen nearest the list's leading
-  /// edge becomes [_anchor].
+  /// After this frame: the bubbles on screen nearest the list's leading
+  /// edge become [_anchors].
   void _scheduleAnchor() {
     if (_anchorPending) {
       return;
@@ -188,15 +226,12 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
     _anchorPending = true;
     SchedulerBinding.instance.addPostFrameCallback((_) {
       _anchorPending = false;
-      _pickAnchor();
+      _pickAnchors();
     });
   }
 
-  void _pickAnchor() {
-    _anchor = null;
-    if (owner._following) {
-      return;
-    }
+  void _pickAnchors() {
+    _anchors.clear();
     final RenderObject? root = context.notificationContext?.findRenderObject();
     final RenderSliverMultiBoxAdaptor? list = root == null
         ? null
@@ -207,7 +242,6 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
     final SliverConstraints constraints = list.constraints;
     final double start = constraints.scrollOffset;
     final double end = start + constraints.remainingPaintExtent;
-    double nearest = double.infinity;
     for (
       RenderBox? child = list.firstChild;
       child != null;
@@ -219,12 +253,16 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
         continue;
       }
       final bool onScreen = offset + child.size.height > start && offset < end;
-      if (onScreen && (offset - start).abs() < nearest) {
-        nearest = (offset - start).abs();
-        _anchor = child;
-        _anchorOffset = offset;
+      if (onScreen) {
+        _anchors.add(_Anchor(child, offset));
       }
     }
+    // A bubble cut by the edge comes last: it may itself change (a picture
+    // measured as it comes into view), and those after it would move.
+    double distance(_Anchor a) => a.offset >= start - 0.5
+        ? a.offset - start
+        : end - start + (start - a.offset);
+    _anchors.sort((_Anchor a, _Anchor b) => distance(a).compareTo(distance(b)));
   }
 
   /// The list of bubbles under [object]: the first one, the others are
@@ -261,7 +299,9 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
   void correctBy(double correction) {
     // The list moved its bubbles and the offset together (it measured some
     // it had only estimated): nothing the reader would see.
-    _anchorOffset += correction;
+    for (final _Anchor anchor in _anchors) {
+      anchor.offset += correction;
+    }
     super.correctBy(correction);
   }
 
@@ -270,7 +310,7 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
     ScrollMetrics oldPosition,
     ScrollMetrics newPosition,
   ) {
-    if (owner._following && !_userScrolling) {
+    if (owner._following && !_userScrolling && !_touched) {
       return _keepLatest(
         _latest(newPosition.minScrollExtent, newPosition.maxScrollExtent),
       );
@@ -282,6 +322,23 @@ class _ChatScrollPosition extends ScrollPositionWithSingleContext {
   void notifyListeners() {
     owner._moved(this);
     super.notifyListeners();
+  }
+}
+
+/// A bubble of the list and where it stood in it ([offset]).
+final class _Anchor {
+  _Anchor(this.box, this.offset);
+
+  final RenderBox box;
+  double offset;
+
+  /// Where it stands now; `null` once it is gone from the list or not laid
+  /// out where it is.
+  double? get offsetNow {
+    final Object? data = box.parentData;
+    return box.attached && data is SliverMultiBoxAdaptorParentData
+        ? data.layoutOffset
+        : null;
   }
 }
 
@@ -366,11 +423,15 @@ class _JumpToLatestState extends State<JumpToLatest> {
       widget.controller.addListener(_refresh);
     }
     final int added = widget.incomingCount - oldWidget.incomingCount;
+    final ScrollController controller = widget.controller;
+    // Under a finger the list keeps what it holds also at the newest
+    // message: what came in waits below and is counted.
     if (added > 0 &&
-        !JumpToLatest.isNearLatest(
-          widget.controller,
-          reversed: widget.reversed,
-        )) {
+        ((controller is ChatScrollController && controller.touched) ||
+            !JumpToLatest.isNearLatest(
+              controller,
+              reversed: widget.reversed,
+            ))) {
       _missed += added;
     }
   }

@@ -532,18 +532,27 @@ void main() {
         expect(distance(), lessThan(0.5), reason: 'in the same frame');
         expect(controller.followsLatest, isTrue);
 
-        // Away from the newest end: the place is kept.
+        // Away from the newest end: the place is kept, what is on the
+        // screen does not move (in a reversed list the item is before it,
+        // and the list moves with it).
         final double away = reversed
             ? 600
             : controller.position.maxScrollExtent - 600;
         controller.jumpTo(away);
         await tester.pump();
         expect(controller.followsLatest, isFalse);
+        final Finder read = find.text(reversed ? 'item 9' : 'item 20');
+        final double top = tester.getTopLeft(read).dy;
         last.value = 40;
         await tester.pump();
+        expect(tester.getTopLeft(read).dy, closeTo(top, 0.5));
         last.value = 500;
         await tester.pump();
-        expect(controller.position.pixels, away);
+        expect(tester.getTopLeft(read).dy, closeTo(top, 0.5));
+        expect(controller.followsLatest, isFalse);
+        if (!reversed) {
+          expect(controller.position.pixels, away);
+        }
 
         controller.showLatest();
         await tester.pump();

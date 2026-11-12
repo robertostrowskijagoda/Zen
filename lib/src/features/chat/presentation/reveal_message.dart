@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:zen/src/features/chat/presentation/jump_to_latest.dart';
 
 /// Frames given to find a message in a list that builds lazily.
 const int _maxSeeks = 12;
@@ -28,7 +29,12 @@ Future<bool> revealChatMessage({
   }
   Map<String, int>? positions;
   for (int attempt = 0; attempt < _maxSeeks; attempt++) {
-    if (!wanted()) {
+    // A finger took the list on the way (after the first frame: the tap that
+    // asked for this may still hold it before that): it stays the user's.
+    if (!wanted() ||
+        (attempt > 0 &&
+            controller is ChatScrollController &&
+            controller.touched)) {
       return false;
     }
     final BuildContext? target = bubbleKeys[id]?.currentContext;
@@ -61,7 +67,10 @@ Future<bool> revealChatMessage({
     await WidgetsBinding.instance.endOfFrame;
   }
   final BuildContext? target = bubbleKeys[id]?.currentContext;
-  if (wanted() && target != null && target.mounted) {
+  if (wanted() &&
+      !(controller is ChatScrollController && controller.touched) &&
+      target != null &&
+      target.mounted) {
     await Scrollable.ensureVisible(
       target,
       alignment: alignment,
