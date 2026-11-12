@@ -632,9 +632,10 @@ class EmulatorCachesTest(unittest.TestCase):
 
 
 class MutationRunnersTest(unittest.TestCase):
-    # A runner with 15 files took about 27 minutes (1.16.4); with 30 it did
-    # not end within the job's 45 and every run of 1.16.5 was cut off.
-    MOST_FILES_ON_A_RUNNER = 20
+    # A file takes about two minutes: a runner with 15 files took 30
+    # minutes and one with 16 took 35 (after 1.16.5); with 30 it did not
+    # end within the job's 45 and every run of 1.16.5 was cut off.
+    MOST_FILES_ON_A_RUNNER = 16
 
     def test_no_runner_gets_more_files_than_fit_in_its_time(self):
         with open(os.path.join(ROOT, ".github/workflows/mutation.yml"),

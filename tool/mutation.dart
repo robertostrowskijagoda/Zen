@@ -8,12 +8,13 @@
 //   dart run tool/mutation.dart                 every target, 15 changes each
 //   dart run tool/mutation.dart --max 40 --seed 7 --summary FILE
 //   dart run tool/mutation.dart lib/src/features/social/peer_share_codec.dart
-//   dart run tool/mutation.dart --shard 2/6    every sixth target (CI's jobs)
+//   dart run tool/mutation.dart --shard 2/8    every eighth target (CI's jobs)
 //
 // The changes are picked at random among all possible ones (--seed), so
 // every run looks at others. The file is put back after every change,
 // also when the run is stopped (Ctrl+C) or a test hangs (--timeout,
-// seconds per change). --summary appends Markdown (CI's job summary).
+// seconds per change). --summary appends Markdown (CI's job summary) file
+// by file: a run cut off by its time limit still says how far it got.
 // A target with "skip" (and the reason in it) is listed but not run.
 // Exit code 0 always unless the tests fail on the unchanged code (then 1):
 // the score informs, it does not block.
@@ -101,10 +102,21 @@ Future<void> main(List<String> args) async {
             listed[i],
         ];
   final String part = split == null ? '' : ' (part ${split.$1} of ${split.$2})';
-  final StringBuffer report = StringBuffer('### Mutation testing$part\n\n')
-    ..writeln('Seed $seed, at most $max changes per file.\n')
-    ..writeln('| File | Caught | Survived |')
-    ..writeln('|---|---|---|');
+  final StringBuffer report = StringBuffer();
+  final String? summaryFile = summary;
+  // Into the summary as it goes, not at the end: a part cut off by the
+  // job's time limit said nothing at all, in every run of 1.16.5.
+  void say(String text) {
+    report.writeln(text);
+    if (summaryFile != null) {
+      File(summaryFile).writeAsStringSync('$text\n', mode: FileMode.append);
+    }
+  }
+
+  say('### Mutation testing$part\n');
+  say('Seed $seed, at most $max changes per file.\n');
+  say('| File | Caught | Survived |');
+  say('|---|---|---|');
   final StringBuffer survivors = StringBuffer();
   int failedBaseline = 0;
   for (final dynamic t in targets) {
@@ -130,7 +142,7 @@ Future<void> main(List<String> args) async {
         stdout.writeln('   | $line');
       }
       failedBaseline++;
-      report.writeln('| `$file` | tests fail unchanged | — |');
+      say('| `$file` | tests fail unchanged | — |');
       continue;
     }
     final File source = File(file);
@@ -170,22 +182,18 @@ Future<void> main(List<String> args) async {
       restore();
       await stop.cancel();
     }
-    report.writeln('| `$file` | $caught | ${lived.length} |');
+    say('| `$file` | $caught | ${lived.length} |');
     for (final String s in lived) {
       survivors.writeln('- `$s`');
     }
   }
   if (survivors.isNotEmpty) {
-    report
-      ..writeln()
-      ..writeln('Changes no test noticed (each a line to pin down):')
-      ..writeln()
-      ..write(survivors);
+    say('\nChanges no test noticed (each a line to pin down):\n');
+    say(survivors.toString().trimRight());
   }
+  // Missing from a summary: the run was cut off before its last file.
+  say('\nEvery file of this run was looked at.');
   stdout.writeln(report);
-  if (summary != null) {
-    File(summary).writeAsStringSync('$report\n', mode: FileMode.append);
-  }
   exitCode = failedBaseline > 0 ? 1 : 0;
 }
 
