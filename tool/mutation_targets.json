@@ -609,5 +609,37 @@
       "test/account_recovery_friends_test.dart",
       "test/privacy_levels_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/features/account/account_holdings.dart",
+    "tests": [
+      "test/account_replace_rule_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/ledger/ledger_fold.dart",
+    "tests": [
+      "test/ledger_fold_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/media/outgoing_media.dart",
+    "tests": [
+      "test/outgoing_media_metadata_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/public_suffix.dart",
+    "tests": [
+      "test/password_public_suffix_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/social/block_book.dart",
+    "tests": [
+      "test/block_book_test.dart",
+      "test/blocked_everywhere_test.dart",
+      "test/dating_block_everywhere_test.dart"
+    ]
   }
 ]
