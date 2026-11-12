@@ -66,33 +66,55 @@ final class LedgerAuthor {
   /// a save nor a peer ever finds only some of them here. Calls are
   /// serialized with [append].
   Future<List<LogEntry>> appendRun(String space, List<LedgerDraft> drafts) {
-    final Future<List<LogEntry>> result = _tail.then((_) async {
-      int seq = store.headOf(space, writer);
-      String prev = store.lastIdOf(space, writer);
-      final List<LogEntry> run = <LogEntry>[];
-      for (final LedgerDraft draft in drafts) {
-        final LogEntry entry = await LogEntry.create(
-          deviceKey: deviceKey,
-          certificate: certificate,
-          space: space,
-          writer: writer,
-          seq: ++seq,
-          prev: prev,
-          hlc: store.clock.now(),
-          kind: draft.kind,
-          body: draft.body,
-          blobs: draft.blobs,
-        );
-        run.add(entry);
-        prev = entry.id;
-      }
-      if (!await store.ingestRun(run)) {
-        throw StateError('Nie udało się zapisać wpisów.');
-      }
-      return run;
+    final Future<List<LogEntry>> result = _tail.then(
+      (_) => _writeRun(space, drafts),
+    );
+    _tail = result.then((_) {}, onError: (Object _) {});
+    return result;
+  }
+
+  /// Like [appendRun], with the drafts made by [plan] in turn with every
+  /// other write: nothing is appended between what it read and its run.
+  /// Writes nothing (and returns `null`) when [plan] returns `null`.
+  Future<List<LogEntry>?> appendPlanned(
+    String space,
+    List<LedgerDraft>? Function() plan,
+  ) {
+    final Future<List<LogEntry>?> result = _tail.then((_) async {
+      final List<LedgerDraft>? drafts = plan();
+      return drafts == null ? null : _writeRun(space, drafts);
     });
     _tail = result.then((_) {}, onError: (Object _) {});
     return result;
+  }
+
+  Future<List<LogEntry>> _writeRun(
+    String space,
+    List<LedgerDraft> drafts,
+  ) async {
+    int seq = store.headOf(space, writer);
+    String prev = store.lastIdOf(space, writer);
+    final List<LogEntry> run = <LogEntry>[];
+    for (final LedgerDraft draft in drafts) {
+      final LogEntry entry = await LogEntry.create(
+        deviceKey: deviceKey,
+        certificate: certificate,
+        space: space,
+        writer: writer,
+        seq: ++seq,
+        prev: prev,
+        hlc: store.clock.now(),
+        kind: draft.kind,
+        body: draft.body,
+        blobs: draft.blobs,
+      );
+      run.add(entry);
+      prev = entry.id;
+    }
+    if (!await store.ingestRun(run)) {
+      throw StateError('Nie udało się zapisać wpisów.');
+    }
+    return run;
   }
 
   /// Starts [space] over: a checkpoint saying that [drafts], written right

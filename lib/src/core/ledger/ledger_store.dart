@@ -75,12 +75,44 @@ final class _WriterLog {
   /// the log moves to it once they have ([LedgerStore.adoptCheckpoint]).
   bool adoptWanted = false;
 
+  /// Entries of this log that held carriers carry ([carriedIn]), by
+  /// sequence number. Those up to [base] are what still counts of the part
+  /// of the log not held ([carriedBefore]); the others are held anyway.
+  final Map<int, LogEntry> carried = <int, LogEntry>{};
+
   int get head => base + entries.length;
   String get lastId => entries.isEmpty ? baseId : entries.last.id;
+
+  /// What still counts of the log before [base], by its writer's folds.
+  Iterable<LogEntry> get carriedBefore =>
+      carried.values.where((LogEntry e) => e.seq <= base);
 
   /// Entry [seq], when held.
   LogEntry? at(int seq) =>
       seq > base && seq <= head ? entries[seq - base - 1] : null;
+
+  /// Reads again what the held carriers carry.
+  void recarry() {
+    carried.clear();
+    for (final LogEntry entry in entries) {
+      _carry(entry);
+    }
+  }
+
+  /// The entries [entry] carries that were not carried before.
+  List<LogEntry> _carry(LogEntry entry) {
+    if (entry.kind != kLedgerCarryKind) {
+      return const <LogEntry>[];
+    }
+    final List<LogEntry> fresh = <LogEntry>[];
+    for (final LogEntry e in carriedIn(entry)) {
+      if (carried[e.seq]?.id != e.id) {
+        fresh.add(e);
+      }
+      carried[e.seq] = e;
+    }
+    return fresh;
+  }
 
   /// Starts the log after entry [newBase] (id [newBaseId]): every held
   /// entry and every pending one up to it goes.
@@ -90,6 +122,7 @@ final class _WriterLog {
     }
     entries.clear();
     rebases.clear();
+    carried.clear();
     for (final int seq in pending.keys.toList()) {
       if (seq <= newBase) {
         bytes -= pending.remove(seq)!.encodedLength;
@@ -113,15 +146,22 @@ final class _WriterLog {
     base = seq - 1;
     baseId = first.prev;
     rebases.removeWhere(((int, int) r) => r.$1 <= base);
+    recarry();
   }
 
-  void add(LogEntry entry) {
+  /// Appends [entry]; returns the entries from before [base] it carries
+  /// that were not carried before (a fold's carrier, [kLedgerCarryKind]).
+  List<LogEntry> add(LogEntry entry) {
     entries.add(entry);
     bytes += entry.encodedLength;
-    final int? count = rebaseCountOf(entry);
+    final int? count = startCountOf(entry);
     if (count != null) {
       rebases.add((entry.seq, count));
     }
+    return <LogEntry>[
+      for (final LogEntry e in _carry(entry))
+        if (e.seq <= base) e,
+    ];
   }
 
   /// The newest held checkpoint whose entries carrying the state are all
@@ -165,6 +205,7 @@ final class _WriterLog {
       entries.removeRange(from, entries.length);
     }
     rebases.removeWhere(((int, int) r) => r.$1 > head);
+    recarry();
   }
 
   /// Marks the log as keeping two histories: nothing more is taken.
@@ -222,6 +263,20 @@ final class LedgerStore {
 
   /// Accounts whose entries this user refuses (their own block list).
   final Set<String> blockedAccounts = <String>{};
+
+  /// This device's own account: its spaces are kept whole, whatever
+  /// [AccountSpacePolicy.maxBytes] says.
+  String? ownAccount;
+
+  /// Spaces of other accounts that reached their bound
+  /// ([AccountSpacePolicy.maxBytes]) and refuse what comes next.
+  final Set<String> _full = <String>{};
+
+  /// Spaces that refuse new entries for want of room ([_overQuota]).
+  Set<String> get fullSpaces => Set<String>.unmodifiable(_full);
+
+  /// Called when [fullSpaces] changes.
+  void Function()? onFullChanged;
 
   final StreamController<LogEntry> _added =
       StreamController<LogEntry>.broadcast(sync: true);
@@ -281,12 +336,14 @@ final class LedgerStore {
     return log.entries.sublist(start - log.base, end - log.base);
   }
 
-  /// All entries of [space] (every device), oldest first by HLC.
+  /// All entries of [space] (every device), oldest first by HLC: those
+  /// held, and those its writers' folds carried from before where a log is
+  /// held from ([kLedgerFoldKind]), as they were written.
   List<LogEntry> entries(String space) {
     final List<LogEntry> all = <LogEntry>[
       for (final _WriterLog log
-          in (_logs[space] ?? const <String, _WriterLog>{}).values)
-        ...log.entries,
+          in (_logs[space] ?? const <String, _WriterLog>{})
+              .values) ...<LogEntry>[...log.carriedBefore, ...log.entries],
     ];
     all.sort((LogEntry a, LogEntry b) {
       final int byTime = a.hlc.compareTo(b.hlc);
@@ -303,8 +360,28 @@ final class LedgerStore {
           return e;
         }
       }
+      for (final LogEntry e in log.carriedBefore) {
+        if (e.id == id) {
+          return e;
+        }
+      }
     }
     return null;
+  }
+
+  /// The entries of [writer] in [space] as its readers see them: what its
+  /// folds carried from before where the log is held from, then what is
+  /// held, in log order.
+  List<LogEntry> logView(String space, String writer) {
+    final _WriterLog? log = _logs[space]?[writer];
+    if (log == null) {
+      return const <LogEntry>[];
+    }
+    return <LogEntry>[
+      ...log.carriedBefore.toList()
+        ..sort((LogEntry a, LogEntry b) => a.seq.compareTo(b.seq)),
+      ...log.entries,
+    ];
   }
 
   /// Takes one entry from anywhere (JSON as received).
@@ -348,9 +425,10 @@ final class LedgerStore {
     );
     clock.observe(entry.hlc);
 
-    if (log.head == 0 && entry.seq > 1 && isLedgerCheckpoint(entry)) {
-      // Nothing held yet and the writer's checkpoint arrives: the log may
-      // start here (those who hand it on may have cut what came before).
+    if (log.head == 0 && entry.seq > 1 && startsLog(entry)) {
+      // Nothing held yet and the writer's checkpoint (or fold) arrives: the
+      // log may start here (those who hand it on may have cut what came
+      // before).
       log.startAfter(entry.seq - 1, entry.prev);
     }
     if (entry.seq <= log.head) {
@@ -374,7 +452,9 @@ final class LedgerStore {
         return const IngestResult(IngestStatus.rejected, 'za dużo zaległych');
       }
       log.addPending(entry);
-      if (log.adoptWanted) {
+      // A full space refuses what comes next until its writer folds: the
+      // fold waits past the refused entries, so the log moves to it.
+      if (log.adoptWanted || _full.contains(entry.space)) {
         adoptCheckpoint(entry.space, entry.writer);
       }
       return const IngestResult(IngestStatus.pending);
@@ -536,7 +616,60 @@ final class LedgerStore {
         log?.pending[entry.seq]?.id != entry.id) {
       return _overBound(entry, policy, log);
     }
+    if (policy is AccountSpacePolicy &&
+        entry.account != ownAccount &&
+        (log == null || entry.seq > log.head) &&
+        log?.pending[entry.seq]?.id != entry.id) {
+      if (policy.maxBytes case final int quota) {
+        return _overQuota(entry, quota);
+      }
+    }
     return null;
+  }
+
+  /// Why [entry] would take its space past [quota] bytes; `null` when it
+  /// fits. What its writers' folds said no longer counts goes first, oldest
+  /// first ([pruneBefore]); then new entries are refused, and the space is
+  /// listed in [fullSpaces]: never anything still current. A fold's own
+  /// entries may take up to twice the bound for the while before what
+  /// they replace goes.
+  IngestResult? _overQuota(LogEntry entry, int quota) {
+    final String space = entry.space;
+    final int size = entry.encodedLength;
+    final int limit =
+        entry.kind == kLedgerFoldKind || entry.kind == kLedgerCarryKind
+        ? 2 * quota
+        : quota;
+    if (_bytesOf(space) + size <= limit) {
+      return null;
+    }
+    for (final MapEntry<String, _WriterLog> e
+        in (_logs[space] ?? const <String, _WriterLog>{}).entries.toList()) {
+      final int? ready = e.value.forked ? null : e.value.readyRebase();
+      if (ready != null) {
+        pruneBefore(space, e.key, ready);
+      }
+    }
+    if (_bytesOf(space) + size <= limit) {
+      return null;
+    }
+    if (_full.add(space)) {
+      onFullChanged?.call();
+    }
+    return const IngestResult(IngestStatus.rejected, 'limit miejsca');
+  }
+
+  /// Takes [space] off [fullSpaces] once it has room again.
+  void _recheckFull(String space) {
+    if (!_full.contains(space)) {
+      return;
+    }
+    final SpacePolicy? policy = _policies(space);
+    final int? quota = policy is AccountSpacePolicy ? policy.maxBytes : null;
+    if (quota == null || _bytesOf(space) < quota) {
+      _full.remove(space);
+      onFullChanged?.call();
+    }
   }
 
   /// The logs of [space], created on first use.
@@ -597,8 +730,13 @@ final class LedgerStore {
       _changed.add(null);
       return false;
     }
-    log.add(entry);
+    final List<LogEntry> carried = log.add(entry);
     _added.add(entry);
+    // What a fold carried from before where this log is held from is new
+    // here too (a log taken from its writer's fold on).
+    for (final LogEntry e in carried) {
+      _added.add(e);
+    }
     _changed.add(null);
     return true;
   }
@@ -635,10 +773,10 @@ final class LedgerStore {
     log.adoptWanted = false;
     for (final int seq in waiting) {
       final LogEntry checkpoint = log.pending[seq]!;
-      if (!isLedgerCheckpoint(checkpoint)) {
+      if (!startsLog(checkpoint)) {
         continue;
       }
-      final int? count = rebaseCountOf(checkpoint);
+      final int? count = startCountOf(checkpoint);
       if (count != null) {
         bool whole = true;
         for (int next = seq + 1; next <= seq + count; next++) {
@@ -655,6 +793,7 @@ final class LedgerStore {
       log.adoptWanted = false;
       log.startAfter(seq - 1, checkpoint.prev);
       _drain(log);
+      _recheckFull(space);
       _changed.add(null);
       return true;
     }
@@ -751,13 +890,14 @@ final class LedgerStore {
   int pruneBefore(String space, String writer, int seq) {
     final _WriterLog? log = _logs[space]?[writer];
     final LogEntry? checkpoint = log?.at(seq);
-    if (log == null || checkpoint == null || !isLedgerCheckpoint(checkpoint)) {
+    if (log == null || checkpoint == null || !startsLog(checkpoint)) {
       return 0;
     }
     final int before = log.entries.length;
     log.dropBefore(seq);
     final int removed = before - log.entries.length;
     if (removed > 0) {
+      _recheckFull(space);
       _changed.add(null);
     }
     return removed;
@@ -877,6 +1017,7 @@ final class LedgerStore {
         log.clearPending();
       }
     }
+    _full.toList().forEach(_recheckFull);
     _changed.add(null);
     return removed;
   }
@@ -895,6 +1036,7 @@ final class LedgerStore {
       _awaitingCount -= waiting.length;
       return true;
     });
+    _full.toList().forEach(_recheckFull);
     _changed.add(null);
   }
 

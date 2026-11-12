@@ -12,13 +12,47 @@ abstract interface class SpacePolicy {
 
 /// Only devices of [owner] may write.
 final class AccountSpacePolicy implements SpacePolicy {
-  const AccountSpacePolicy(this.owner);
+  const AccountSpacePolicy(this.owner, {this.maxBytes});
 
   final String owner;
+
+  /// Most bytes a device keeps of this space when it is not its own
+  /// account's ([accountSpaceQuota]); `null`: no bound.
+  final int? maxBytes;
 
   @override
   bool allows(LogEntry entry) => entry.account == owner;
 }
+
+/// Most bytes kept of one friend's `acts`: likes, comments, follows and the
+/// bundles of reactions under their posts. Folds keep an honest log far
+/// below it (a like then takes about 0.4 KB instead of 5 KB; ten acts a
+/// day come to about 5.5 MB a year): it is there for an app that writes
+/// without end.
+const int kFriendActsBytes = 32 << 20;
+
+/// Most bytes kept of one friend's `feed`: posts are never folded away, so
+/// this leaves room for about 10,000 of them (photos and films are files
+/// apart, under their own limits).
+const int kFriendFeedBytes = 64 << 20;
+
+/// Most bytes kept of one friend's `profile` (a few entries, folded).
+const int kFriendProfileBytes = 4 << 20;
+
+/// Most bytes kept of one friend's `private` copy of their friends and
+/// groups: the largest backup (256 parts) with as much again superseded
+/// before its writer starts the log over.
+const int kFriendPrivateBytes = 32 << 20;
+
+/// The bound on bytes kept of someone else's space of [kind] (see
+/// [AccountSpacePolicy.maxBytes]); `null` for a kind kept unbounded.
+int? accountSpaceQuota(String kind) => switch (kind) {
+  'acts' => kFriendActsBytes,
+  'feed' => kFriendFeedBytes,
+  'profile' => kFriendProfileBytes,
+  'private' => kFriendPrivateBytes,
+  _ => null,
+};
 
 /// Nobody may write (yet). Used for the power log until a valid pyramid
 /// exists.
@@ -150,7 +184,7 @@ SpacePolicy? defaultSpacePolicy(String space) {
     return null;
   }
   if (kAccountSpaceKinds.contains(kind)) {
-    return AccountSpacePolicy(owner);
+    return AccountSpacePolicy(owner, maxBytes: accountSpaceQuota(kind));
   }
   if (!_spaceKindPattern.hasMatch(kind)) {
     return null;

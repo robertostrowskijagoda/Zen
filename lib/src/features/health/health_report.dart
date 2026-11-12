@@ -30,7 +30,7 @@ class HealthItem {
   });
 
   /// Stable name: `network`, `peers`, `background`, `notifications`,
-  /// `battery`, `clock`, `storage`, `contacts`.
+  /// `battery`, `clock`, `storage`, `contacts`, `friend_logs`.
   final String id;
   final HealthLevel level;
   final String title;
@@ -66,6 +66,7 @@ class HealthInputs {
     this.clockPeers = 0,
     this.storage,
     this.contactsBackupFailing = false,
+    this.friendLogsFull = 0,
   });
 
   final HealthNetState net;
@@ -93,6 +94,10 @@ class HealthInputs {
   /// The newest backup of friends and groups could not be saved with
   /// friends (`ContactsBackupNotice`).
   final bool contactsBackupFailing;
+
+  /// Friends whose posts or reactions this phone takes no more of: it keeps
+  /// as much of each friend as its limits allow (`LedgerRoomNotice`).
+  final int friendLogsFull;
 }
 
 @immutable
@@ -142,6 +147,7 @@ HealthReport buildHealthReport(HealthInputs i) {
     _clock(i),
     _storage(i),
     if (i.contactsBackupFailing) _contactsBackup(),
+    if (i.friendLogsFull > 0) _friendLogsFull(i.friendLogsFull),
   ]);
 }
 
@@ -414,6 +420,27 @@ HealthItem _contactsBackup() => HealthItem(
   detail: t(
     'Nie udało się zapisać u znajomych kopii listy znajomych i grup. '
     'Zen spróbuje znowu przy następnej zmianie listy.',
+  ),
+);
+
+HealthItem _friendLogsFull(int friends) => HealthItem(
+  id: 'friend_logs',
+  level: HealthLevel.warn,
+  title: t('Wpisy znajomych'),
+  detail: tn(
+    friends,
+    one:
+        'Wpisy {n} znajomego zajęły całe miejsce, jakie telefon na nie '
+        'daje: jego nowe posty i reakcje tu nie docierają. To, co już jest, '
+        'zostaje. Zwykle pomaga, gdy ta osoba zaktualizuje Zen.',
+    few:
+        'Wpisy {n} znajomych zajęły całe miejsce, jakie telefon na nie '
+        'daje: ich nowe posty i reakcje tu nie docierają. To, co już jest, '
+        'zostaje. Zwykle pomaga, gdy te osoby zaktualizują Zen.',
+    many:
+        'Wpisy {n} znajomych zajęły całe miejsce, jakie telefon na nie '
+        'daje: ich nowe posty i reakcje tu nie docierają. To, co już jest, '
+        'zostaje. Zwykle pomaga, gdy te osoby zaktualizują Zen.',
   ),
 );
 

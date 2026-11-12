@@ -20,6 +20,7 @@ import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/contacts_backup.dart';
+import 'package:zen/src/features/ledger/ledger_fold.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/met_attestation.dart';
 import 'package:zen/src/features/neighbors/flat_door_mail.dart'
@@ -767,6 +768,11 @@ final class LedgerNode {
         acc == loaded.certificate.account ||
         _accounts.containsValue(acc) ||
         _followed.containsValue(acc);
+    // This account's own spaces are kept whole; others' within their bounds.
+    store
+      ..ownAccount = loaded.certificate.account
+      ..onFullChanged = () =>
+          LedgerRoomNotice.instance.update(store.fullSpaces);
     await archive.open(store, blobs);
     if (existing != null && archive.lostOwnLog(loaded.writer)) {
       // Our own log did not come back whole: entries others hold may be
@@ -853,6 +859,10 @@ final class LedgerNode {
     _ready = true;
     // Logs whose writer started them over while this device was closed.
     _dropReadyRebases();
+    // This device's own logs as an earlier build left them.
+    for (final String kind in kFoldedSpaceKinds) {
+      _scheduleFold(kind);
+    }
     _settle();
     if (!_openedChanges.isClosed) {
       // Readable now: screens built before show what was read.
@@ -1198,12 +1208,75 @@ final class LedgerNode {
     if (gate != null) {
       await gate.future;
     }
-    return author.append(
+    final LogEntry entry = await author.append(
       accountSpace(spaceKind, account),
       kind,
       body,
       blobs: blobs,
     );
+    if (kFoldedSpaceKinds.contains(spaceKind)) {
+      _scheduleFold(spaceKind);
+    }
+    return entry;
+  }
+
+  /// How long after a write into a folded space ([kFoldedSpaceKinds]) the
+  /// device looks whether to fold it: taps in a row are folded once.
+  @visibleForTesting
+  static Duration foldDelay = const Duration(seconds: 5);
+
+  /// How long this device keeps its own log from before a fold
+  /// ([kFoldOwnKeep]).
+  @visibleForTesting
+  static Duration foldOwnKeep = kFoldOwnKeep;
+
+  /// What a log may hold beyond what a fold would leave ([kFoldSlackBytes]).
+  @visibleForTesting
+  static int foldSlack = kFoldSlackBytes;
+
+  final Map<String, Timer> _foldTimers = <String, Timer>{};
+  Future<void> _folding = Future<void>.value();
+
+  void _scheduleFold(String spaceKind) {
+    if (_foldTimers.containsKey(spaceKind) || _stopped) {
+      return;
+    }
+    _foldTimers[spaceKind] = Timer(foldDelay, () {
+      _foldTimers.remove(spaceKind);
+      if (_stopping == null && !_stopped) {
+        unawaitedLogged(
+          foldNow(spaceKind),
+          context: 'Folding the ledger failed',
+        );
+      }
+    });
+  }
+
+  /// Folds this device's own log in [spaceKind] when enough of it no
+  /// longer counts ([planFold]); returns whether it did. Every holder that
+  /// understands a fold then drops what came before it; this device keeps
+  /// it [kFoldOwnKeep] longer ([_dropToRebase]).
+  Future<bool> foldNow(String spaceKind) {
+    final Future<bool> done = _folding.then((_) async {
+      if (!_ready || _suspended || _stopped) {
+        return false;
+      }
+      final String space = accountSpace(spaceKind, account);
+      final String writer = author.writer;
+      // Planned in turn with every other write of this device, so nothing
+      // is written between what the fold read and the fold.
+      final List<LogEntry>? run = await author.appendPlanned(
+        space,
+        () => planFold(
+          store.logView(space, writer),
+          base: store.baseOf(space, writer).base,
+          slack: foldSlack,
+        ),
+      );
+      return run != null;
+    });
+    _folding = done.then((_) {}, onError: (Object _) {});
+    return done;
   }
 
   /// Entries of [spaceKind] of [ofAccount] (default: this account).
@@ -2503,7 +2576,15 @@ final class LedgerNode {
         if (e.seq < seq) e.id,
     ];
     if (store.pruneBefore(space, writer, seq) > 0) {
+      // What a fold carried is still read as it was.
+      final Set<String> carried = <String>{
+        for (final LogEntry e in store.logView(space, writer))
+          if (e.seq < seq) e.id,
+      };
       for (final String id in ids) {
+        if (carried.contains(id)) {
+          continue;
+        }
         _opened.remove(id);
         _partHashes.remove(id);
         if (_assembled?.$1 == id) {
@@ -2557,6 +2638,22 @@ final class LedgerNode {
   void _dropToRebase(String space, String writer) {
     final int? seq = store.readyRebase(space, writer);
     if (seq == null || _suspended || !_ready) {
+      return;
+    }
+    final List<LogEntry> start = store.entriesAfter(
+      space,
+      writer,
+      seq - 1,
+      limit: 1,
+    );
+    if (start.isNotEmpty &&
+        start.first.kind == kLedgerFoldKind &&
+        start.first.account == account &&
+        store.clock.wallMillis() - start.first.hlc.millis <
+            foldOwnKeep.inMilliseconds) {
+      // This account's own log is kept whole a while after a fold, for
+      // friends on builds that do not understand one ([kFoldOwnKeep]);
+      // the periodic round looks again.
       return;
     }
     for (final LogEntry e in store.entriesAfter(space, writer, 0)) {
@@ -3836,6 +3933,11 @@ final class LedgerNode {
       timer.cancel();
     }
     _rebaseTimers.clear();
+    for (final Timer timer in _foldTimers.values) {
+      timer.cancel();
+    }
+    _foldTimers.clear();
+    await _folding;
     await _storeChanged?.cancel();
     await _devicesChanged.close();
     await _contactsChanged.close();

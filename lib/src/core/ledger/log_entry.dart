@@ -49,6 +49,75 @@ int? rebaseCountOf(LogEntry entry) {
   return n is int && n >= 0 && n <= kMaxRebaseEntries ? n : null;
 }
 
+/// Kind of a fold (from 1.17.0): its writer says that the `c` entries right
+/// after it ([kLedgerCarryKind]) carry every entry of the log before it
+/// that still counts, word for word; what they leave out no longer counts
+/// (a like taken back, a bundle or a profile replaced by a newer one).
+/// Holders that understand it hold and hand on the log from here, once
+/// they hold all `c`, and drop what came before ([foldCountOf]).
+///
+/// To builds before 1.17.0 it is no checkpoint: they keep the whole log,
+/// skip both kinds, and never start or move a log to it.
+const String kLedgerFoldKind = 'fold';
+
+/// Kind of an entry right after a fold that carries entries from before
+/// it: `{v, e: [entry, ...]}`. Each is the entry as it was signed
+/// (`LogEntry.toJson`), or only its signed part ([LogEntry.unsigned]) for
+/// kinds nobody hands on with their own signature: this entry's signature,
+/// by the same device, then vouches for it ([LogEntry.isVouched]).
+const String kLedgerCarryKind = 'carry';
+
+/// How many entries right after the fold [entry] carry what still counts
+/// from before it (`c`); `null` for any other entry.
+int? foldCountOf(LogEntry entry) {
+  if (entry.kind != kLedgerFoldKind) {
+    return null;
+  }
+  final Object? c = entry.body['c'];
+  return c is int && c >= 0 && c <= kMaxRebaseEntries ? c : null;
+}
+
+/// Whether a holder of this build may hold [entry]'s log from it on: a
+/// checkpoint or a fold.
+bool startsLog(LogEntry entry) =>
+    isLedgerCheckpoint(entry) || foldCountOf(entry) != null;
+
+/// How many entries right after [entry] carry the state from before it: a
+/// checkpoint's `n` ([rebaseCountOf]) or a fold's `c` ([foldCountOf]).
+int? startCountOf(LogEntry entry) => rebaseCountOf(entry) ?? foldCountOf(entry);
+
+/// The entries [carrier] ([kLedgerCarryKind]) carries: only entries of its
+/// own log from before it (same space, log, account and device), never a
+/// checkpoint, fold or carrier. Malformed ones are left out.
+List<LogEntry> carriedIn(LogEntry carrier) {
+  if (carrier.kind != kLedgerCarryKind) {
+    return const <LogEntry>[];
+  }
+  final Object? items = carrier.body['e'];
+  if (items is! List) {
+    return const <LogEntry>[];
+  }
+  final List<LogEntry> out = <LogEntry>[];
+  for (final Object? item in items) {
+    final LogEntry? e = item is Map && item.containsKey('sig')
+        ? LogEntry.fromJson(item)
+        : LogEntry._vouched(item, carrier);
+    if (e == null ||
+        e.space != carrier.space ||
+        e.writer != carrier.writer ||
+        e.account != carrier.account ||
+        e.device != carrier.device ||
+        e.seq >= carrier.seq ||
+        startsLog(e) ||
+        e.kind == kLedgerCarryKind) {
+      continue;
+    }
+    final DeviceCertificate? cert = carrier.certificate;
+    out.add(cert == null ? e : e.withCertificate(cert));
+  }
+  return out;
+}
+
 const int kMaxSpaceLength = 200;
 const int kMaxKindLength = 40;
 const int kMaxBlobsPerEntry = 32;
@@ -333,11 +402,49 @@ final class LogEntry {
     );
   }
 
+  /// An entry a fold carried without its own signature ([carriedIn]): the
+  /// carrier's signature, by the same device, vouches for it. Its id is the
+  /// one it was signed under, so everything that names it still finds it;
+  /// it is only never handed on as a signed entry.
+  static LogEntry? _vouched(Object? json, LogEntry carrier) {
+    if (json is! Map || json.containsKey('sig')) {
+      return null;
+    }
+    final LogEntry? parsed = fromJson(<String, dynamic>{
+      ...Map<String, dynamic>.from(json),
+      'sig': carrier.signature,
+    });
+    if (parsed == null) {
+      return null;
+    }
+    return LogEntry._(
+      version: parsed.version,
+      space: parsed.space,
+      writer: parsed.writer,
+      seq: parsed.seq,
+      prev: parsed.prev,
+      hlc: parsed.hlc,
+      kind: parsed.kind,
+      body: parsed.body,
+      blobs: parsed.blobs,
+      account: parsed.account,
+      device: parsed.device,
+      certificate: null,
+      signature: '',
+      id: parsed.id,
+      encodedLength: parsed.encodedLength - carrier.signature.length,
+    );
+  }
+
+  /// Carried by a fold without its own signature (see [carriedIn]).
+  bool get isVouched => signature.isEmpty;
+
   /// The device's hybrid signature, checked against the ML-DSA key its
-  /// certificate publishes; false without a [certificate].
+  /// certificate publishes; false without a [certificate] and for an entry
+  /// carried without its signature ([isVouched]).
   Future<bool> verifySignature() {
     final DeviceCertificate? cert = certificate;
-    return cert == null
+    return cert == null || isVouched
         ? Future<bool>.value(false)
         : cert.verifyByDevice(canonicalJsonBytes(unsigned), signature);
   }
