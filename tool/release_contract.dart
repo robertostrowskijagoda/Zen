@@ -531,15 +531,67 @@ String? whatsNewLineProblem(String text) {
   return null;
 }
 
+/// The Polish texts of the app that its English translation
+/// (`assets/i18n/en.json`, source text → English) words differently, as
+/// [whatsNewSection] needs them to refuse a Polish label in an English
+/// line. Left out, to keep false alarms away: texts the two languages share
+/// (case aside: "Chat", the app's name "Zen"), texts with a placeholder
+/// (`{n}`), texts shorter than four characters, and plural entries (not
+/// plain strings).
+Map<String, String> englishLabelsFrom(Map<String, Object?> en) =>
+    <String, String>{
+      for (final MapEntry<String, Object?> e in en.entries)
+        if (e.value is String &&
+            e.key.length >= 4 &&
+            !e.key.contains('{') &&
+            e.key.toLowerCase() != (e.value! as String).toLowerCase())
+          e.key: e.value! as String,
+    };
+
+/// A letter only Polish has: a text with one cannot be an English word.
+final RegExp _polishLetter = RegExp('[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]');
+
+/// The Polish texts of [labels] (see [englishLabelsFrom]) that the English
+/// [line] holds as they are, with the English text the app shows instead.
+/// A text counts when the line has it with the same capitals, as a whole
+/// word or phrase. A single word without a Polish letter ("Film", which
+/// English has too) counts only inside the line, not as its first word,
+/// where it may be an ordinary English word.
+Map<String, String> polishLabelsIn(String line, Map<String, String> labels) {
+  final Map<String, String> found = <String, String>{};
+  for (final MapEntry<String, String> e in labels.entries) {
+    final String key = e.key;
+    if (!line.contains(key)) {
+      continue;
+    }
+    final bool onlyPolish = _polishLetter.hasMatch(key) || key.contains(' ');
+    final RegExp word = RegExp(
+      r'(?<![\p{L}\p{N}_])' + RegExp.escape(key) + r'(?![\p{L}\p{N}_])',
+      unicode: true,
+    );
+    for (final RegExpMatch m in word.allMatches(line)) {
+      if (onlyPolish || m.start > 0) {
+        found[key] = e.value;
+        break;
+      }
+    }
+  }
+  return found;
+}
+
 /// The "### What's new" note of [version]'s part of [changelog] (null:
 /// "## Unreleased"): language code → lines, in order, and what is wrong
 /// with it. Every non-empty line of the note is `- [xx] Text`; English is
 /// required (1 to [kMaxWhatsNewLines] lines), other languages optional
 /// with the same limit. [required]: a missing note is a problem too.
+/// [englishLabels] (see [englishLabelsFrom]): an English line that holds a
+/// Polish text of the app which the English app words differently (a screen
+/// named "Hasła" where the English app says "Passwords") is a problem.
 ({Map<String, List<String>> lines, List<String> problems}) whatsNewSection(
   String changelog, {
   String? version,
   bool required = true,
+  Map<String, String> englishLabels = const <String, String>{},
 }) {
   final String part = version ?? 'Unreleased';
   final List<String> rows = const LineSplitter().convert(changelog);
@@ -582,6 +634,14 @@ String? whatsNewLineProblem(String text) {
     if (problem != null) {
       problems.add('$kWhatsNewHeading: "$text" $problem');
       continue;
+    }
+    if (m.group(1) == kWhatsNewFallbackLanguage) {
+      polishLabelsIn(text, englishLabels).forEach((String polish, String en) {
+        problems.add(
+          '$kWhatsNewHeading: the [en] line "$text" names "$polish", which '
+          'is the Polish text; the English app says "$en"',
+        );
+      });
     }
     (lines[m.group(1)!] ??= <String>[]).add(text);
   }
