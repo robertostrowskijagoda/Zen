@@ -117,6 +117,17 @@ abstract interface class SignalTransport {
   Future<void> closeRelay(String callId);
 }
 
+/// A transport whose node hands over only so many signals an hour from
+/// senders nobody named to it (a locked phone's node, stranger_signals.go
+/// in the bridge): the friends and own devices the app names count as
+/// known there; the locked receiver names the other contacts it hears from
+/// (members of its groups), which it can tell only once a frame of theirs
+/// came.
+abstract interface class SignalSenderAdmission {
+  /// [address] is a contact: its signals are always handed over.
+  void admitSender(String address);
+}
+
 class MemorySignalTransport implements SignalTransport {
   final StreamController<SignalTransportFrame> _frames =
       StreamController<SignalTransportFrame>.broadcast();

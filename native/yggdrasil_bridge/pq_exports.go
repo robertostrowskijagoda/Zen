@@ -168,6 +168,10 @@ type pqSetPinsRequest struct {
 	Seen    map[string]int64 `json:"seen"`
 	// When present: the addresses the app knows (setKnown).
 	Known *[]string `json:"known"`
+	// Addresses the app listens to besides the known ones (the contacts a
+	// locked receiver heard from): their signals do not count against a
+	// locked phone's budget for strangers (stranger_signals.go).
+	Listen []string `json:"listen"`
 }
 
 // applyPinsRequest does what a YggPqSetPinsJson request asks:
@@ -214,8 +218,10 @@ func applyPinsRequest(endpoint *pqEndpoint, request pqSetPinsRequest) map[string
 //   - known (alone or with any of the above): the addresses of the app's
 //     friends and this person's own devices, the only peers that use the
 //     known peers' KEM budget and keep their entries and pins.
+//   - listen: addresses added to those a node that only receives hands
+//     over every signal of (stranger_signals.go); nothing elsewhere.
 //
-// -> {taken, conflicts: {address: pinned}, known}.
+// -> {taken, conflicts: {address: pinned}, known, listened}.
 //
 //export YggPqSetPinsJson
 func YggPqSetPinsJson(handle C.int, payload *C.char) *C.char {
@@ -228,6 +234,10 @@ func YggPqSetPinsJson(handle C.int, payload *C.char) *C.char {
 		if err != nil {
 			return responseError(err)
 		}
-		return responseOK(applyPinsRequest(endpoint, request))
+		answer := applyPinsRequest(endpoint, request)
+		if len(request.Listen) > 0 && node.strangerSignals != nil {
+			answer["listened"] = node.strangerSignals.listen(request.Listen)
+		}
+		return responseOK(answer)
 	})
 }

@@ -153,6 +153,13 @@ const Set<String> _socialTypes = <String>{
 const int kLockedStrangerFramesPerSender = 5;
 const int kLockedStrangerFramesTotal = 50;
 
+/// How many times an hour at most what one sender who is not a friend sets
+/// off (a message kept, a mailbox's duty) holds a locked phone awake until
+/// it is done; past that it runs while the phone is awake anyway. Each hold
+/// lasts the work and a second more: a group member or a stranger keeps the
+/// phone awake about a minute an hour at most this way.
+const int kLockedWorkHoldsPerHour = 60;
+
 /// How often the receiver asks its mailboxes for mail held for it, at
 /// first and again once something came.
 ///
@@ -931,12 +938,7 @@ final class LockedReceiver {
     );
     _doorSubscription = _doorFrames?.listen(
       (SignalTransportFrame frame) => unawaitedLogged(
-        // Kept and rung (a knock): the phone stays awake until done.
-        ZenWake.holdWhile(
-          () => handleDoorFrame(frame),
-          tag: _keepHoldTag,
-          limit: _keepHoldLimit,
-        ),
+        handleDoorFrame(frame),
         context: 'A door frame for the locked inbox failed',
       ),
     );
@@ -1073,6 +1075,22 @@ final class LockedReceiver {
     while (_kept.length > _maxKeptIds) {
       _kept.remove(_kept.first);
     }
+    // Kept and rung (a knock): the phone stays awake until done. Only now:
+    // anyone can knock, and what is dropped above holds nothing.
+    await ZenWake.holdWhile(
+      () => _keepDoorFrame(frame, record, id, from, type),
+      tag: _keepHoldTag,
+      limit: _keepHoldLimit,
+    );
+  }
+
+  Future<void> _keepDoorFrame(
+    SignalTransportFrame frame,
+    Uint8List record,
+    String id,
+    String from,
+    String type,
+  ) async {
     if (!await _inbox.append(record, sender: from, stranger: true)) {
       _kept.remove(id);
       return;
@@ -1479,16 +1497,23 @@ final class LockedReceiver {
     }
   }
 
-  /// Whether a contact's ping at [at] gets a pong ([pongEvery]; a ping
-  /// from a Zen that just started, [freshPongEvery]), noting it when so.
-  /// A clock set back answers at once.
-  bool _answersPing(String from, int at, Map<String, dynamic> payload) {
+  /// Whether a contact's ping at [at] gets a pong ([pongEvery]; a
+  /// [friend]'s (or own device's) ping from a Zen that just started,
+  /// [freshPongEvery]: a group member's word that its Zen started gets no
+  /// answer sooner, or it could have one every 20 s for nothing), noting it
+  /// when so. A clock set back answers at once.
+  bool _answersPing(
+    String from,
+    int at,
+    Map<String, dynamic> payload, {
+    required bool friend,
+  }) {
     bool lately(Map<String, int> answered, Duration every) {
       final int? last = answered[from];
       return last != null && at >= last && at - last < every.inMilliseconds;
     }
 
-    final bool fresh = payload[kPresenceFreshKey] == true;
+    final bool fresh = friend && payload[kPresenceFreshKey] == true;
     if (lately(_pongedAt, pongEvery) &&
         (!fresh || lately(_freshPongedAt, freshPongEvery))) {
       return false;
@@ -1502,6 +1527,22 @@ final class LockedReceiver {
       _freshPongedAt[from] = at;
     }
     return true;
+  }
+
+  /// The contacts named to the node in this run ([SignalSenderAdmission]).
+  final Set<String> _admitted = <String>{};
+
+  /// Names [from], a contact, to the node once: a locked phone's node
+  /// counts the signals of senders nobody named against a small hourly
+  /// budget, and it knows only the friends and own devices the app named.
+  void _admit(String from) {
+    final SignalTransport transport = _transport;
+    if (transport is! SignalSenderAdmission ||
+        _admitted.length >= _maxPresencePeers ||
+        !_admitted.add(from)) {
+      return;
+    }
+    (transport as SignalSenderAdmission).admitSender(from);
   }
 
   /// Sends [payload] to [to]; false when it could not go.
@@ -1529,7 +1570,20 @@ final class LockedReceiver {
       return;
     }
     final bool contact = kind != BackgroundContactKind.stranger;
-    if (_mailboxSet.contains(from)) {
+    final bool mailbox = _mailboxSet.contains(from);
+    if (kind == BackgroundContactKind.friend || mailbox) {
+      // Someone this phone listens to: it stays awake a moment so the frame
+      // is read and answered (its node hands frames over without that,
+      // YggdrasilSignalTransport.holdOnArrival). Anyone else's frame holds
+      // the phone only for what it sets to work (kept, rung, a mailbox's
+      // duty), while that runs: a stranger, a former friend or a group
+      // member sending one frame after another must not keep it awake.
+      ZenWake.signalArrived();
+    }
+    if (contact) {
+      _admit(from);
+    }
+    if (mailbox) {
       _mailboxAnswered = true;
     }
     // Friends' confirmations and answers, and mailboxes (possibly strangers
@@ -1543,7 +1597,13 @@ final class LockedReceiver {
     }
     if (type == 'ping') {
       final int at = _now();
-      if (contact && _answersPing(from, at, frame.payload)) {
+      if (contact &&
+          _answersPing(
+            from,
+            at,
+            frame.payload,
+            friend: kind == BackgroundContactKind.friend,
+          )) {
         final bool sent = await _sendQuietly(frame.from, <String, dynamic>{
           'type': 'pong',
           if (kind == BackgroundContactKind.friend)
@@ -1570,19 +1630,11 @@ final class LockedReceiver {
       if (mailbox != null && LockedMailbox.dutyTypes.contains(type)) {
         // From friends' senders too, who need not be contacts here: the
         // mailbox checks who may leave what.
-        await ZenWake.holdWhile(
-          () => mailbox.handle(frame),
-          tag: _keepHoldTag,
-          limit: _keepHoldLimit,
-        );
+        await _holdingFor(from, kind, () => mailbox.handle(frame));
         return;
       }
       if (contact && type == 'rly_mail') {
-        await ZenWake.holdWhile(
-          () => _keepMail(frame, from, kind),
-          tag: _keepHoldTag,
-          limit: _keepHoldLimit,
-        );
+        await _holdingFor(from, kind, () => _keepMail(frame, from, kind));
         return;
       }
       if (contact && _keptRelayTypes.contains(type)) {
@@ -1639,19 +1691,62 @@ final class LockedReceiver {
   }
 
   /// Keeps [frame] in the inbox (and tells about it): the phone stays
-  /// awake until that is done, then may sleep (a frame that is dropped
-  /// costs only the short hold of its arrival).
+  /// awake until that is done ([_holdingFor]), then may sleep (a frame that
+  /// is dropped holds it at most a moment, a friend's only).
   Future<void> _keep(
     SignalTransportFrame frame,
     String from,
     String type,
     BackgroundContactKind kind, {
     required String? rid,
-  }) => ZenWake.holdWhile(
+  }) => _holdingFor(
+    from,
+    kind,
     () => _keepHeld(frame, from, type, kind, rid: rid),
-    tag: _keepHoldTag,
-    limit: _keepHoldLimit,
   );
+
+  /// Runs [work] that a frame from [from] set off, holding the phone awake
+  /// until it is done: always for a friend (or own device) and a mailbox;
+  /// for anyone else ([kLockedWorkHoldsPerHour]) at most so many times an
+  /// hour, after that without a hold. Nothing is dropped for it: the work
+  /// runs while the phone is awake anyway, and what is left of it when the
+  /// phone falls asleep runs on its next wake. A group member, or a sender
+  /// a friend's mailbox here takes deposits from, sending one frame after
+  /// another cannot keep the phone awake.
+  Future<T> _holdingFor<T>(
+    String from,
+    BackgroundContactKind kind,
+    Future<T> Function() work,
+  ) {
+    if (kind == BackgroundContactKind.friend ||
+        _mailboxSet.contains(from) ||
+        _workHoldLeft(from)) {
+      return ZenWake.holdWhile(work, tag: _keepHoldTag, limit: _keepHoldLimit);
+    }
+    return work();
+  }
+
+  /// Work holds taken this hour per sender who is not a friend:
+  /// (hour started at, holds).
+  final Map<String, (int, int)> _workHolds = <String, (int, int)>{};
+
+  bool _workHoldLeft(String from) {
+    final int now = _now();
+    final (int, int)? had = _workHolds[from];
+    final bool sameHour =
+        had != null && now >= had.$1 && now - had.$1 < _hourMs;
+    final int used = sameHour ? had.$2 : 0;
+    if (used >= kLockedWorkHoldsPerHour) {
+      return false;
+    }
+    if (!sameHour && _workHolds.length >= _maxPresencePeers) {
+      _workHolds.clear();
+    }
+    _workHolds[from] = (sameHour ? had.$1 : now, used + 1);
+    return true;
+  }
+
+  static const int _hourMs = 60 * 60 * 1000;
 
   static const String _keepHoldTag = 'locked-keep';
   static const Duration _keepHoldLimit = Duration(seconds: 20);

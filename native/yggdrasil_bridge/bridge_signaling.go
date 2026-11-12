@@ -94,6 +94,13 @@ func startPacketLoop(node *bridgeNode) {
 				if !ok {
 					continue
 				}
+				if !node.admitSignal(source, network) {
+					// A locked phone, and a sender nobody named, over its
+					// hourly budget (stranger_signals.go): the app is not
+					// woken for it.
+					debugf("[ZEN-GO] stranger signal budget, dropping from=%s\n", source.String())
+					continue
+				}
 				debugf("[ZEN-GO] signal reassembled from=%s msgLen=%d\n", source.String(), len(message))
 				// Never blocks, so relay (call audio/video) processing is not
 				// held up; over budget, older signals of the heaviest source

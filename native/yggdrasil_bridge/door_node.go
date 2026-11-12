@@ -688,6 +688,11 @@ func (door *doorNode) run(main *bridgeNode) {
 			door.stats.add("not taken")
 			continue
 		}
+		if !main.admitSignal(source, network) {
+			// A locked phone's budget for strangers (stranger_signals.go).
+			door.stats.add("over budget")
+			continue
+		}
 		door.stats.add("taken")
 		main.signalInbox.push(signalMessage{
 			From:    source.String(),

@@ -313,6 +313,7 @@ final class RuntimeNodeSession {
     this.hintSessionKeys,
     this.dropSessionKeyHints,
     this.setKnownPeers,
+    this.admitSenders,
     this.keyConflicts,
     this.setOnScreen,
   });
@@ -376,6 +377,11 @@ final class RuntimeNodeSession {
   /// devices) to the bridge: only they use the known peers' KEM budget and
   /// keep their peer entries and pins (pq_session.go, setKnown).
   final void Function(List<String> addresses)? setKnownPeers;
+
+  /// Names contacts besides the known ones (members of groups a locked
+  /// receiver heard from) to a locked phone's node, whose budget for
+  /// strangers' signals then leaves them out (stranger_signals.go).
+  final void Function(List<String> addresses)? admitSenders;
 
   /// Addresses whose record the bridge refused because it contradicts a
   /// device key vouched for there (read with the pins once a minute).
@@ -711,7 +717,7 @@ final class ManagedSignalTransport implements SignalTransport {
 }
 
 final class RuntimeNodeRuntime extends ChangeNotifier
-    implements SignalTransport {
+    implements SignalTransport, SignalSenderAdmission {
   RuntimeNodeRuntime.preview()
     : _bootstrap = null,
       _previewMode = true,
@@ -842,6 +848,11 @@ final class RuntimeNodeRuntime extends ChangeNotifier
 
   /// The addresses the app knows (null: not said in this run).
   List<String>? _knownPeers;
+
+  /// The contacts named with [admitSender], handed over again after the
+  /// node restarts; at most [_maxAdmitted] (the bridge takes no more).
+  final Set<String> _admitted = <String>{};
+  static const int _maxAdmitted = 4096;
   final StreamController<String> _keyConflicts =
       StreamController<String>.broadcast();
   final Set<String> _reportedConflicts = <String>{};
@@ -949,6 +960,29 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     }
     _knownPeers = known;
     _setKnownNow(known);
+  }
+
+  @override
+  void admitSender(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    if (normalized.isEmpty ||
+        _admitted.length >= _maxAdmitted ||
+        !_admitted.add(normalized)) {
+      return;
+    }
+    _admitNow(<String>[normalized]);
+  }
+
+  void _admitNow(List<String> addresses) {
+    final void Function(List<String>)? admit = _session?.admitSenders;
+    if (admit == null) {
+      return;
+    }
+    try {
+      admit(addresses);
+    } on Object catch (error) {
+      logZenWarning('Contacts were not handed over: $error');
+    }
   }
 
   void _setKnownNow(List<String> known) {
@@ -1667,6 +1701,9 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         if (known != null) {
           _setKnownNow(known);
         }
+        if (_admitted.isNotEmpty) {
+          _admitNow(_admitted.toList());
+        }
         if (_vouchedKeys.isNotEmpty) {
           _pinNow(Map<String, String>.of(_vouchedKeys), keep: true);
         }
@@ -2063,6 +2100,9 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
         ),
         waitTimeout: config.waitTimeout,
         fallbackPollInterval: config.fallbackPollInterval,
+        // A locked phone's receiver holds the phone itself, once it knows
+        // who sent a signal (LockedReceiver.handleFrame).
+        holdOnArrival: config.peerTarget != kReceiveOnlyPeerTarget,
       ),
       onStop: () async {
         linkCheck?.cancel();
@@ -2113,6 +2153,10 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     setKnownPeers: (List<String> addresses) => bridge.setPqPins(
       handle,
       jsonEncode(<String, Object?>{'known': addresses}),
+    ),
+    admitSenders: (List<String> addresses) => bridge.setPqPins(
+      handle,
+      jsonEncode(<String, Object?>{'listen': addresses}),
     ),
     keyConflicts: keyConflicts.stream,
     setOnScreen: (bool onScreen) => bridge.setNodeOnScreen(handle, onScreen),

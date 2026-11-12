@@ -525,16 +525,25 @@ void main() {
 
     test('the phone stays awake only for what is kept or rings', () async {
       final _WakeCalls wake = _WakeCalls();
+      // The arrival's hold comes at most every 1.5 s: none taken before.
+      ZenWake.resetForTest();
       ZenWake.platform = wake;
       addTearDown(() => ZenWake.platform = const TimerWakePlatform());
       await startReceiver(await publishFor(_masterKey()));
 
-      // Dropped at once: nothing more than the arrival's own moment.
+      // Dropped at once: nothing more than the arrival's own moment, which
+      // a friend's frame takes here (the node no longer takes it for
+      // anyone's), at most every 1.5 s.
       await receive(_ada, const <String, dynamic>{'type': 'pong'});
+      expect(wake.calls, <String>['hold signal 3']);
       await receive(_ada, const <String, dynamic>{'type': 'away'});
       await receive(_ada, const <String, dynamic>{'type': 'lg_hello'});
       await receive(_ada, const <String, dynamic>{'type': 'rly_deposit'});
-      expect(wake.calls, isEmpty);
+      List<String> work() => <String>[
+        for (final String c in wake.calls)
+          if (!c.startsWith('hold signal ')) c,
+      ];
+      expect(work(), isEmpty);
 
       // Kept: held while it goes into the inbox, let go right after.
       await receive(_ada, <String, dynamic>{
@@ -542,7 +551,7 @@ void main() {
         '_rid': 'w1',
         'text': 'Hej',
       });
-      expect(wake.calls, <String>[
+      expect(work(), <String>[
         'hold locked-keep 20',
         'release locked-keep 1000',
       ]);
@@ -550,7 +559,7 @@ void main() {
 
       // A ring: awake while it rings, so its end is noticed.
       await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
-      expect(wake.calls, <String>['hold ring 8']);
+      expect(work(), <String>['hold ring 8']);
     });
 
     test('polls that find nothing come less often, and often again once '
