@@ -24,9 +24,11 @@
 # the release tag; a release whose APK (any of the per-ABI ones) or IPA
 # contradicts it stops the deployment (the old pages stay).
 # Runs on a push to main that changes them, by hand, once a day, and when
-# a release is published: that event only asks for a run on main (the
-# github-pages environment deploys from main only), so the source follows
-# every release. Needs Settings -> Pages -> Source: GitHub Actions (once).
+# a release is published or a pre-release is promoted to a release
+# (`published` and `released`: promoting fires only `released`, and a
+# release published at once fires both): those events only ask for a run
+# on main (the github-pages environment deploys from main only), so the
+# source follows every release. Needs Settings -> Pages -> Source: GitHub Actions (once).
 # No secret is used; the token reads the repository and, for the release
 # event, may start this workflow. Actions are pinned to commit SHAs
 # (Dependabot updates them).
@@ -41,16 +43,21 @@ on:
       - 'tool/ci/site_files.py'
       - '.github/workflows/pages.yml'
   release:
-    types: [published]
+    types: [published, released]
   schedule:
     - cron: '17 4 * * *'
   workflow_dispatch:
 
 permissions: {}
 
+# Only the requests for a run replace each other. A deployment is never
+# cancelled once started: Pages then still holds it as in progress for a
+# while, and the next deployment is refused for it ("in progress
+# deployment"), which is how the deployment right after a release has been
+# failing. A newer run waits for the running one.
 concurrency:
   group: pages-${{ github.event_name == 'release' && 'kick' || 'deploy' }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'release' }}
 
 jobs:
   kick:
@@ -66,20 +73,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.event.repository.default_branch }}
-        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+        run: |
+          for attempt in 1 2 3; do
+            gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" && exit 0
+            echo "The request failed (attempt $attempt): again in 20 s."
+            sleep 20
+          done
+          exit 1
 
   deploy:
     name: Pages and the iPhone source
     if: github.event_name != 'release' && !github.event.repository.private
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_again.outputs.page_url || steps.deployment_last.outputs.page_url }}
     steps:
       # The whole history: the sitemap dates each page by its last commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -130,5 +143,35 @@ jobs:
           path: _site
           include-hidden-files: true
 
+      # Up to three tries with the same uploaded site, 90 and 240 seconds
+      # apart: a refused or failed deployment (Pages still busy with the
+      # last one, a hiccup of the service) must not leave the install page
+      # and the SideStore source on the old version until the next day's
+      # run. A deployment is made anew each time from the one artifact, so
+      # a try after a failure changes nothing a successful one has done.
       - id: deployment
+        continue-on-error: true
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          timeout: 300000
+
+      - name: Wait before the second try
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 90
+
+      - id: deployment_again
+        if: steps.deployment.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          timeout: 300000
+
+      - name: Wait before the last try
+        if: steps.deployment.outcome == 'failure' && steps.deployment_again.outcome == 'failure'
+        run: sleep 240
+
+      - id: deployment_last
+        if: steps.deployment.outcome == 'failure' && steps.deployment_again.outcome == 'failure'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          timeout: 300000
