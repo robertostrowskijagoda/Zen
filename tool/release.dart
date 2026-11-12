@@ -17,10 +17,13 @@
 //   dart run tool/release.dart prepare 1.12.0 [--build 12] [--skip-checks]
 //       [--allow-dirty] [--no-tag] [--allow-unpinned-keys]
 //       [--allow-unpinned-native] [--allow-missing-fixture]
+//       [--allow-old-suffix-list]
 //       Clean tree, the upgrade fixture of the version being replaced
 //       (test/fixtures/upgrade/<current version>), a valid "### What's
 //       new" note under "## Unreleased" (an [en] line may not name a screen
-//       by its Polish text),
+//       by its Polish text), a Public Suffix List no older than 120 days
+//       (refreshed with tool/public_suffix_list.dart;
+//       --allow-old-suffix-list to go on),
 //       the app pins its release keys (kReleaseMaintainers,
 //       kOfficialApkCertificatesSha256; --allow-unpinned-keys only for a
 //       test release), the native builds pin what they download (Gradle's
@@ -368,6 +371,23 @@ Future<bool> _prepare(List<String> args) async {
         stdout.writeln('  $file');
       }
     }
+  }
+
+  // 1a''. The Public Suffix List the password autofill tells one site from
+  // another by: new public suffixes (hosting where anyone gets a subdomain)
+  // are added to it every week.
+  final String? suffixes = publicSuffixListAgeProblem(
+    File(
+      'lib/src/features/passwords/public_suffix_rules.dart',
+    ).readAsStringSync(),
+    DateTime.now(),
+  );
+  if (suffixes != null) {
+    if (!_flag(args, 'allow-old-suffix-list')) {
+      _report('Public Suffix List', <String>[suffixes]);
+      return false;
+    }
+    stderr.writeln('WARNING: --allow-old-suffix-list: $suffixes');
   }
 
   // 1b. The short note the app shows with the update notice; release.yml

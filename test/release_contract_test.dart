@@ -42,6 +42,34 @@ void main() {
     );
   });
 
+  test('preparing a release stops on a Public Suffix List older than it '
+      'allows', () {
+    const String rules =
+        "const String kPublicSuffixListVersion = '2026-11-11_17-18-20_UTC';";
+    expect(
+      publicSuffixListAgeProblem(rules, DateTime.utc(2027, 1, 20)),
+      isNull,
+    );
+    expect(
+      publicSuffixListAgeProblem(rules, DateTime.utc(2027, 4, 1)),
+      allOf(contains('141 days'), contains('tool/public_suffix_list.dart')),
+    );
+    expect(
+      publicSuffixListAgeProblem('', DateTime.utc(2027)),
+      contains('no version'),
+    );
+    // The file the app carries names its version as the check reads it.
+    expect(
+      publicSuffixListAgeProblem(
+        File(
+          'lib/src/features/passwords/public_suffix_rules.dart',
+        ).readAsStringSync(),
+        DateTime.utc(2000),
+      ),
+      isNull,
+    );
+  });
+
   test('preparing a release names the changed logic with a fast test of '
       'its own that mutation testing does not cover yet', () {
     const String logic = "import 'dart:math';\n";

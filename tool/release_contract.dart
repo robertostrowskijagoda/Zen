@@ -1100,6 +1100,33 @@ String? missingUpgradeFixture(String released, Iterable<String> present) {
       '"Upgrade fixtures").';
 }
 
+/// The oldest the Public Suffix List the app carries may be at a release.
+const Duration kMaxPublicSuffixListAge = Duration(days: 120);
+
+/// Why the Public Suffix List of [rulesSource] (the text of
+/// lib/src/features/passwords/public_suffix_rules.dart) is too old to
+/// release with at [now] ([kMaxPublicSuffixListAge]), or null when it is
+/// recent enough.
+String? publicSuffixListAgeProblem(String rulesSource, DateTime now) {
+  final RegExpMatch? m = RegExp(
+    r"kPublicSuffixListVersion = '(\d{4}-\d{2}-\d{2})_",
+  ).firstMatch(rulesSource);
+  final DateTime? at = m == null
+      ? null
+      : DateTime.tryParse('${m.group(1)}T00:00:00Z');
+  if (at == null) {
+    return 'public_suffix_rules.dart names no version of the list: run '
+        '`dart run tool/public_suffix_list.dart`.';
+  }
+  final int days = now.toUtc().difference(at).inDays;
+  if (days <= kMaxPublicSuffixListAge.inDays) {
+    return null;
+  }
+  return 'The Public Suffix List is $days days old (${m!.group(1)}): run '
+      '`dart run tool/public_suffix_list.dart`, review the diff and commit '
+      'it.';
+}
+
 /// The files of [changed] (paths under lib/ changed since the last release)
 /// that mutation testing should cover and does not: plain logic (no widget
 /// code: nothing under `presentation/`, [sources] does not import Flutter's

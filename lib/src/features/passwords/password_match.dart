@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
+import 'package:zen/src/features/passwords/public_suffix.dart';
 
 /// What an entry's address points at.
 enum PasswordAddressKind {
@@ -101,15 +102,17 @@ final class PasswordAddress {
   String toString() => 'PasswordAddress(${kind.name})';
 }
 
-/// [host] in lower case without a trailing dot; null when it is not a
-/// host. Letters of other alphabets are kept as they are (never folded to
-/// look-alike Latin ones), so `exаmple.com` with a Cyrillic `а` stays a
+/// [host] as the autofill compares it: in its ASCII form, as browsers
+/// report a page ([asciiHost]: lower case, letters of other alphabets in
+/// punycode, `bücher.de` as `xn--bcher-kva.de`), without a trailing dot;
+/// null when it is not a host. Letters that look like Latin ones are never
+/// folded into them, so `exаmple.com` with a Cyrillic `а` stays a
 /// different host from `example.com`.
 String? normalizePasswordHost(String host) {
   String h = host.trim().toLowerCase();
   if (h.contains('%')) {
     // `Uri` escapes letters of other alphabets (and anything else) in a
-    // host: compared as the letters themselves.
+    // host: read as the letters themselves.
     try {
       h = Uri.decodeComponent(h);
     } on ArgumentError {
@@ -126,6 +129,11 @@ String? normalizePasswordHost(String host) {
     // An IPv6 literal as `Uri.host` gives it (without brackets).
     return '[$h]';
   }
+  final String? ascii = asciiHost(h);
+  if (ascii == null) {
+    return null;
+  }
+  h = ascii;
   while (h.endsWith('.')) {
     h = h.substring(0, h.length - 1);
   }
@@ -139,95 +147,18 @@ String? normalizePasswordHost(String host) {
   return h;
 }
 
-/// Second-level names that countries use as a public layer under their
-/// top-level domain (`co.uk`, `com.pl`, `ne.jp`): under a two-letter
-/// top-level domain they are never the registrable part.
-const Set<String> _genericSecondLevel = <String>{
-  'ac',
-  'co',
-  'com',
-  'edu',
-  'gob',
-  'gov',
-  'go',
-  'gouv',
-  'info',
-  'ltd',
-  'me',
-  'mil',
-  'ne',
-  'net',
-  'nom',
-  'or',
-  'org',
-  'plc',
-  'sch',
-  'biz',
-};
-
-/// Public suffixes of more than one label that the rule above does not
-/// cover: shared hosting where every subdomain is somebody else's, and
-/// regional names in Poland. A host under one of these is matched only
-/// exactly or with its own subdomains.
-const Set<String> _publicSuffixes = <String>{
-  // Poland (regional and functional second-level names).
-  'waw.pl', 'krakow.pl', 'wroclaw.pl', 'poznan.pl', 'gda.pl', 'gdansk.pl',
-  'lodz.pl', 'szczecin.pl', 'lublin.pl', 'katowice.pl', 'bialystok.pl',
-  'olsztyn.pl', 'torun.pl', 'bydgoszcz.pl', 'rzeszow.pl', 'opole.pl',
-  'kielce.pl', 'zgora.pl', 'gorzow.pl', 'slask.pl', 'mazowsze.pl',
-  'pomorze.pl', 'malopolska.pl', 'wielkopolska.pl', 'warmia.pl',
-  'mail.pl', 'shop.pl', 'priv.pl', 'tm.pl', 'media.pl', 'sklep.pl',
-  'pc.pl', 'agro.pl', 'atm.pl', 'auto.pl', 'gmina.pl', 'powiat.pl',
-  'nieruchomosci.pl', 'realestate.pl', 'travel.pl', 'turystyka.pl',
-  // Hosting where each subdomain belongs to someone else.
-  'github.io', 'gitlab.io', 'blogspot.com', 'herokuapp.com', 'netlify.app',
-  'vercel.app', 'pages.dev', 'workers.dev', 'web.app', 'firebaseapp.com',
-  'appspot.com', 'azurewebsites.net', 'cloudfront.net', 'amazonaws.com',
-  'ngrok.io', 'ngrok-free.app', 'glitch.me', 'repl.co', 'onrender.com',
-  'fly.dev', 'wordpress.com', 'wixsite.com', 'blogspot.pl', 'neocities.org',
-  'surge.sh', 'bitbucket.io', 'myshopify.com', 'carrd.co', 'webflow.io',
-  'translate.goog', 'dyndns.org', 'duckdns.org', 'no-ip.org', 'ddns.net',
-  'r.appspot.com', 'sharepoint.com', 'readthedocs.io', 'deno.dev',
-  'pythonanywhere.com', 'replit.dev', 'framer.website', 'notion.site',
-  // Other countries' multi-label suffixes outside the rule above.
-  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
-  'com.br', 'net.br', 'org.br', 'gov.br', 'com.cn', 'net.cn', 'org.cn',
-  'gov.cn', 'com.tw', 'org.tw', 'com.hk', 'org.hk', 'com.sg', 'com.my',
-  'com.mx', 'com.ar', 'com.tr', 'com.ua', 'kiev.ua', 'com.ru', 'msk.ru',
-  'spb.ru', 'com.de', 'co.za', 'co.in', 'firm.in', 'gen.in', 'ind.in',
-};
-
-bool _isPublicSuffix(List<String> labels) {
-  final String name = labels.join('.');
-  if (_publicSuffixes.contains(name)) {
-    return true;
-  }
-  return labels.length == 2 &&
-      labels[1].length == 2 &&
-      _genericSecondLevel.contains(labels[0]);
-}
-
-/// The registrable part of [host] (`example.com` for `login.example.com`,
-/// `bank.com.pl` for `www.bank.com.pl`); null for an address, a single
-/// label, or a host that is itself a public suffix: those match only
-/// exactly.
+/// The registrable part of [host] by the Public Suffix List
+/// ([publicSuffixList]: `example.com` for `login.example.com`,
+/// `bank.com.pl` for `www.bank.com.pl`, `sklep.gdynia.pl` for
+/// `www.sklep.gdynia.pl`, `victim.github.io` for `a.victim.github.io`),
+/// in ASCII form; null for an address, a single label, or a host that is
+/// itself a public suffix: those match only exactly.
 String? registrablePasswordDomain(String host) {
   final String? h = normalizePasswordHost(host);
   if (h == null || h.startsWith('[') || _ipv4.hasMatch(h)) {
     return null;
   }
-  final List<String> labels = h.split('.');
-  if (labels.length < 2 || _isPublicSuffix(labels)) {
-    return null;
-  }
-  // The longest public suffix wins (`a.b.github.io` → `b.github.io`).
-  for (int start = 0; start < labels.length - 2; start++) {
-    if (_isPublicSuffix(labels.sublist(start + 1))) {
-      return labels.sublist(start).join('.');
-    }
-  }
-  // Only the top-level domain is public.
-  return labels.sublist(labels.length - 2).join('.');
+  return publicSuffixList.registrableDomain(h);
 }
 
 /// How an entry matched a request.
@@ -236,7 +167,8 @@ enum PasswordMatchKind {
   exact,
 
   /// Another host of the same registrable domain (`login.example.com` for
-  /// `example.com`).
+  /// `example.com`, by the Public Suffix List): the picker shows the
+  /// address the entry was saved for beside it.
   sameSite,
 }
 
@@ -262,7 +194,9 @@ int _defaultPort(String scheme) => scheme == 'http' ? 80 : 443;
 ///   same registrable domain ([registrablePasswordDomain]). Never by a
 ///   part of a name: `evil-example.com`, `example.com.evil.net` and
 ///   `notexample.com` do not match `example.com`; hosts under a public
-///   suffix (`co.uk`, `github.io`) match only their own registrable name.
+///   suffix of the Public Suffix List (`co.uk`, `gdynia.pl`, `github.io`,
+///   `s3.amazonaws.com`) match only their own registrable name. Both sides
+///   are compared in their ASCII form ([normalizePasswordHost]).
 /// * A page that is not https ([webScheme] `http`, or not given) never
 ///   matches an https entry; it matches only entries that say `http://`.
 ///   An https page matches both.
