@@ -851,7 +851,10 @@ void main() {
       ];
       expect(links, isNotEmpty);
       for (final String link in links) {
-        expect(link, startsWith('/Zen/'), reason: link);
+        // Another site (the footer's documents) is not relative.
+        if (!link.startsWith('https://')) {
+          expect(link, startsWith('/Zen/'), reason: link);
+        }
       }
       for (final String target in <String>[
         '/Zen/',
@@ -1330,9 +1333,17 @@ void main() {
         expect(figure, isNot(contains('href="http')));
         expect(figure, isNot(matches(RegExp(r'fill="#|stroke="#'))));
       }
-      // The only image of the page is the app icon.
+      // The only image of the page is the app icon (the header's, for a
+      // visitor without a script, is inside <noscript>).
       expect(
-        RegExp(r'<img ').allMatches(iphone).length,
+        RegExp(r'<img ')
+            .allMatches(
+              iphone.replaceAll(
+                RegExp('<noscript>.*?</noscript>', dotAll: true),
+                '',
+              ),
+            )
+            .length,
         1,
         reason: 'the hero icon',
       );
