@@ -397,7 +397,9 @@ None of these is a frame between Zen devices.
   back; a check the person starts never waits.
 - **Android autofill** (`ZenAutofillService.kt`, `password_autofill_bridge.dart`):
   the system's autofill service talks only to the app on the same phone
-  over the method channel `zen/autofill`; nothing of it goes on the
+  over the method channel `zen/autofill`; the password setup
+  (`password_setup.dart`, `ZenAutofillSetupBridge.kt`) looks at the
+  installed browsers over `zen/autofill_setup`; nothing of it goes on the
   network.
 
 ## 2. Frame types

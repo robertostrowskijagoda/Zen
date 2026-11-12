@@ -214,7 +214,9 @@ header, and that nothing else brings it in.
 | `test/locked_presence_sim_test.dart`, `test/locked_presence_open_sim_test.dart` | the real `LockedReceiver` of several locked friends on a virtual clock (frames 80 ms on the way, a phone awake 5 s from its own round and 3 s from a frame, phones on 1.16.4 modelled as that version pinged and answered): how often they wake each other (each number with its "before"), lost pings, silent friends, a clock set back, `presence.zbox` writes; and what the first screen shows of friends the moment Zen opens after a lock |
 | `test/locked_alert_conformity_test.dart` | each frame ends the same on a locked phone as in the app: rings, call cards and message notices from one shared decision, a flood of mentions from one member |
 | `test/account_recovery_friends_test.dart`, `test/password_vault_recovery_test.dart`, `test/account_sync_pruning_test.dart`, `test/ledger_contacts_backup_test.dart` | key pieces at close friends (the account password's rules, the thresholds 2/3/4, recovery end to end with three close friends, pieces sent again until confirmed, former holders, a removed friend, a helper on a new phone, a stop from a device cut off, a helper on 1.16.4); passwords and notes back with every way an account comes back, the newest copy taken, a revoked device given none, a key copy with no friend at all; the state log started over so a deleted password or note leaves it; friends and groups saved in parts above some 240 friends and the private log started over within its bound |
-| `test/password_vault_test.dart`, `test/password_generator_test.dart`, `test/password_csv_import_test.dart`, `test/password_match_test.dart`, `test/password_screens_test.dart`, `test/password_autofill_test.dart` | "Hasła": the store's limits, earlier versions, edits on two devices, a newer or damaged vault left as it is, no secret in a debug string; the generator (classes, no modulo bias, strength); CSV files of Chrome, Edge, Firefox, Bitwarden, KeePass and KeePassXC, broken files and random bytes; matching by exact host, registrable domain, port and package, look-alike pages getting nothing; the screens behind the app password; the autofill picker (nothing leaves Zen without an unlock and a pick, a lock closes it) with the Android side faked |
+| `test/password_vault_test.dart`, `test/password_generator_test.dart`, `test/password_csv_import_test.dart`, `test/password_match_test.dart`, `test/password_screens_test.dart`, `test/password_autofill_test.dart` | "Hasła": the store's limits, earlier versions, edits on two devices, a newer or damaged vault left as it is, no secret in a debug string; the generator (classes, no modulo bias, strength); CSV files of Chrome, Edge, Firefox, Bitwarden, KeePass and KeePassXC, broken files and random bytes; matching by exact host, registrable domain, port and package, look-alike pages getting nothing; the screens behind the app password; the autofill picker (nothing leaves Zen without an unlock and a pick, a lock closes it) with the Android side faked; one question per request (the lock screen's unlock is the question for the request that was waiting, once, within its minute, never after a wrong or an emergency password, an unlock older than the request does not count, a lock forgets it), a login added in the picker (saved under the request's address, used at once, the held request, a form that ended meanwhile, a full or newer vault, a lock while typing), the first page of a login in two steps and a page with the password alone |
+| `test/password_manager_setup_test.dart` | the password manager's setup with the device faked: nothing asked where Zen fills nothing, the installed browsers Zen knows in its order with what each needs (a switch of its own, nothing, probably not shown, unverified), Zen's list equal to the autofill's list of browsers and to the manifest's `<queries>`, the Android side's answer read defensively, a browser's name as one short line, the channel's calls and a missing or failing Kotlin side, the screen on Android (Chrome off or on, reading again on return, no known browser, an Android that cannot fill, the import at the end), the honest page elsewhere, the button in "Hasła" also when empty |
+| `test/onboarding_first_run_setup_test.dart` | the first-start setup: the steps and their count, the password manager's step (asked first, yes shows the same setup as "Hasła", no changes nothing, the honest page where Zen fills nothing), after an update only the new step for who went through the revision before and every step for anyone further behind, the last step closing the setup opened from Ustawienia |
 | `test/secure_clipboard_test.dart` | a copied secret leaves the clipboard at a lock and at the end of its time in the background, without the clipboard being read; a failed marked copy copies nothing and says so; the plain clipboard where the system has no marked one |
 | `test/pyramid_era_seal_test.dart`, `test/pyramid_treasury_test.dart`, `test/pyramid_court_anonymity_test.dart` | on the pyramid's simulated world: operations dated into a sealed era count nowhere, late changes of the treasurers undo no payment, two seals of one era; a number split between orders freed by a release, a dishonest treasurer among six, what treasurers keep; the court's one-time cards (two distinct cards decide, one judge counts once, a card of one matter counts in no other, nobody outside the court holds one) |
 | `test/profile_photo_gif_test.dart`, `test/diagnostics_go_crash_accounts_test.dart`, `test/ledger_device_record_key_test.dart` | a GIF profile photo keeps moving, HEIC read by the phone's own decoder (faked), animated WebP and PNG made GIFs; the Go crash file given to the bridge only for a listed account; a key named in a friend's device record is a hint from that friend's account, never a pin |
@@ -854,9 +856,17 @@ JVM tests (JUnit) of the Kotlin code with no Android in it: the
 power-button alarm's counting (`PowerPressCounter`), where a link Zen
 claims goes instead of back to Zen (`linkTargetWithoutZen`) and which
 fields of a login form autofill takes for the login and the password
-(`ZenAutofillFieldsTest`: hints first, a new password or a one-time code
-is no password to fill, two password fields offer nothing, a page's
-address counts only in a known browser). The CI job
+(`ZenAutofillFieldsTest`: hints first, hints that say nothing, as
+`autocomplete="off"`, leave the field to its type, a new password or a
+one-time code is no password to fill, two password fields offer nothing,
+the first page of a login in two steps fills the login alone, a page's
+address counts only in a known browser), which browsers the password
+setup looks at and what their provider's answer means
+(`ZenAutofillSetupTest`: only package names, each once and at most 40,
+only the documented values of the switch, the provider is the browser's
+own) and how long a request waits while a new login is typed
+(`ZenAutofillTimeoutTest`: five minutes from when it opened, a minute to
+pick but never past the same end). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
 
@@ -905,15 +915,22 @@ tests leave behind; a new class in its report is worth a look.
 - Of 1.16.5, only a phone shows: video between two Android phones (the
   VP8 preference is tested on descriptions, not on hardware codecs); the
   autofill service with real apps and browsers (of the Kotlin side only
-  the reading of a form's fields has unit tests and the manifest an
-  emulator test, section 9; the picker is tested with the Android side
-  faked); the phone's own
+  the reading of a form's fields, the setup's packages and a request's
+  time have unit tests and the manifest an emulator test, section 9; the
+  picker is tested with the Android side faked); the phone's own
   decoder for HEIC photos (faked); the clipboard emptied from the
   background; the alarm windows of a real phone (section 1, the model);
   the Android service taking over from a hung app; key pieces and the copy
   with friends end to end between real phones (simulated between
   services only). [RELEASES.md](RELEASES.md), section 3, lists what to
   try before a release.
+- The password manager's setup and the autofill row of the release after
+  1.16.5 were tried on no phone: Chrome's switch read through its provider
+  and its settings page opened, what Brave, Vivaldi, Firefox and its forks
+  really need, whether Edge, Samsung Internet and Opera show Zen at all,
+  the row in the light and the dark theme, and the suggestion inside a
+  real keyboard. The setup is tested with the device faked, the browsers'
+  answers as the documentation describes them.
 - The harness works only in debug builds.
 - Apps on one computer share one link: network splits are tested in the
   simulator.

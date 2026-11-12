@@ -507,14 +507,91 @@ entries, 4 MB).
 
 On Android 9 and later Zen can fill logins into other apps and browsers,
 once the person picks Zen as Android's autofill service (off until then).
-A login form then gets one suggestion, "Odblokuj Zen", which carries no
-login and no password: nothing is read from disk for it and no password
-exists on the Android side. Nothing leaves Zen before the person taps it,
-unlocks Zen, confirms who they are and picks an entry; only that entry's
-login and password go back, and only to the request still open. Closing
-the picker, Zen locking, the time running out, going back to the app
-instead of picking, or any error ends the request with nothing filled.
-This version never offers to save what is typed elsewhere.
+A login form then gets one suggestion, a row of Zen's own with its icon,
+"Zen" and "Odblokuj Zen", which carries no login and no password: nothing
+is read from disk for it and no password exists on the Android side. The
+same holds for the suggestion inside the keyboard (Android 11 and later,
+built with `androidx.autofill`): it holds the icon, the two words and a
+description for screen readers, and its long press opens Zen from an
+immutable intent with no extras. Nothing leaves Zen before the person taps
+the suggestion, is asked who they are once (below) and picks an entry; only
+that entry's login and password go back, and only to the request still
+open. Closing the picker, Zen locking, the time running out, going back to
+the app instead of picking, or any error ends the request with nothing
+filled. This version never offers to save what is typed elsewhere.
+
+- **Which forms get it.** A form with exactly one field that says it takes
+  the current password, and at most one login field before it; or the first
+  page of a login in two steps: no password field of any kind and exactly
+  one field that says it is the login (`username`; an e-mail field alone is
+  not enough). A hint that says nothing about a field (`autocomplete="off"`
+  and the words pages put there to keep browsers away) is passed over, and
+  the field is read by its type and its name; a field that says it is
+  something else (a new password, a one-time code, a search, a phone
+  number) is never filled, and a form with two password fields (signing up,
+  changing a password) gets nothing. Only the fields the form has are
+  filled: the login alone on the first page of two, the password alone on
+  the second.
+- **One question, and the unlock that counts as it.** An unlocked Zen asks
+  who the person is when a request's picker is to open, as for opening
+  "Hasła", every time. When Zen was locked, asking again right after the
+  lock screen would be the same question twice, so that unlock is the
+  question, within these limits. The lock screen asks the Android side, as
+  it starts to check a password or a fingerprint, which request is open;
+  only an answer that came back before the check ended counts, so only a
+  request already waiting at that moment. Only a check that opened this
+  account passes; the emergency wipe password, "Nie pamiętam hasła" and
+  "Inne konto" never start one, so a hidden or another account's unlock
+  passes nothing, and a wrong password forgets it. The pass is for that one
+  request (by its id), is taken once, whatever the answer, and only within
+  a minute of when the request was seen open, the longest the Android side
+  keeps a request. Locking Zen forgets it, so does any later check, and a
+  host with nothing to take it up lets it go. It opens nothing else: it does
+  not touch the clock of confirmations that "Hasła" and every other
+  sensitive place use, so "Hasła" itself still asks every time. What it
+  gives up compared with a second question: that question confirmed the
+  person at the moment the picker was about to open, with the requesting
+  app named on the screen; now the confirmation is the unlock made up to a
+  minute earlier, on the lock screen, which does not name the app. What
+  remains: the request exists only because someone tapped Zen's suggestion
+  in that app a moment before, the picker still names the app and the page,
+  and nothing goes to the form without an entry picked there. Someone who
+  holds the phone and can unlock it could answer a second question just as
+  well, since it asks for the same password or finger.
+- **A login added in the picker.** With nothing saved for the page or app,
+  the picker opens the ordinary entry form to add one. Its address is taken
+  from the request alone, never from what the page or app wrote: the page's
+  scheme, host and port as a known browser reported them, or
+  `android-app://` with the package as the system reports it, shown and not
+  editable, so the next request from the same page or app finds the entry
+  as an exact match. While it is typed the request is kept open for up to
+  five minutes from when it began (`hold`; the Android side never keeps it
+  longer, and Zen locking or the person leaving still ends it). The request
+  holds only the ids of the form's fields: when the form has gone, nothing
+  is filled and the new entry is kept and said so. What a longer wait gives
+  up: the form stays fillable for minutes instead of one. An entry added
+  this way is typed by the person for that page, so a page cannot make Zen
+  save a login under an address of its choosing.
+- **The setup looks at browsers.** "Konfiguracja haseł" tells which of 21
+  known browsers are installed, so the manifest names them under
+  `<queries>` (package visibility, no permission; Zen sees whether these
+  packages are installed and nothing else about the others): `com.android.chrome`,
+  `com.chrome.beta`, `com.chrome.dev`, `com.chrome.canary`,
+  `org.chromium.chrome`, `com.brave.browser`, `com.vivaldi.browser`,
+  `com.microsoft.emmx`, `com.sec.android.app.sbrowser`, `com.opera.browser`,
+  `com.kiwibrowser.browser`, `org.mozilla.firefox`,
+  `org.mozilla.firefox_beta`, `org.mozilla.fenix`, `org.mozilla.focus`,
+  `org.mozilla.klar`, `org.torproject.torbrowser`, `us.spotco.fennec_dos`,
+  `org.mozilla.fennec_fdroid`, `org.ironfoxoss.ironfox` and
+  `com.duckduckgo.mobile.android`. For the Chromium family it reads the
+  browser's own provider
+  (`content://<package>.AutofillThirdPartyModeContentProvider/autofill_third_party_mode`)
+  for its "Autofill using another service" switch, off the main thread
+  (the browser may start for it), and takes anything unexpected for
+  unknown; "Otwórz ustawienia przeglądarki" starts an activity only when
+  it resolves in that very package, never a chooser. What Dart names is
+  checked again on the Android side (only valid package names, at most 40
+  in a call). Nothing about it leaves the phone or goes to the log.
 
 - **Matching.** The picker lists only the logins saved for the app or
   page that asked; every other entry is shown only after a warning
@@ -532,7 +609,8 @@ This version never offers to save what is typed elsewhere.
   autofill service answers. It cannot name a web page to be matched as
   one (only a known browser's page counts; any other app is matched by its
   package alone), cannot change what the suggestion carries to Zen, and
-  gets nothing unless the person unlocks Zen and picks an entry for it;
+  gets nothing unless the person unlocks Zen (or confirms who they are)
+  and picks an entry for it;
   the picker shows its package (and the name it gives itself) at the top.
   What it can do: ask, look like another app, and receive whatever the
   person picks for it past the warning. A browser is trusted to report

@@ -76,8 +76,13 @@ to the install page and the same steps for every system.
    skip: when Zen locks itself (with what *Never* really means; choosing it
    asks for the password you have just set once more), what
    notifications say (*Sender and content*, *Sender only* or *Notice
-   only*), whether your gates are open for free or need your consent, and
-   the animations. *Settings → Run the setup again* asks them all again.
+   only*), whether your gates are open for free or need your consent, the
+   animations, and whether you want Zen's password manager (*Yes* shows its
+   setup: whether Zen is Android's autofill service and what each browser
+   needs, see [Passwords](passwords.md#password-setup); *No* changes
+   nothing). *Settings → Run the setup again* asks them all again. After an
+   update that adds a question, someone who went through the setup just
+   before sees only the new one, once.
    **Permissions** come last. On top: notifications, Bluetooth (on, and visible
    nearby), full-screen alerts and not being put to sleep. Microphone,
    camera, location and exact alarms sit folded under *More permissions

@@ -184,10 +184,15 @@ key, so every release must be signed with this key.
 >    photo and in a post.
 > 9. Autofill (Android 9 and later): *Hasła* → menu → *Wypełnianie w innych
 >    aplikacjach*, pick Zen in Android's settings; a login page in a browser and a login form of
->    an app offer *Odblokuj Zen*; after the app password and a pick, the
->    login and the password are filled; closing the picker without a pick
->    fills nothing; with Zen locked the suggestion still asks for the
->    unlock first.
+>    an app offer Zen's row (the icon, *Zen*, *Odblokuj Zen*, readable in
+>    the light and the dark theme, and in the keyboard on Android 11 and
+>    later); with Zen unlocked one confirmation and a pick fill the login
+>    and the password; with Zen locked the unlock is the only question and
+>    the picker opens right after it; closing the picker without a pick
+>    fills nothing. A form with `autocomplete="off"` still gets the row, the
+>    first page of a login in two steps fills the login alone, a sign-up or
+>    change-of-password form gets nothing; a login added in the picker for a
+>    page with nothing saved is filled at once.
 > 10. Lock a phone with friends' statuses known, wait 20 minutes, open Zen:
 >     every friend's status is there at once, and the log has a
 >     `presence-kept` line.
@@ -205,6 +210,14 @@ key, so every release must be signed with this key.
 >     on a spare phone: both friends tap *Pomóż*, and after 24 hours the
 >     account password takes the account over; its friends, chats,
 >     passwords and notes come back from the copy the friends keep.
+> 15. Not tried on a phone before the release that has them: *Hasła* →
+>     *Konfiguracja haseł* on a phone with Chrome 135 or later, then with
+>     Brave and Vivaldi, Firefox and Edge or Samsung Internet. Chrome shows
+>     its "Autofill using another service" switch as off until it is turned
+>     on, as on after, and its settings page opens; the others say what
+>     the page claims about them (Firefox and its forks need nothing, Edge
+>     and Samsung Internet probably never show Zen). The first-start setup
+>     step appears once after the update over 1.16.5 and not again.
 >
 > Only when all of it works, edit the release, untick "pre-release" and tick
 > "Set as the latest release". If something fails, delete the pre-release and
