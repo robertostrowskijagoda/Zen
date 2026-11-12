@@ -606,6 +606,12 @@ final class LedgerNode {
   /// Followed addresses (not friends) → account key ('' until known).
   final Map<String, String> _followed = <String, String>{};
 
+  /// Addresses that were friends once → the account they had then, the
+  /// newest last: someone blocked stops being a friend, and the wall still
+  /// has to know whose reactions to leave out.
+  final Map<String, String> _former = <String, String>{};
+  static const int _maxFormer = 2000;
+
   /// /64 network -> (minute, frames) for strangers.
   final Map<String, (int, int)> _strangerBudget = <String, (int, int)>{};
   static const int _maxStrangerNetworks = 5000;
@@ -648,6 +654,11 @@ final class LedgerNode {
   /// Account key of friend [address], once known.
   String? accountOf(String address) =>
       _accounts[PeerShareCodec.normalizeAddress(address)];
+
+  /// The account [address] had while it was a friend (removed or blocked
+  /// since), or null.
+  String? formerAccountOf(String address) =>
+      _former[PeerShareCodec.normalizeAddress(address)];
 
   /// The account whose device at [address] its owner unlinked (a lost or
   /// stolen phone), or null: nothing should go there any more.
@@ -1148,6 +1159,13 @@ final class LedgerNode {
       _unlinked.remove(address);
       _certificateKnownBy.remove(address);
       final String? acc = _accounts.remove(address);
+      if (acc != null) {
+        _former.remove(address);
+        _former[address] = acc;
+        if (_former.length > _maxFormer) {
+          _former.remove(_former.keys.first);
+        }
+      }
       if (acc != null && !_accounts.containsValue(acc)) {
         for (final String kind in kFollowedFriendSpaces) {
           replicator.unsubscribe(accountSpace(kind, acc));
@@ -3749,6 +3767,7 @@ final class LedgerNode {
         into(_accounts, json['a']);
         into(_addressDevices, json['d']);
         into(_unlinked, json['x']);
+        into(_former, json['f']);
       }
     } on FormatException {
       logZenWarning('The ledger list of friend accounts is damaged.');
@@ -3779,8 +3798,9 @@ final class LedgerNode {
     Uint8List.fromList(utf8.encode(jsonEncode(_followed))),
   );
 
-  /// Friends' accounts by address (`a`), the device proven at each (`d`)
-  /// and the addresses whose device was cut off (`x`).
+  /// Friends' accounts by address (`a`), the device proven at each (`d`),
+  /// the addresses whose device was cut off (`x`) and the accounts of
+  /// former friends (`f`, from 1.17.0; older builds ignore it).
   Future<void> _savePeers() => disk.write(
     _peersKey,
     Uint8List.fromList(
@@ -3789,6 +3809,7 @@ final class LedgerNode {
           'a': _accounts,
           'd': _addressDevices,
           'x': _unlinked,
+          if (_former.isNotEmpty) 'f': _former,
         }),
       ),
     ),

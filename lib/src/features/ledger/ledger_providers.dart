@@ -69,6 +69,22 @@ List<String> acceptedFriendAddresses(SocialHubState state) => <String>[
     if (f.status == FriendRelationshipStatus.accepted) f.address,
 ];
 
+/// The accounts of the people blocked in the messenger, as far as [node]
+/// can tell: the account a hello from a blocked address proved, or the one
+/// it had while it was a friend. The wall leaves their likes and comments
+/// out (`buildFeed`).
+Set<String> blockedAccountsOf(LedgerNode node, SocialHubState state) {
+  if (!node.isReady) {
+    return const <String>{};
+  }
+  return <String>{
+    for (final FriendProfile f in state.friends.values)
+      if (f.status == FriendRelationshipStatus.blocked)
+        ?(node.accountOfAnyAddress(f.address) ??
+            node.formerAccountOf(f.address)),
+  }..remove(node.account);
+}
+
 /// What the account routing (several devices) asks the ledger.
 final class LedgerAccountDirectory implements AccountDeviceDirectory {
   LedgerAccountDirectory(this.node, this.friends, {this.groupMembers});

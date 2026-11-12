@@ -277,6 +277,8 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
       nameOf: nameOf,
       notify: notify,
       shouldNotify: () => !focused(),
+      blockedAccounts: () =>
+          blockedAccountsOf(node, ref.read(socialHubControllerProvider)),
     ),
     posts: FriendPostNotifier(
       node: node,

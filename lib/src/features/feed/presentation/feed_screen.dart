@@ -991,6 +991,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       reshares: _reshares,
       held: _reach,
       pyramidAddresses: _pyramidAddresses(),
+      blockedAccounts: blockedAccountsOf(node, social),
     ).where((FeedPost p) => p.id == id).firstOrNull;
     _byId = (_feedRevision, id, found);
     return found;
@@ -1004,6 +1005,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         reshares: _reshares,
         held: _reach,
         pyramidAddresses: _pyramidAddresses(),
+        blockedAccounts: blockedAccountsOf(node, social),
       );
 
   @override
