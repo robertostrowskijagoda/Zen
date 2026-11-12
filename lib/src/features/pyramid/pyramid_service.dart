@@ -28,6 +28,8 @@ import 'package:zen/src/features/pyramid/pyramid_record_log.dart';
 import 'package:zen/src/features/pyramid/pyramid_root.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/runtime/runtime_signal_codec.dart'
+    show kRuntimeSignalMaxBytes;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart'
@@ -680,9 +682,13 @@ final class PyramidService extends ChangeNotifier {
 
   /// Spans of slots this person signed as a treasurer (one operation each,
   /// another only once the era of the one before was sealed without it;
-  /// one release vote per span; shared with the person's other devices),
-  /// and own orders and settlements waiting for the treasurers.
+  /// one release vote per span; one seal of an era, one close of a vote;
+  /// shared with the person's other devices) → what was signed, and the
+  /// time it carries ([_signedWhen]); pruned once nothing could be signed
+  /// in their place any more ([_pruneSigned]). And own orders and
+  /// settlements waiting for the treasurers.
   final Map<String, String> _signedOrders = <String, String>{};
+  final Map<String, int> _signedWhen = <String, int>{};
   final Map<String, PyramidRecord> _payments = <String, PyramidRecord>{};
 
   /// The private side of the money (see `pyramid_treasury.dart`).
@@ -1004,6 +1010,9 @@ final class PyramidService extends ChangeNotifier {
         _signedOrders
           ..clear()
           ..addAll(_strs(json['so']));
+        _signedWhen
+          ..clear()
+          ..addAll(_ints(json['sow']));
         myReports.clear();
         if (json['rep'] is List) {
           for (final Object? r in json['rep'] as List) {
@@ -1465,6 +1474,7 @@ final class PyramidService extends ChangeNotifier {
           'mv': myVotes,
           'ts': _tallySent,
           'so': _signedOrders,
+          'sow': _signedWhen,
           'rep': <Map<String, dynamic>>[
             for (final PyrReport r in myReports.values) r.toJson(),
           ],
@@ -3987,7 +3997,8 @@ final class PyramidService extends ChangeNotifier {
       body: <String, dynamic>{
         't': PyrT.transfer,
         'py': s.id,
-        'at': _now(),
+        // Never before a change counted on the account (a slow clock).
+        'at': _treasury.orderAt(payer),
         'by': <String>[me.id],
         'from': payer,
         'to': to,
@@ -4023,6 +4034,19 @@ final class PyramidService extends ChangeNotifier {
     for (final PyramidRecord r in _payments.values)
       if (r.type == PyrT.transfer) r,
   ];
+
+  /// Orders carry this phone's clock alone, not the time of the newest
+  /// change counted on the account (tests: a wallet that does not know
+  /// when its money came, as after a lost message).
+  @visibleForTesting
+  bool orderTimeFromClock = false;
+
+  /// Why the treasurers refused order [id] waiting here, once so many did
+  /// that it cannot count: 'funds' (no money there at its time), 'seq'
+  /// (not the account's next number), 'limit' (the day's orders), 'rule'
+  /// (anything else); null while it may still count. An order refused
+  /// only for its time goes out again by itself, dated later.
+  String? paymentRefusal(String id) => _treasury.refusalOf(id);
 
   /// Stops sending order [id]. The treasurers who signed it keep their
   /// signature, and it may still count if most of them did; the next order
@@ -4062,7 +4086,11 @@ final class PyramidService extends ChangeNotifier {
       body: <String, dynamic>{
         't': PyrT.settle,
         'py': s.id,
-        'at': _now(),
+        // Never before the payment it settles (a slow clock).
+        'at': max(
+          _treasury.orderAt(me.id),
+          (_treasury.view(s).escrows[transferId]?.at ?? 0) + 1,
+        ),
         'by': <String>[me.id],
         'x': transferId,
         'ok': ok,
@@ -4137,6 +4165,30 @@ final class PyramidService extends ChangeNotifier {
   Future<void> sendSealed(String to, Map<String, dynamic> json) =>
       _treasury.sendTo(to, json);
 
+  /// The statement frame treasurer [me], keeping [ledger] whole, sends
+  /// to [account] at [now] (tests: its size).
+  @visibleForTesting
+  static Future<Map<String, dynamic>> statementFrame(
+    PyrLedger ledger,
+    PyramidState s,
+    String account,
+    LedgerKeyPair me,
+    int now,
+  ) => _Treasury.statementFrame(
+    ledger,
+    ledger.compute(s, whole: true),
+    s,
+    account,
+    me,
+    now,
+  );
+
+  /// What this person signed as a treasurer and still keeps, so as never
+  /// to sign another in its place (tests).
+  @visibleForTesting
+  Map<String, String> get signedSpans =>
+      Map<String, String>.unmodifiable(_signedOrders);
+
   /// Asks the treasurers for this person's statement now.
   Future<void> refreshStatement() => _treasury.askStatements(force: true);
 
@@ -4147,17 +4199,29 @@ final class PyramidService extends ChangeNotifier {
     return s == null ? null : _treasury.view(s).escrows[id];
   }
 
-  /// Conditional payments that concern this person.
+  /// Conditional payments that concern this person (one to this person
+  /// only once the treasurers count it: [awaitingConfirmation]).
   List<PyrEscrow> get myEscrows {
     final PyramidState? s = state;
     final String? me = myKey;
     if (s == null || me == null) {
       return const <PyrEscrow>[];
     }
+    final Set<String> waits = _treasury.awaiting(me);
     return <PyrEscrow>[
       for (final PyrEscrow e in _treasury.view(s).escrows.values)
-        if (e.from == me || e.to == me || e.condBy == me) e,
+        if ((e.from == me || e.to == me || e.condBy == me) &&
+            !waits.contains(e.id))
+          e,
     ];
+  }
+
+  /// Whether history entry [id] came in for this person and waits for the
+  /// treasurers: no statement most of them signed lists it yet. It is no
+  /// money until then (not in [balance], not [receivedPayment]).
+  bool awaitingConfirmation(String id) {
+    final String? me = myKey;
+    return me != null && _treasury.awaiting(me).contains(id);
   }
 
   /// This person's history (newest last).
@@ -4174,18 +4238,20 @@ final class PyramidService extends ChangeNotifier {
   }
 
   /// Whether order [id] paid this person outright (not waiting for
-  /// anybody's word) and counts: from [from], at least [amount], when
-  /// given.
+  /// anybody's word) and counts for the treasurers (their agreed
+  /// statement lists it, or this treasurer's own ledger counts it): from
+  /// [from], at least [amount], when given.
   bool receivedPayment(String id, {String? from, int amount = 0}) {
     final String? me = myKey;
-    return myEntries.any(
-      (PyrLedgerEntry e) =>
-          e.id == id &&
-          e.to == me &&
-          e.kind == PyrEntryKind.payment &&
-          (from == null || e.from == from) &&
-          e.amount >= amount,
-    );
+    return _treasury.confirmed(id) &&
+        myEntries.any(
+          (PyrLedgerEntry e) =>
+              e.id == id &&
+              e.to == me &&
+              e.kind == PyrEntryKind.payment &&
+              (from == null || e.from == from) &&
+              e.amount >= amount,
+        );
   }
 
   /// Each treasurer's latest statement of this person's account.
@@ -8028,6 +8094,51 @@ final class PyramidService extends ChangeNotifier {
     }
   }
 
+  /// Notes that this account signed [id] (dated [at]) for [key]: nothing
+  /// else is signed for it while it is kept.
+  void _markSigned(String key, String id, int at) {
+    _signedOrders[key] = id;
+    _signedWhen[key] = at;
+  }
+
+  /// Forgets what [_signedOrders] no longer needs to hold, so it does not
+  /// grow with every operation a treasurer ever signed: a span whose
+  /// operation counts on this whole ledger ([whole]; nothing else for its
+  /// slot is signed while one counts) or is dated in a sealed era (it
+  /// counts there only if listed; either way another one for its span may
+  /// be signed then); a release vote once the release counts (the next
+  /// one follows it); a seal once its era is sealed; a vote's close once
+  /// no close of it is signed any more. What is left: the spans of this
+  /// era signed and not (yet) counted, the release votes still gathering,
+  /// the seals and closes in progress. Whether anything went.
+  bool _pruneSigned(PyramidState s, PyrLedgerView? whole) {
+    final int had = _signedOrders.length;
+    final int now = _now();
+    final Set<int> sealed = <int>{for (final PyrSeal x in s.seals) x.n};
+    _signedOrders.removeWhere((String key, String id) {
+      final int? at = _signedWhen[key] ?? _treasury.ledger.ops[id]?.at;
+      if (key.startsWith('seal|')) {
+        final int? n = int.tryParse(key.split('|')[1]);
+        return n != null && sealed.contains(n);
+      }
+      if (key.startsWith('vclose|')) {
+        final int? end =
+            at ?? s.elections[key.substring('vclose|'.length)]?.deadline;
+        return end != null && now > end + kPyrMaxOrderAgeMs + kPyrMaxSkewMs;
+      }
+      if (key.startsWith('rel|')) {
+        final PyramidRecord? r = _treasury.ledger.releases[id];
+        return r != null && PyrLedger.releaseFinal(r, s);
+      }
+      return (whole != null && whole.counted.contains(id)) ||
+          (at != null && s.seals.isNotEmpty && at < s.sealedTo);
+    });
+    _signedWhen.removeWhere(
+      (String key, int _) => !_signedOrders.containsKey(key),
+    );
+    return _signedOrders.length != had;
+  }
+
   /// Signs [bare] (adding to the signatures already here) and takes it
   /// in, unless this account already signed another record for [slot]:
   /// one seal of an era, one close of a vote — two would contradict each
@@ -8043,7 +8154,7 @@ final class PyramidService extends ChangeNotifier {
         (had?.sigs.containsKey(me.id) ?? false)) {
       return;
     }
-    _signedOrders[slot] = bare.id;
+    _markSigned(slot, bare.id, bare.at);
     await _save();
     await ingest(await (had ?? bare).signedBy(me));
   }
@@ -8172,6 +8283,7 @@ final class PyramidService extends ChangeNotifier {
               },
               'ts': _tallySent,
               'so': _signedOrders,
+              'sow': _signedWhen,
               'cs': _consent,
               'rs': <Map<String, dynamic>>[
                 for (final PyramidRecord r
@@ -8232,7 +8344,17 @@ final class PyramidService extends ChangeNotifier {
     }
     changed = _addInts(myVotes, shared['mv']) | changed;
     changed = _addStrs(_tallySent, shared['ts']) | changed;
-    changed = _addStrs(_signedOrders, shared['so']) | changed;
+    // What this device pruned already is not taken back.
+    final Map<String, String> signedBefore = Map<String, String>.of(
+      _signedOrders,
+    );
+    _addStrs(_signedOrders, shared['so']);
+    _addInts(_signedWhen, shared['sow']);
+    final PyramidState? st = state;
+    if (st != null) {
+      _pruneSigned(st, _treasury._keeps(st) ? _treasury.view(st) : null);
+    }
+    changed = !mapEquals(signedBefore, _signedOrders) | changed;
     final Object? consent = shared['cs'];
     if (consent is Map) {
       final int t = _now();

@@ -725,13 +725,17 @@ class PyramidWallet extends StatelessWidget {
   /// what only waits or went back (no sign).
   Widget _entry(ZenColors zen, PyrLedgerEntry e) {
     final bool incoming = e.to == me;
-    final int sign = switch (e.kind) {
-      PyrEntryKind.payment => incoming ? 1 : -1,
-      PyrEntryKind.emission => 1,
-      PyrEntryKind.hold => incoming ? 0 : -1,
-      PyrEntryKind.kept => incoming ? 1 : 0,
-      PyrEntryKind.returned => incoming ? 1 : 0,
-    };
+    // Not money until the treasurers' agreed statement lists it.
+    final bool waits = pyr.awaitingConfirmation(e.id);
+    final int sign = waits
+        ? 0
+        : switch (e.kind) {
+            PyrEntryKind.payment => incoming ? 1 : -1,
+            PyrEntryKind.emission => 1,
+            PyrEntryKind.hold => incoming ? 0 : -1,
+            PyrEntryKind.kept => incoming ? 1 : 0,
+            PyrEntryKind.returned => incoming ? 1 : 0,
+          };
     final String who = switch (e.kind) {
       PyrEntryKind.emission => t('z emisji'),
       _ when incoming => t('od {name}', <String, Object?>{
@@ -739,12 +743,14 @@ class PyramidWallet extends StatelessWidget {
       }),
       _ => t('dla {name}', <String, Object?>{'name': pyrAccountName(s, e.to)}),
     };
-    final String what = switch (e.kind) {
-      PyrEntryKind.hold => t('(warunkowo)'),
-      PyrEntryKind.kept => t('przyjęta'),
-      PyrEntryKind.returned => t('zwrot'),
-      _ => '',
-    };
+    final String what = waits
+        ? t('czeka na potwierdzenie skarbników')
+        : switch (e.kind) {
+            PyrEntryKind.hold => t('(warunkowo)'),
+            PyrEntryKind.kept => t('przyjęta'),
+            PyrEntryKind.returned => t('zwrot'),
+            _ => '',
+          };
     final Color color = sign > 0
         ? zen.success
         : sign < 0
@@ -1044,13 +1050,25 @@ class PyramidWallet extends StatelessWidget {
                         'amount': formatMoney(p.integer('amount')),
                         'name': pyrAccountName(s, p.str('to')),
                       }),
-                      subtitle: t(
-                        'Czeka na skarbników: {count} z {need}',
-                        <String, Object?>{
-                          'count': p.tsigs.length,
-                          'need': s.treasurerMajority,
-                        },
-                      ),
+                      subtitle: switch (pyr.paymentRefusal(p.id)) {
+                        null => t(
+                          'Czeka na skarbników: {count} z {need}',
+                          <String, Object?>{
+                            'count': p.tsigs.length,
+                            'need': s.treasurerMajority,
+                          },
+                        ),
+                        'funds' => t(
+                          'Skarbnicy odmówili: za mało pieniędzy na koncie',
+                        ),
+                        'seq' => t('Skarbnicy odmówili: zły numer zlecenia'),
+                        'limit' => t(
+                          'Skarbnicy odmówili: dzienny limit przelewów',
+                        ),
+                        _ => t(
+                          'Skarbnicy odmówili: przelew niezgodny z zasadami',
+                        ),
+                      },
                       trailing: TextButton(
                         onPressed: () => pyr.cancelPending(p.id),
                         child: Text(t('Anuluj')),

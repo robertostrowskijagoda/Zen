@@ -186,10 +186,7 @@ void main() {
       }
       // Y has nothing to spend: no honest treasurer signs.
       final PyramidRecord spend = await order(start, 'Y', 'B1', 5000, 1);
-      expect(
-        PyrLedger.problem(spend, st, l.compute(st, whole: true), start),
-        'za mało środków',
-      );
+      expect(l.problem(spend, st, start), 'za mało środków');
     });
 
     test('the first era\'s treasurer takes back no payment by dating its own '
@@ -199,7 +196,7 @@ void main() {
       final List<PyramidRecord> seals = await sealEras(<PyramidRecord>[e], l);
       final PyramidState st = w.fold(<PyramidRecord>[e, ...seals], now: start);
       final PyramidRecord honest = await order(start, 'S', 'B1', 800, 1);
-      expect(PyrLedger.problem(honest, st, l.compute(st), start), isNull);
+      expect(l.problem(honest, st, start), isNull);
       l.merge(await signed(honest, five));
       final PyramidRecord back = await signed(
         await order(t0, 'S', 'Y', 800, 1),
@@ -308,7 +305,7 @@ void main() {
       // S orders again now, with the number that stayed free.
       expect(v.seqOf(w.id('S')), 1);
       final PyramidRecord again = await order(zAt + h, 'S', 'A2', 50, 2);
-      expect(PyrLedger.problem(again, st, v, zAt + h), isNull);
+      expect(treasurer.problem(again, st, zAt + h), isNull);
     });
   });
 
@@ -342,10 +339,7 @@ void main() {
         final PyramidRecord e = await fund(l, 'B1', 1000);
         final PyramidRecord pay = await order(start, 'B1', 'A2', 800, 1);
         final PyramidState before = w.fold(<PyramidRecord>[e], now: start);
-        expect(
-          PyrLedger.problem(pay, before, l.compute(before), start),
-          isNull,
-        );
+        expect(l.problem(pay, before, start), isNull);
         l.merge(await signed(pay, five));
         final List<LedgerKeyPair> keys = <LedgerKeyPair>[
           await LedgerKeyPair.generate(),
@@ -730,7 +724,7 @@ void main() {
       ),
       five,
     );
-    expect(PyrLedger.problem(x, st, l.compute(st), start), isNotNull);
+    expect(l.problem(x, st, start), isNotNull);
     l.merge(x);
     for (final bool whole in <bool>[false, true]) {
       final PyrLedgerView v = l.compute(st, whole: whole);
