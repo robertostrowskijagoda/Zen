@@ -7,6 +7,7 @@ enum _ConversationMenuAction {
   acceptRequest,
   rejectRequest,
   cancelRequest,
+  resendRequest,
   setNickname,
   retentionSettings,
   disappearingMessages,
@@ -23,14 +24,30 @@ enum _ConversationMenuAction {
 String _conversationSubtitle({
   required FriendProfile? friend,
   required String peerAddress,
+  OutgoingInvite? invite,
 }) {
-  return _conversationRelationshipStatusLabel(friend) ?? '';
+  return _conversationRelationshipStatusLabel(friend, invite: invite) ?? '';
 }
 
-String? _conversationRelationshipStatusLabel(FriendProfile? friend) {
+String? _conversationRelationshipStatusLabel(
+  FriendProfile? friend, {
+  OutgoingInvite? invite,
+}) {
   return switch (friend?.status) {
     FriendRelationshipStatus.pendingIncoming => t('Zaproszenie oczekuje'),
-    FriendRelationshipStatus.pendingOutgoing => t('Czekasz na akceptację'),
+    // Whether the invitation reached them: it travels only while both
+    // devices are online at the same time (not known for one sent before
+    // 1.17.0).
+    FriendRelationshipStatus.pendingOutgoing => switch (invite?.status) {
+      OutgoingInviteStatus.onItsWay => t('Zaproszenie jeszcze nie dotarło'),
+      OutgoingInviteStatus.delivered => t(
+        'Zaproszenie dotarło — czekasz na akceptację',
+      ),
+      OutgoingInviteStatus.lost => t(
+        'Nie dotarło — oboje musicie być w sieci w tym samym czasie',
+      ),
+      null => t('Czekasz na akceptację'),
+    },
     FriendRelationshipStatus.blocked => t('Relacja zablokowana'),
     FriendRelationshipStatus.none => null,
     // No relationship at all (a chat opened from a link, for one): say so,
@@ -151,10 +168,14 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
   required int messageCount,
   int disappearSeconds = 0,
   bool postsMuted = false,
+  OutgoingInvite? invite,
 }) {
   final List<PopupMenuEntry<_ConversationMenuAction>> items =
       <PopupMenuEntry<_ConversationMenuAction>>[];
-  final String? statusLabel = _conversationRelationshipStatusLabel(friend);
+  final String? statusLabel = _conversationRelationshipStatusLabel(
+    friend,
+    invite: invite,
+  );
   if (statusLabel != null) {
     items.add(
       PopupMenuItem<_ConversationMenuAction>(
@@ -201,6 +222,15 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
       ]);
       break;
     case FriendRelationshipStatus.pendingOutgoing:
+      if (invite?.status == OutgoingInviteStatus.lost) {
+        items.add(
+          PopupMenuItem<_ConversationMenuAction>(
+            key: const Key('conversation-resend-invite'),
+            value: _ConversationMenuAction.resendRequest,
+            child: Text(t('Wyślij zaproszenie ponownie')),
+          ),
+        );
+      }
       items.add(
         PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.cancelRequest,

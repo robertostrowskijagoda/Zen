@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -36,23 +38,24 @@ typedef MirroredSend =
     Future<void> Function(String peer, Map<String, dynamic> payload);
 
 /// Messages another own device sent, copied here: `{type, to, p}`.
-const String kMirrorType = 'acct_mirror';
+const String kMirrorType = kOwnDeviceCopyType;
 
 /// What is copied to the account's other devices: text messages, the
 /// disappearing-messages timer (those messages never go into the ledger's
 /// lasting copies, so this live copy is how the other devices see them),
 /// reactions, edits and deletions of messages (1:1 and groups), so the
-/// conversation looks the same on each, and the read receipt sent to a
-/// friend, so a chat read on one device is read (and its notification gone)
-/// on the others. A device of an older version drops a copy of a type it
-/// does not know.
+/// conversation looks the same on each. A device of an older version drops
+/// a copy of a type it does not know.
+///
+/// Not the read receipt sent to a friend: the app tells the account's other
+/// devices of a reading itself ([AccountRoutingTransport.tellOwnDevices]),
+/// with the messages it covers, through the queue (see [relayIsReadCopy]).
 const Set<String> kMirroredTypes = <String>{
   'message',
   'disappear_timer',
   'msg_react',
   'msg_edit',
   'msg_delete',
-  'message_read',
 };
 
 /// Whether [payload] is copied to the account's other devices.
@@ -187,13 +190,16 @@ final class AccountRoutingTransport implements SignalTransport {
         _callOwner.remove(_callOwner.keys.first);
       }
     }
-    // Answered (or declined) on one device: the others stop ringing.
+    // Answered (or declined) on one device: the others stop ringing, with
+    // no word of a missed call (the friend took it, there). A Zen before
+    // 1.17.0 there reads the frame as a hang-up and stops ringing too.
     for (final String other in dir.addressesOf(acc)) {
       if (!PeerShareCodec.addressesEqual(other, from)) {
         unawaited(
           _sendQuietly(other, <String, dynamic>{
             'type': 'call_end',
             'callId': callId,
+            kCallElsewhereKey: true,
           }),
         );
       }
@@ -269,6 +275,32 @@ final class AccountRoutingTransport implements SignalTransport {
       }
     }
     await _mirror(dir, remoteAddress, payload);
+  }
+
+  /// Tells the account's other devices that [payload] was done here in the
+  /// conversation [to] (a friend's address, or `group:<id>`), as a copy of
+  /// what this device did ([kMirrorType]). A read copy goes through the
+  /// queue underneath ([relayIsReadCopy]), so a device that is off gets it
+  /// when it is back. Nothing goes while the account's devices are not
+  /// known.
+  Future<void> tellOwnDevices(String to, Map<String, dynamic> payload) async {
+    if (_directory() != null) {
+      await _loading?.call();
+    }
+    final AccountDeviceDirectory? dir = _directory();
+    if (dir == null || dir.ownAccount.isEmpty) {
+      return;
+    }
+    for (final String sibling in dir.addressesOf(dir.ownAccount)) {
+      if (dir.unlinkedAccountOf(sibling) != null) {
+        continue;
+      }
+      await _sendQuietly(sibling, <String, dynamic>{
+        'type': kMirrorType,
+        'to': to,
+        'p': payload,
+      });
+    }
   }
 
   /// A copy of what this device sent, for the account's other devices.

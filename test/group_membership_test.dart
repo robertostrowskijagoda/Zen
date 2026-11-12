@@ -327,6 +327,310 @@ void main() {
       }
       expect(_listOf(w['D'], id), _listOf(w['A'], id));
     });
+
+    test(
+      'two members adding someone at about the same time: the two '
+      'newcomers learn of each other and see each other\'s messages',
+      () async {
+        final FriendsWorld w = await FriendsWorld.create(<String>[
+          'A',
+          'B',
+          'C',
+          'D',
+          'E',
+        ]);
+        final FriendsPhone a = w['A'];
+        final FriendsPhone c = w['C'];
+        final FriendsPhone d = w['D'];
+        final FriendsPhone e = w['E'];
+        final String id = await w.createGroup(a, 'Ekipa', <FriendsPhone>[
+          w['B'],
+          c,
+        ]);
+        await w.deliver();
+        // C is on a train without network; A adds D, who joins at once.
+        w.partition(<FriendsPhone>[c], <FriendsPhone>[a, w['B'], d, e]);
+        await a.hub.addMemberToGroup(groupId: id, memberAddress: d.address);
+        await w.deliver();
+        await d.hub.acceptGroupInvite(
+          groupId: id,
+          groupName: 'Ekipa',
+          senderAddress: a.address,
+        );
+        await w.deliver();
+        // Meanwhile C, on the train, adds E.
+        await c.hub.addMemberToGroup(groupId: id, memberAddress: e.address);
+        w.heal();
+        await w.advance(const Duration(minutes: 3));
+        await e.hub.acceptGroupInvite(
+          groupId: id,
+          groupName: 'Ekipa',
+          senderAddress: c.address,
+        );
+        await w.advance(const Duration(minutes: 3));
+        await w.sendGroup(d, id, 'od D');
+        await w.sendGroup(e, id, 'od E');
+        await w.advance(
+          const Duration(hours: 6),
+          step: const Duration(minutes: 5),
+        );
+        expect(await w.groupTexts(d, id), contains('od E'));
+        expect(await w.groupTexts(e, id), contains('od D'));
+        for (final String n in <String>['A', 'B', 'C', 'D', 'E']) {
+          expect(_has(w[n], id, d), isTrue, reason: '$n knows D');
+          expect(_has(w[n], id, e), isTrue, reason: '$n knows E');
+          expect(_listOf(w[n], id), _listOf(a, id), reason: n);
+        }
+      },
+    );
+
+    test('a newcomer whose members\' list is still on its way puts off a '
+        'third member\'s message instead of dropping it', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>[
+        'A',
+        'B',
+        'C',
+        'E',
+      ]);
+      final FriendsPhone a = w['A'];
+      final FriendsPhone b = w['B'];
+      final FriendsPhone e = w['E'];
+      final String id = await w.createGroup(a, 'Ekipa', <FriendsPhone>[
+        b,
+        w['C'],
+      ]);
+      await a.hub.addMemberToGroup(groupId: id, memberAddress: e.address);
+      await w.deliver();
+      // The inviter goes off just as E joins: its list comes later.
+      await w.setOnline(a, false);
+      await e.hub.acceptGroupInvite(
+        groupId: id,
+        groupName: 'Ekipa',
+        senderAddress: a.address,
+      );
+      await w.deliver();
+      expect(_has(e, id, b), isFalse);
+      await w.sendGroup(b, id, 'Witaj E');
+      await w.deliver();
+      expect(await w.groupTexts(e, id), isNot(contains('Witaj E')));
+      await w.setOnline(a, true);
+      await w.until(
+        () async => (await w.groupTexts(e, id)).contains('Witaj E'),
+        within: const Duration(hours: 1),
+        reason: "B's message reaching E once its list came",
+      );
+      expect(_has(e, id, b), isTrue);
+    });
+
+    test('someone who left is not brought back by a member a leave behind '
+        'passing on what it knows', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>[
+        'A',
+        'B',
+        'C',
+        'M',
+        'N',
+      ]);
+      final FriendsPhone a = w['A'];
+      final FriendsPhone b = w['B'];
+      final FriendsPhone m = w['M'];
+      final FriendsPhone n = w['N'];
+      final String id = await w.createGroup(a, 'Ekipa', <FriendsPhone>[
+        b,
+        w['C'],
+      ]);
+      // A adds M, who joins; then M leaves while B has no network.
+      await a.hub.addMemberToGroup(groupId: id, memberAddress: m.address);
+      await w.deliver();
+      await m.hub.acceptGroupInvite(
+        groupId: id,
+        groupName: 'Ekipa',
+        senderAddress: a.address,
+      );
+      await w.deliver();
+      expect(_has(b, id, m), isTrue);
+      w.partition(<FriendsPhone>[b], <FriendsPhone>[a, w['C'], m, n]);
+      await m.hub.leaveGroup(groupId: id);
+      await w.deliver();
+      // A adds N, who joins; B, back, still counts M a member for a while.
+      await a.hub.addMemberToGroup(groupId: id, memberAddress: n.address);
+      await w.deliver();
+      await n.hub.acceptGroupInvite(
+        groupId: id,
+        groupName: 'Ekipa',
+        senderAddress: a.address,
+      );
+      await w.deliver();
+      w.heal();
+      await w.advance(const Duration(minutes: 30));
+      for (final String p in <String>['A', 'B', 'C', 'N']) {
+        expect(_has(w[p], id, m), isFalse, reason: '$p: M left');
+        expect(_has(w[p], id, n), isTrue, reason: '$p: N was added');
+      }
+      expect(m.state.groups[id], isNull);
+    });
+  });
+
+  group('two members adding at about the same time', () {
+    // This phone (a member) took Eve, added by Bob a moment ago.
+    GroupProfile withEve() => _joined().copyWith(
+      memberAddresses: <String>[ada, bob, cyd, dan, eve],
+      addedAt: <String, int>{eve: DateTime.now().millisecondsSinceEpoch - 1000},
+    );
+
+    test('a member that knows of an addition the adder did not tells the '
+        'newcomer of it, and the one added of the newcomer', () async {
+      final _Phone p = _Phone(group: withEve());
+      final int at = DateTime.now().millisecondsSinceEpoch;
+      await p.deliver(cyd, _members(<String>[cyd, fay], added: fay, at: at));
+      expect(p.members, contains(fay));
+      final Map<String, dynamic> toFay = p.sentTo(fay, 'group_invite').single;
+      expect(toFay['memberAddresses'], contains(eve));
+      expect((toFay[kGroupAddsKey] as Map<String, int>).keys, <String>[eve]);
+      expect(toFay.containsKey('inviteId'), isFalse);
+      final Map<String, dynamic> toEve = p.sentTo(eve, 'group_invite').single;
+      expect(toEve['added'], fay);
+      expect(toEve['at'], at);
+    });
+
+    test('nothing is passed on when the adder knew of it', () async {
+      final _Phone p = _Phone(group: withEve());
+      final int at = DateTime.now().millisecondsSinceEpoch;
+      await p.deliver(cyd, <String, dynamic>{
+        ..._members(<String>[cyd, fay], added: fay, at: at),
+        kGroupAddsKey: <String, int>{eve: withEve().addedAt[eve]!},
+      });
+      expect(p.members, contains(fay));
+      expect(p.sentTo(fay, 'group_invite'), isEmpty);
+      expect(p.sentTo(eve, 'group_invite'), isEmpty);
+    });
+
+    test('a newcomer takes the additions a member tells of, but not over a '
+        'later leave, and nothing from someone outside the group', () async {
+      final int now = DateTime.now().millisecondsSinceEpoch;
+      final _Phone p = _Phone(
+        group: _joined(departedAt: <String, int>{fay: now - 1000}),
+      );
+      await p.deliver(bob, <String, dynamic>{
+        ..._members(<String>[bob, eve, fay]),
+        kGroupAddsKey: <String, int>{eve: now - 500, fay: now - 2000},
+      });
+      expect(p.members, <String>{ada, bob, cyd, dan, eve});
+      expect(p.group.addedAt[eve], now - 500);
+      // An addition made after the leave brings them back.
+      await p.deliver(bob, <String, dynamic>{
+        ..._members(<String>[bob, fay]),
+        kGroupAddsKey: <String, int>{fay: now},
+      });
+      expect(p.members, contains(fay));
+      // Someone outside the group adds nobody.
+      final _Phone q = _Phone(group: _joined());
+      const String stranger = '200::5a';
+      await q.deliver(stranger, <String, dynamic>{
+        ..._members(<String>[stranger, eve]),
+        kGroupAddsKey: <String, int>{eve: now},
+      });
+      expect(q.members, <String>{ada, bob, cyd, dan});
+    });
+  });
+
+  group('clocks that run ahead', () {
+    test('a leaver whose clock ran ahead can be added again at once: the '
+        'addition is stamped after the leave', () async {
+      final int ahead = DateTime.now().millisecondsSinceEpoch + 50 * 60000;
+      final _Phone adder = _Phone(group: _joined());
+      final _Phone other = _Phone(group: _joined());
+      for (final _Phone p in <_Phone>[adder, other]) {
+        await p.deliver(dan, _leave(at: ahead));
+        expect(p.members, isNot(contains(dan)));
+      }
+      await adder.hub.addMemberToGroup(groupId: _gid, memberAddress: dan);
+      final Map<String, dynamic> update = adder
+          .sentTo(bob, 'group_invite')
+          .single;
+      expect(update['at'] as int, greaterThan(ahead));
+      await other.deliver(cyd, update);
+      expect(other.members, contains(dan));
+    });
+
+    test('someone added by a member whose clock ran ahead leaves after that '
+        'addition on every phone', () async {
+      final FriendsWorld w = await FriendsWorld.create(<String>[
+        'A',
+        'B',
+        'C',
+        'E',
+      ]);
+      final FriendsPhone a = w['A'];
+      final FriendsPhone b = w['B'];
+      final FriendsPhone e = w['E'];
+      final String id = await w.createGroup(a, 'Ekipa', <FriendsPhone>[
+        b,
+        w['C'],
+      ]);
+      await b.hub.addMemberToGroup(groupId: id, memberAddress: e.address);
+      await w.deliver();
+      await e.hub.acceptGroupInvite(
+        groupId: id,
+        groupName: 'Ekipa',
+        senderAddress: b.address,
+      );
+      await w.deliver();
+      // B's clock ran 50 minutes ahead when it added E: what A and E were
+      // told says so.
+      final int ahead = DateTime.now().millisecondsSinceEpoch + 50 * 60000;
+      Future<void> told(FriendsPhone p, Map<String, dynamic> payload) async {
+        await p.hub.receiveSignal(
+          zenSignalFromTransportPayload(sender: b.address, payload: payload)!,
+          receivedAtMillis: w.now,
+        );
+      }
+
+      await told(a, <String, dynamic>{
+        ..._members(<String>[b.address, e.address]),
+        'groupId': id,
+        'added': e.address,
+        'at': ahead,
+      });
+      await told(e, <String, dynamic>{
+        ..._members(<String>[b.address, e.address]),
+        'groupId': id,
+        kGroupAddsKey: <String, int>{e.address: ahead},
+      });
+      expect(a.state.groups[id]!.addedAt[e.address], ahead);
+      await e.hub.leaveGroup(groupId: id);
+      await w.deliver();
+      expect(_has(a, id, e), isFalse, reason: 'the leave is after the add');
+    });
+  });
+
+  group('a creator who left and is added again', () {
+    test('is a member like any other: a list of theirs brings in at most '
+        'one newcomer', () async {
+      final _Phone p = _Phone(group: _joined());
+      await p.deliver(ada, _leave(at: 10000), at: 10000);
+      await p.deliver(bob, _members(<String>[bob, ada], added: ada, at: 11000));
+      expect(p.members, contains(ada));
+      expect(p.group.createdById, isEmpty);
+      await p.deliver(ada, _members(<String>[ada, bob, eve, fay]), at: 12000);
+      expect(p.members, isNot(contains(eve)));
+      expect(p.members, isNot(contains(fay)));
+    });
+
+    test('also when the group was saved by 1.16.5 with the creator still '
+        'named', () async {
+      final _Phone p = _Phone(
+        group: _joined(
+          members: <String>[bob, cyd, dan],
+          departedAt: <String, int>{ada: 10000},
+        ),
+      );
+      expect(p.group.createdById, ada);
+      await p.deliver(bob, _members(<String>[bob, ada], added: ada, at: 11000));
+      expect(p.group.createdById, isEmpty);
+      await p.deliver(ada, _members(<String>[ada, bob, eve, fay]), at: 12000);
+      expect(p.members, <String>{ada, bob, cyd, dan});
+    });
   });
 
   group('on one phone, in any order', () {

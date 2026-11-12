@@ -96,6 +96,127 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         nicknameChanged: sanitizeFriendNickname(nickname).isNotEmpty,
       ),
     );
+    // On its way: whether it reaches them is told by the mailbox layer
+    // ([_applyFriendInviteReport]).
+    state = state.copyWith(
+      outgoingInvites: _outgoingInvitesWith(
+        normalizedAddress,
+        OutgoingInvite(token: inviteToken),
+      ),
+    );
+    await _persistState();
+  }
+
+  /// [outgoingInvites] with [invite] for [address] (none when null), and
+  /// only for those whose invitation still waits for an answer.
+  Map<String, OutgoingInvite> _outgoingInvitesWith(
+    String address,
+    OutgoingInvite? invite,
+  ) {
+    final Map<String, OutgoingInvite> next = <String, OutgoingInvite>{
+      for (final MapEntry<String, OutgoingInvite> e
+          in state.outgoingInvites.entries)
+        if (!PeerShareCodec.addressesEqual(e.key, address) &&
+            state.friendByAddress(e.key)?.status ==
+                FriendRelationshipStatus.pendingOutgoing)
+          e.key: e.value,
+    };
+    if (invite != null) {
+      next[address] = invite;
+    }
+    while (next.length > kMaxOutgoingInvites) {
+      next.remove(next.keys.first);
+    }
+    return next;
+  }
+
+  /// Sends the invitation to [peerAddress] again, as it went (with the code
+  /// it was sent with and its note): one that expired without reaching
+  /// them ("Nie dotarło"), from the menu, or by itself once they are heard
+  /// from. Nothing for anyone not invited from here.
+  @override
+  Future<void> resendFriendRequest({required String peerAddress}) async {
+    final String address = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? friend = state.friendByAddress(address);
+    if (friend == null ||
+        friend.status != FriendRelationshipStatus.pendingOutgoing) {
+      return;
+    }
+    final String token = state.outgoingInviteTo(address)?.token ?? '';
+    final String? senderName = _ownSenderName(null);
+    final String note = friend.requestMessage?.trim() ?? '';
+    await _sendFriendLifecycleSignal(
+      peerAddress: address,
+      payload: <String, dynamic>{
+        'type': 'friend_request',
+        'senderName': ?senderName,
+        if (token.isNotEmpty) 'it': token,
+        if (note.isNotEmpty) 'message': note,
+      },
+    );
+    state = state.copyWith(
+      book: state.book.edit(
+        address,
+        (FriendProfile f) => f.copyWith(
+          lastMessagePreview: t('Zaproszenie oczekuje na odpowiedź.'),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+        ),
+      ),
+      outgoingInvites: _outgoingInvitesWith(
+        address,
+        OutgoingInvite(token: token),
+      ),
+    );
+    await _persistState();
+  }
+
+  /// The mailbox layer's word on the invitation to [address]: it reached
+  /// their device ([delivered]), or it was given up after two weeks without
+  /// reaching it. The conversation and the chat list say so; a lost one can
+  /// be sent again. An invitation answered meanwhile changes nothing.
+  @override
+  Future<void> _applyFriendInviteReport(
+    String address, {
+    required bool delivered,
+  }) async {
+    final FriendProfile? friend = state.friendByAddress(address);
+    if (friend == null ||
+        friend.status != FriendRelationshipStatus.pendingOutgoing) {
+      return;
+    }
+    final OutgoingInvite had =
+        state.outgoingInviteTo(friend.address) ?? const OutgoingInvite();
+    if (!delivered && had.status == OutgoingInviteStatus.delivered) {
+      // A copy of it reached them already.
+      return;
+    }
+    final OutgoingInviteStatus status = delivered
+        ? OutgoingInviteStatus.delivered
+        : OutgoingInviteStatus.lost;
+    if (had.status == status) {
+      return;
+    }
+    state = state.copyWith(
+      book: state.book.edit(
+        friend.address,
+        (FriendProfile f) => f.copyWith(
+          lastMessagePreview: delivered
+              ? t('Zaproszenie dotarło, czeka na odpowiedź.')
+              : t(
+                  'Nie dotarło — oboje musicie być w sieci w tym samym czasie.',
+                ),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+        ),
+      ),
+      outgoingInvites: _outgoingInvitesWith(
+        friend.address,
+        had.copyWith(status: status),
+      ),
+    );
     await _persistState();
   }
 
@@ -2552,8 +2673,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       // a word: refused here, where the person adding can be told.
       throw FormatException(groupFullText());
     }
-    final int now = DateTime.now().millisecondsSinceEpoch;
+    // Stamped after their leave, whatever the clocks say: a leaver whose
+    // clock ran ahead stamped it later than this phone's now, and every
+    // member took this addition for an older one than the leave.
+    final int? left = _groupStampFor(current.departedAt, member);
+    final int now = max(
+      DateTime.now().millisecondsSinceEpoch,
+      left == null ? 0 : left + 1,
+    );
     final GroupProfile updated = current.copyWith(
+      // A creator who left comes back as a member like any other.
+      createdById:
+          left != null &&
+              PeerShareCodec.addressesEqual(current.createdById, member)
+          ? ''
+          : null,
       // Added by name now: a new invitation, whoever left before, and a
       // late copy of an older leave takes nobody out.
       departedAt: _withoutGroupStamp(current.departedAt, member),
@@ -2585,11 +2719,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     // was offline when someone left), and a member who left must not come
     // back on anyone's phone with it - not on a Zen before 1.16.5 either,
     // which merges whatever list comes.
+    // It also tells which other additions this device knew of: a member
+    // that knows of more (someone else added someone meanwhile) tells the
+    // newcomer of them (`_tellOfAddsMissed`).
     final Map<String, dynamic> sync = <String, dynamic>{
       ..._groupInvitePayload(updated),
       'memberAddresses': <String>[if (localAddr.isNotEmpty) localAddr, member],
       kGroupAddedKey: member,
       'at': now,
+      kGroupAddsKey: _recentGroupAdds(updated, now)..remove(member),
     };
     // The newcomer gets the invite; everyone already in the group gets the
     // update (they merge it without any inbox entry). Without that, the
@@ -2798,11 +2936,20 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
     // Stamped with this phone's clock: the same time on every member's
     // phone, so an invitation made after it (and only such) brings this
-    // person back (`_groupAfterLeave`).
+    // person back (`_groupAfterLeave`). Never before this person was added
+    // (the inviter's list tells when): an adder whose clock ran ahead
+    // stamped the addition later than this phone's now, and every member
+    // took the leave for an older one.
+    final int? added = localAddr.isEmpty
+        ? null
+        : _groupStampFor(removed.addedAt, localAddr);
     final Map<String, dynamic> leave = <String, dynamic>{
       'type': 'group_leave',
       'groupId': groupId,
-      'at': DateTime.now().millisecondsSinceEpoch,
+      'at': max(
+        DateTime.now().millisecondsSinceEpoch,
+        added == null ? 0 : added + 1,
+      ),
     };
     for (final String member in removed.memberAddresses) {
       if (localAddr.isNotEmpty &&

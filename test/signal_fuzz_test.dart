@@ -154,6 +154,10 @@ const List<String> _keys = <String>[
   kChangeAuthorKey,
   kGroupAddedKey,
   kGroupLeftKey,
+  kGroupAddsKey,
+  kCallElsewhereKey,
+  // What a reading told to the account's other devices covers.
+  'r',
 ];
 
 /// The messages of friends the frames aim at (by id).

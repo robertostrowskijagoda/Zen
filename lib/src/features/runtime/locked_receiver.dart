@@ -2122,11 +2122,13 @@ final class LockedReceiver {
       return;
     }
     if (_ringEndTypes.contains(type) && _ringingFrom == from) {
-      await _ringEnded();
+      // Answered or declined on another device of this account: the ring
+      // stops, and nothing was missed.
+      await _ringEnded(missed: payload[kCallElsewhereKey] != true);
     }
   }
 
-  Future<void> _ringEnded() async {
+  Future<void> _ringEnded({bool missed = true}) async {
     _ringTimer?.cancel();
     _ringTimer = null;
     if (_ringingFrom == null) {
@@ -2137,7 +2139,9 @@ final class LockedReceiver {
     await hideIncomingCallPopup();
     try {
       await _notices.dismissSlot(kLockedCallSlot);
-      await _postMissedCall();
+      if (missed) {
+        await _postMissedCall();
+      }
     } finally {
       unawaited(
         ZenWake.release(tag: 'ring', after: const Duration(seconds: 1)),

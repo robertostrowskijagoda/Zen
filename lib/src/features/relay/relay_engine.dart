@@ -657,6 +657,12 @@ const Set<String> kFirstContactTypes = <String>{
   'friend_accept',
 };
 
+/// The [RelayDeliveryReport.messageId] of a report about an invitation to
+/// become friends: it reached the other side's device, or it expired
+/// without reaching it (it travels directly only, so it arrives only while
+/// both devices are online at the same time).
+const String kFriendInviteReportId = 'friend_request';
+
 /// The kind of [payload] when it is one where only the newest to a device
 /// matters, `null` otherwise. Each of these carries the whole of what it
 /// says (the sender's profile, friend list, nearby keys, status, "open to
@@ -695,8 +701,38 @@ String? relayReplaceKeyOf(Map<String, dynamic> payload) {
       return group is String && group.isNotEmpty
           ? 'message_read|$group'
           : 'message_read';
+    case kOwnDeviceCopyType when relayIsReadCopy(payload):
+      // The account's other device needs only the newest reading of a
+      // conversation: it names the messages read up to there.
+      return 'acct_read|${payload['to']}';
   }
   return null;
+}
+
+/// What one device of an account tells the account's other devices of what
+/// it did (`{type, to, p}`, see account_routing_transport.dart).
+const String kOwnDeviceCopyType = 'acct_mirror';
+
+/// Whether [payload] tells the account's other devices that a chat was read
+/// here (a `message_read` or a `group_read` copy, [kOwnDeviceCopyType]). It
+/// goes through the queue ([isReliablePayload]): the other device is most
+/// often off while this one reads (the laptop shut while the phone is in
+/// use), and a single datagram left the chat unread there, with its
+/// notification, when it came back. Only the newest per conversation waits
+/// ([relayReplaceKeyOf]). It is something the person did that nothing
+/// brings there again (the next reading of that chat may never come), so
+/// it counts as personal ([relayIsPersonalPayload]); an account's own
+/// devices are never taken for gone anyway.
+bool relayIsReadCopy(Map<String, dynamic> payload) {
+  if (payload['type'] != kOwnDeviceCopyType) {
+    return false;
+  }
+  final Object? inner = payload['p'];
+  final Object? to = payload['to'];
+  return inner is Map &&
+      to is String &&
+      to.isNotEmpty &&
+      (inner['type'] == 'message_read' || inner['type'] == 'group_read');
 }
 
 /// Whether [payload] is something a person did that nothing brings to the
@@ -932,7 +968,8 @@ const int _maxDeliveryReports = 200;
 
 bool isReliablePayload(Map<String, dynamic> payload) {
   return payload[kSendOnceKey] != true &&
-      kReliablePayloadTypes.contains(payload['type']);
+      (kReliablePayloadTypes.contains(payload['type']) ||
+          relayIsReadCopy(payload));
 }
 
 /// Store-and-forward delivery.
@@ -2096,20 +2133,28 @@ final class RelayEngine {
   }
 
   /// Queues delivery news about [entry] for the chat layer; only chat messages
-  /// are reported. Returns whether the queue changed.
+  /// are reported, and invitations to become friends (under
+  /// [kFriendInviteReportId]: that one reached the other side, or expired
+  /// without reaching it, as nothing else tells the person who invited).
+  /// A chat message's own delivery comes with its receipt, so only its
+  /// troubles are told. Returns whether the queue changed.
   bool _report(
     RelayState state,
     RelayOutboxEntry entry,
     RelayDeliveryStatus status,
     int now,
   ) {
-    final Object? messageId = entry.payload['msgId'];
+    final bool invitation = entry.payload['type'] == 'friend_request';
+    final Object? messageId = invitation
+        ? kFriendInviteReportId
+        : entry.payload['msgId'];
     // An attachment's manifest stands for its chat message.
     final bool chatMessage =
         entry.payload['type'] == _chatMessageType ||
         (entry.payload['type'] == kBlobManifestType &&
             entry.payload['k'] == RelayBlobKind.attachment.wire);
-    if (!chatMessage ||
+    if (!(invitation ||
+            (chatMessage && status != RelayDeliveryStatus.delivered)) ||
         messageId is! String ||
         messageId.isEmpty ||
         state.deliveryReports.any(
@@ -2465,6 +2510,9 @@ final class RelayEngine {
     );
     _reportedDirectOnly.remove(entry.rid);
     _settleTracked(state, entry, delivered: true, now: _now());
+    // An invitation says nothing back until it is answered: that it reached
+    // the other side is told here.
+    _report(state, entry, RelayDeliveryStatus.delivered, _now());
     // Our own copy as one of the recipient's mailboxes is not needed any
     // more either; remembered as delivered, so a co-relay's late copy is
     // not taken in again.

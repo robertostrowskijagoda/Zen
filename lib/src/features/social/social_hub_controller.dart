@@ -60,7 +60,11 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
-    show kGroupJoinedAck, kMaxGroupMessageChars, kMaxSignalIdChars;
+    show
+        isCallTakenElsewhere,
+        kGroupJoinedAck,
+        kMaxGroupMessageChars,
+        kMaxSignalIdChars;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -1830,6 +1834,25 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Tells this account's other devices that the group [groupId] was read
   /// here (`social_hub_controller_messages.dart`).
   Future<void> _mirrorGroupRead(String groupId);
+
+  /// A message just kept here that another device of this account read
+  /// before it came: taken in read (`social_hub_controller_messages.dart`).
+  Future<bool> _takenAsReadElsewhere(ZenSignal signal, int timestamp);
+
+  /// Sends the invitation to [peerAddress] again
+  /// (`social_hub_controller_social.dart`).
+  Future<void> resendFriendRequest({required String peerAddress});
+
+  /// Whether the invitation to [address] reached them, or was given up
+  /// (`social_hub_controller_social.dart`).
+  Future<void> _applyFriendInviteReport(
+    String address, {
+    required bool delivered,
+  });
+
+  /// A call ringing here that another device of this account answered or
+  /// declined: it stops without a word (`social_hub_controller_messages.dart`).
+  Future<void> _endCallTakenElsewhere(ZenSignal signal, int timestamp);
 
   Future<void> _sendCallSignal({
     required String remoteAddress,

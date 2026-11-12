@@ -405,9 +405,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final String conversationTitle = friend == null
         ? widget.title
         : (peerOwnName.isEmpty ? friend.displayLabel : peerOwnName);
+    // Whether an invitation sent from here reached them.
+    final OutgoingInvite? invite = ref.watch(
+      socialHubControllerProvider.select(
+        (SocialHubState state) => state.outgoingInviteTo(widget.peerAddress),
+      ),
+    );
     final String conversationSubtitle = _conversationSubtitle(
       friend: friend,
       peerAddress: widget.peerAddress,
+      invite: invite,
     );
     // The presence dot: only for a friend who shows it ("status nieznany"
     // while it is not known now).
@@ -458,6 +465,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           messageCount: messageCount,
           disappearSeconds: disappearSeconds,
           postsMuted: postsMuted,
+          invite: invite,
         );
     // On a narrow phone the magnifier would push the name out of the bar:
     // the search is in the menu there.
@@ -690,6 +698,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   if (cancelled) {
                     _popBackToFriends();
                   }
+                  return;
+                case _ConversationMenuAction.resendRequest:
+                  await _handleConversationAction(
+                    () => _socialHubController.resendFriendRequest(
+                      peerAddress: widget.peerAddress,
+                    ),
+                    failurePrefix: t('Nie udało się wysłać'),
+                  );
                   return;
                 case _ConversationMenuAction.setNickname:
                   if (friend != null) {

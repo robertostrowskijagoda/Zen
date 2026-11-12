@@ -48,6 +48,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'callAcceptToken',
     'disappear',
     'disappearAt',
+    'readElsewhere',
+    'outgoingInvites',
     'notifyPrivacy',
     'mutedUntil',
     'groupNotifyAll',
@@ -248,6 +250,9 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     final Map<String, int> disappearingTimers = <String, int>{};
     final Map<String, int> disappearTimersSetAt = <String, int>{};
     final Map<String, int> disappearedMessages = <String, int>{};
+    final Map<String, int> readElsewhere = <String, int>{};
+    final Map<String, OutgoingInvite> outgoingInvites =
+        <String, OutgoingInvite>{};
     final Map<String, NotificationPrivacy> notificationPrivacy =
         <String, NotificationPrivacy>{};
     final Map<String, int> mutedUntil = <String, int>{};
@@ -389,6 +394,31 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
+      // Messages read on another device before they came here (absent
+      // before 1.17.0).
+      final Object? readThere = decoded['readElsewhere'];
+      if (readThere is Map) {
+        for (final MapEntry<dynamic, dynamic> e in readThere.entries.take(
+          kMaxReadElsewhere,
+        )) {
+          if (e.key is String && e.value is int) {
+            readElsewhere[e.key as String] = e.value as int;
+          }
+        }
+      }
+      // Whether each invitation sent from here reached the other side
+      // (absent before 1.17.0).
+      final Object? invites = decoded['outgoingInvites'];
+      if (invites is Map) {
+        for (final MapEntry<dynamic, dynamic> e in invites.entries.take(
+          kMaxOutgoingInvites,
+        )) {
+          final OutgoingInvite? invite = OutgoingInvite.fromJson(e.value);
+          if (e.key is String && invite != null) {
+            outgoingInvites[e.key as String] = invite;
+          }
+        }
+      }
       final Object? levels = decoded['notifyPrivacy'];
       if (levels is Map) {
         for (final MapEntry<dynamic, dynamic> e in levels.entries) {
@@ -515,6 +545,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       disappearingTimers: disappearingTimers,
       disappearTimersSetAt: disappearTimersSetAt,
       disappearedMessages: disappearedMessages,
+      readElsewhere: readElsewhere,
+      outgoingInvites: outgoingInvites,
       notificationPrivacy: notificationPrivacy,
       mutedUntil: mutedUntil,
       groupNotifyAll: groupNotifyAll,
@@ -711,6 +743,14 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         if (state.disappearTimersSetAt.isNotEmpty)
           'disappearAt': state.disappearTimersSetAt,
         'disappeared': state.disappearedMessages,
+        if (state.readElsewhere.isNotEmpty)
+          'readElsewhere': state.readElsewhere,
+        if (state.outgoingInvites.isNotEmpty)
+          'outgoingInvites': <String, dynamic>{
+            for (final MapEntry<String, OutgoingInvite> e
+                in state.outgoingInvites.entries)
+              e.key: e.value.toJson(),
+          },
         'notifyPrivacy': <String, String>{
           for (final MapEntry<String, NotificationPrivacy> e
               in state.notificationPrivacy.entries)
@@ -846,6 +886,8 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       disappearingTimers: Map<String, int>.from(state.disappearingTimers),
       disappearTimersSetAt: Map<String, int>.from(state.disappearTimersSetAt),
       disappearedMessages: Map<String, int>.from(state.disappearedMessages),
+      readElsewhere: Map<String, int>.from(state.readElsewhere),
+      outgoingInvites: Map<String, OutgoingInvite>.from(state.outgoingInvites),
       notificationPrivacy: Map<String, NotificationPrivacy>.from(
         state.notificationPrivacy,
       ),
