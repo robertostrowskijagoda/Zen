@@ -23,7 +23,7 @@ func TestPublicPeerScorePrefers443AndIPv4(t *testing.T) {
 
 func TestAndroidBootstrapPeersAreCuratedTlsUris(t *testing.T) {
 	// The phone's picks; the rest of its pool is reserve behind them.
-	peers := androidBootstrapPeers()[:phonePeerPoolSize]
+	peers := androidBootstrapPeers(nil)[:phonePeerPoolSize]
 	seen := make(map[string]bool, len(peers))
 	ipv4Count := 0
 	for _, peer := range peers {
@@ -59,11 +59,11 @@ func TestApplyAndroidRuntimeConfigUsesCuratedPeersAndDisablesMulticast(t *testin
 	cfg := config.GenerateConfig()
 	cfg.Peers = []string{"tls://203.0.113.10:443?sni=stale"}
 	applyAndroidRuntimeConfig(cfg)
-	if len(cfg.Peers) != len(androidBootstrapPeers()) {
+	if len(cfg.Peers) != len(androidBootstrapPeers(peerOrderSeed(cfg.PrivateKey))) {
 		t.Fatalf("stale peers were kept: %v", cfg.Peers)
 	}
-	if cfg.Peers[0] != androidBootstrapPeers()[0] {
-		t.Fatalf("first peer = %q, want %q", cfg.Peers[0], androidBootstrapPeers()[0])
+	if cfg.Peers[0] != androidBootstrapPeers(peerOrderSeed(cfg.PrivateKey))[0] {
+		t.Fatalf("first peer = %q, want %q", cfg.Peers[0], androidBootstrapPeers(peerOrderSeed(cfg.PrivateKey))[0])
 	}
 	if len(cfg.MulticastInterfaces) != 0 {
 		t.Fatalf("multicast should be disabled, got %#v", cfg.MulticastInterfaces)

@@ -28,7 +28,7 @@ func TestPublicPeerPoolIsLargeAndParseable(t *testing.T) {
 }
 
 func TestDesktopPeersAreSpreadAcrossCountries(t *testing.T) {
-	peers := desktopPublicPeers(desktopPublicPeerCount)
+	peers := desktopPublicPeers(desktopPublicPeerCount, nil)
 	if len(peers) != desktopPublicPeerCount {
 		t.Fatalf("want %d desktop peers, got %d", desktopPublicPeerCount, len(peers))
 	}
@@ -54,7 +54,7 @@ func TestDesktopRuntimePeersDropStalePublicEntriesButKeepLocalOnes(t *testing.T)
 		"tls://192.168.1.20:32913",
 		"tls://203.0.113.10:443",
 	}
-	got := desktopRuntimePeers(existing)
+	got := desktopRuntimePeers(existing, nil)
 	if got[0] != existing[0] || got[1] != existing[1] {
 		t.Fatalf("local peers were not kept first: %v", got)
 	}
@@ -69,7 +69,7 @@ func TestDesktopRuntimePeersDropStalePublicEntriesButKeepLocalOnes(t *testing.T)
 }
 
 func TestAndroidBootstrapPeersAreStableTLS(t *testing.T) {
-	peers := selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
+	peers := selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize, nil)
 	if len(peers) != phonePeerPoolSize {
 		t.Fatalf("want %d android peers, got %d", phonePeerPoolSize, len(peers))
 	}
@@ -92,7 +92,7 @@ func TestAndroidBootstrapPeersAreStableTLS(t *testing.T) {
 func TestAPhonesReserveHasEveryTLSPeerBeforeQUICAndWebSocket(t *testing.T) {
 	sawOther := ""
 	tlsPeers := 0
-	for _, uri := range phonePeerCandidates(publicPeerPool) {
+	for _, uri := range phonePeerCandidates(publicPeerPool, nil) {
 		if peerScheme(uri) != "tls" {
 			if sawOther == "" {
 				sawOther = uri

@@ -175,15 +175,17 @@ func newTestMesh(t *testing.T) *testMesh {
 		pqPlain: true,
 	}
 	node.startMesh()
-	allowed := doorHostPeerAllowed
+	allowed, pool := doorHostPeerAllowed, doorHostPublicPool
 	doorHostPeerAllowed = func(string) bool { return true }
+	// The hub is the only way onto this mesh: the door host shares it.
+	doorHostPublicPool = func() []publicPeer { return nil }
 	t.Cleanup(func() {
 		node.stopDoor()
 		_, _ = node.setMailboxDoors(nil)
 		node.mesh.stop()
 		yggCore.Stop()
 		hub.Stop()
-		doorHostPeerAllowed = allowed
+		doorHostPeerAllowed, doorHostPublicPool = allowed, pool
 	})
 	return &testMesh{hub: hub, node: node}
 }
@@ -824,5 +826,55 @@ func TestDoorHostIsALeafWithOnePublicPeer(t *testing.T) {
 		if got := doorHostPeers(pool, "tls://a:443", offset, doorHostPeerCount); len(got) != 1 {
 			t.Fatalf("offset %d picked %v", offset, got)
 		}
+	}
+}
+
+// The door host never dials an operator the main node dials: that operator
+// would see the person's key and the door's from one IP address, and so
+// learn who lives behind the sticker on a door.
+func TestDoorHostTakesNoPeerOfTheMainNode(t *testing.T) {
+	setUserPublicPeers(nil, false)
+	for n := 0; n < 20; n++ {
+		mainPeers := firstPeers(phonePeerCandidates(publicPeerPool, peerOrderSeed(testNodePrivateKey(n))), phonePeerCount)
+		// A friend's bridge and a device on the LAN, too.
+		mainPeers = append(mainPeers, "tls://203.0.113.9:443", "tcp://192.168.1.5:5000")
+		host := &doorHost{seed: peerOrderSeed(testNodePrivateKey(1000 + n))}
+		candidates := host.candidates(mainPeers)
+		if len(candidates) < 50 {
+			t.Fatalf("only %d candidates left", len(candidates))
+		}
+		groups := peerGroups(mainPeers)
+		for offset := 0; offset < len(candidates); offset++ {
+			for _, uri := range doorHostPeers(candidates, "", offset, doorHostPeerCount) {
+				if groups[peerGroup(uri)] {
+					t.Fatalf("node %d: the door host dials %s, an operator of the main node %v", n, uri, mainPeers)
+				}
+			}
+		}
+		// Its first pick is a stable TLS peer, as the main node's are.
+		if first := candidates[0]; peerScheme(first) != "tls" || peerHostIsIPv6Literal(first) {
+			t.Fatalf("node %d: the door host starts on %s", n, first)
+		}
+	}
+	// Another URI of a dialled operator (here its plain TCP port) is out too.
+	got := doorHostCandidates([]string{"tcp://5.252.118.13:65535", "tls://5.252.118.200:443", "tls://198.51.100.1:443"},
+		[]string{"tls://5.252.118.13:443"})
+	if len(got) != 1 || got[0] != "tls://198.51.100.1:443" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+// With nothing else in the pool (a list of the user's own that the main
+// node dials whole), the door host still gets onto the mesh, on one of the
+// main node's peers.
+func TestDoorHostFallsBackOnTheMainNodesPeers(t *testing.T) {
+	mine := []string{"tls://198.51.100.1:443", "tls://198.51.101.1:443"}
+	withUserPublicPeers(t, mine)
+	host := &doorHost{seed: peerOrderSeed(testNodePrivateKey(1))}
+	if got := host.candidates(mine); len(got) != 0 {
+		t.Fatalf("got %v", got)
+	}
+	if got := host.candidates(mine[:1]); len(got) != 1 || got[0] != mine[1] {
+		t.Fatalf("the peer the main node does not dial: %v", got)
 	}
 }

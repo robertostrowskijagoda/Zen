@@ -75,7 +75,7 @@ func TestEveryBuiltInPeerIsValid(t *testing.T) {
 }
 
 func TestAppPicksOnlyEncryptedTransportsAndOneURIPerHost(t *testing.T) {
-	desktop := desktopPublicPeers(desktopPublicPeerCount)
+	desktop := desktopPublicPeers(desktopPublicPeerCount, nil)
 	hosts := map[string]bool{}
 	for _, peer := range desktop {
 		if !isEncryptedPeerURI(peer) {
@@ -86,7 +86,7 @@ func TestAppPicksOnlyEncryptedTransportsAndOneURIPerHost(t *testing.T) {
 		}
 		hosts[peerHost(peer)] = true
 	}
-	for _, peer := range append(androidBootstrapPeers(), defaultPublicPeerURIs()...) {
+	for _, peer := range append(androidBootstrapPeers(nil), defaultPublicPeerURIs()...) {
 		if !isEncryptedPeerURI(peer) {
 			t.Fatalf("%q would carry the node's traffic in clear", peer)
 		}
@@ -103,10 +103,10 @@ func withUserPublicPeers(t *testing.T, uris []string) {
 func TestUserPublicPeersReplaceTheBuiltInPool(t *testing.T) {
 	mine := []string{"tcp://203.0.113.7:1514", "tls://203.0.113.8:443", "quic://203.0.113.9:443"}
 	withUserPublicPeers(t, mine)
-	if got := androidBootstrapPeers(); strings.Join(got, " ") != strings.Join(mine, " ") {
+	if got := androidBootstrapPeers(nil); strings.Join(got, " ") != strings.Join(mine, " ") {
 		t.Fatalf("phone peers %v", got)
 	}
-	if got := desktopPublicPeers(desktopPublicPeerCount); strings.Join(got, " ") != strings.Join(mine, " ") {
+	if got := desktopPublicPeers(desktopPublicPeerCount, nil); strings.Join(got, " ") != strings.Join(mine, " ") {
 		t.Fatalf("desktop peers %v", got)
 	}
 	if got := defaultPublicPeerURIs(); len(got) != 3 {
@@ -279,9 +279,9 @@ func TestProbePublicPeers(t *testing.T) {
 func TestBuiltInListingPutsWhatThisDeviceDialsFirst(t *testing.T) {
 	withUserPublicPeers(t, []string{"tls://203.0.113.8:443"})
 	listing := builtInPeerListing()
-	chosen := builtInDesktopPeers(desktopPublicPeerCount)
+	chosen := builtInDesktopPeers(desktopPublicPeerCount, nil)
 	if isPhoneOS() {
-		chosen = selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
+		chosen = selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize, nil)
 	}
 	if len(listing) != len(builtInPublicPeers()) {
 		t.Fatalf("%d listed, %d built in", len(listing), len(builtInPublicPeers()))

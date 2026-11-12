@@ -51,12 +51,34 @@ func customPublicPeers() bool {
 	return set
 }
 
-// desiredPublicPeers is the public part of a node's peer list now.
-func desiredPublicPeers() []string {
+// desiredPublicPeers is the public part of a node's peer list now, in the
+// node's own order (seed, peerOrderSeed).
+func desiredPublicPeers(seed []byte) []string {
 	if isPhoneOS() {
-		return androidBootstrapPeers()
+		return androidBootstrapPeers(seed)
 	}
-	return desktopPublicPeers(desktopPublicPeerCount)
+	return desktopPublicPeers(desktopPublicPeerCount, seed)
+}
+
+// peerOrderSeed is the node's own order of the public peers.
+func (node *bridgeNode) peerOrderSeed() []byte {
+	node.configMu.RLock()
+	defer node.configMu.RUnlock()
+	if node.config == nil {
+		return nil
+	}
+	return peerOrderSeed(node.config.PrivateKey)
+}
+
+// listingPeerOrderSeed is the order the settings show the built-in pool
+// in: that of a running node (nil with none).
+func listingPeerOrderSeed() []byte {
+	var seed []byte
+	nodes.Range(func(_, value any) bool {
+		seed = value.(*bridgeNode).peerOrderSeed()
+		return seed == nil
+	})
+	return seed
 }
 
 // applyPublicPeers swaps the node's public peers for desiredPublicPeers,
@@ -64,7 +86,7 @@ func desiredPublicPeers() []string {
 // Returns how many were added and removed.
 func (node *bridgeNode) applyPublicPeers() (int, int) {
 	// A phone dials its share of the list, a computer on battery a few.
-	desired := node.limitPublicPeers(desiredPublicPeers())
+	desired := node.limitPublicPeers(desiredPublicPeers(node.peerOrderSeed()))
 	desiredSet := make(map[string]bool, len(desired))
 	for _, peer := range desired {
 		desiredSet[peer] = true
@@ -137,11 +159,12 @@ type publicPeerJSON struct {
 // builtInPeerListing is the built-in pool as the app shows it: what this
 // device dials by default first (in that order), then the rest.
 func builtInPeerListing() []publicPeerJSON {
+	seed := listingPeerOrderSeed()
 	var chosen []string
 	if isPhoneOS() {
-		chosen = selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
+		chosen = selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize, seed)
 	} else {
-		chosen = builtInDesktopPeers(desktopPublicPeerCount)
+		chosen = builtInDesktopPeers(desktopPublicPeerCount, seed)
 	}
 	byURI := make(map[string]publicPeer, len(publicPeerPool))
 	for _, peer := range builtInPublicPeers() {
@@ -169,7 +192,7 @@ func builtInPeerListing() []publicPeerJSON {
 	}
 	if isPhoneOS() {
 		// The reserve, in the order the phone falls back on it.
-		for _, uri := range phonePeerCandidates(publicPeerPool) {
+		for _, uri := range phonePeerCandidates(publicPeerPool, seed) {
 			if peer, ok := byURI[uri]; ok {
 				add(peer, false)
 			}

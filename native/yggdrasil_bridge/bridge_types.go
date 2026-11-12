@@ -303,3 +303,6 @@ func debugf(format string, args ...any) {
 //     "Łączę...");
 //   - desktopPublicPeers(): a desktop connects to every configured peer, so
 //     it gets a spread-out subset instead of the whole pool.
+//
+// Both in the node's own order (peerOrderSeed), so that not every device
+// shows itself to the same few operators.

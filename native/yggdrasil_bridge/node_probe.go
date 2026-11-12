@@ -39,7 +39,7 @@ func ensureDefaultRuntimeConfig(cfg *config.NodeConfig) {
 		// iOS gets the phone profile too: no inbound port to open.
 		applyAndroidRuntimeConfig(cfg)
 	default:
-		cfg.Peers = desktopRuntimePeers(cfg.Peers)
+		cfg.Peers = desktopRuntimePeers(cfg.Peers, peerOrderSeed(cfg.PrivateKey))
 		// Desktops always expose a stable TLS peering port so other Zen
 		// nodes (and the wider mesh) can reach them; the app opens it in the
 		// home router and announces it once friends confirm it works.
@@ -59,7 +59,7 @@ func applyAndroidRuntimeConfig(cfg *config.NodeConfig) {
 	cfg.MulticastInterfaces = []config.MulticastInterfaceConfig{}
 	cfg.InterfacePeers = map[string][]string{}
 	cfg.AllowedPublicKeys = []string{}
-	cfg.Peers = androidBootstrapPeers()
+	cfg.Peers = androidBootstrapPeers(peerOrderSeed(cfg.PrivateKey))
 }
 
 func countNonLoopbackPeers(peers []string) int {
@@ -74,12 +74,13 @@ func countNonLoopbackPeers(peers []string) int {
 
 // androidBootstrapPeers is a phone's pool, in the order it tries the peers:
 // the user's list when they made one, else phonePeerCandidates of the
-// built-in pool. It dials only a few of them at once (phone_peers.go).
-func androidBootstrapPeers() []string {
+// built-in pool in the node's own order (seed, peerOrderSeed). It dials
+// only a few of them at once (phone_peers.go).
+func androidBootstrapPeers(seed []byte) []string {
 	if uris, set := currentUserPublicPeers(); set {
 		return uris
 	}
-	return phonePeerCandidates(publicPeerPool)
+	return phonePeerCandidates(publicPeerPool, seed)
 }
 
 func ipv4LiteralPublicPeers() []string {

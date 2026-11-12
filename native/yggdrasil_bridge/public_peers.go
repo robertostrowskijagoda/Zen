@@ -2,6 +2,9 @@ package main
 
 import (
 	"crypto/ed25519"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -298,9 +301,82 @@ func peerHostIsIPv6Literal(uri string) bool {
 	return ip != nil && ip.To4() == nil
 }
 
-// selectAndroidBootstrapPeers picks stable TLS peers, IPv4 literals first
-// (no DNS needed), then port 443, keeping the pool order otherwise.
-func selectAndroidBootstrapPeers(pool []publicPeer, count int) []string {
+// Every device orders the built-in peers its own way. With one order for
+// all, every locked phone in the world dialled the same volunteer's node
+// first (and every awake one the same four): that one operator saw the IP
+// address and the Zen address of nearly every user, and when it went down
+// they all moved at once to the same next peer. The order is a secret of
+// the node (peerOrderSeed), so nobody can tell from someone's Zen address
+// which peer to watch for them; it stays the same across restarts, so a
+// device does not show itself to a new peer on every start either.
+
+// peerOrderSeed is the node's own order of the public peers, derived from
+// its private key: stable for the node, and unknown to anyone who has only
+// its public key. nil without a private key (the pool's own order).
+func peerOrderSeed(privateKey []byte) []byte {
+	if len(privateKey) != ed25519.PrivateKeySize {
+		return nil
+	}
+	mac := hmac.New(sha256.New, privateKey)
+	mac.Write([]byte("zen.public-peer-order.v1"))
+	return mac.Sum(nil)
+}
+
+// peerOrderRank is where value falls in seed's order: from seed and the
+// value alone, so a peer added to or dropped from the list moves no other.
+func peerOrderRank(seed []byte, value string) uint64 {
+	mac := hmac.New(sha256.New, seed)
+	mac.Write([]byte(value))
+	return binary.BigEndian.Uint64(mac.Sum(nil))
+}
+
+// seededOrder sorts uris by seed's order within the bands band gives them
+// (lower bands first); with a nil seed the bands keep the order they had.
+// The order goes by operator (peerGroup) first: one that lists three URIs
+// is not three times as likely to come first.
+func seededOrder(uris []string, seed []byte, band func(string) int) {
+	type rank struct{ group, uri uint64 }
+	ranks := make(map[string]rank, len(uris))
+	if seed != nil {
+		for _, uri := range uris {
+			ranks[uri] = rank{peerOrderRank(seed, peerGroup(uri)), peerOrderRank(seed, uri)}
+		}
+	}
+	sort.SliceStable(uris, func(i, j int) bool {
+		bi, bj := band(uris[i]), band(uris[j])
+		if bi != bj {
+			return bi < bj
+		}
+		ri, rj := ranks[uris[i]], ranks[uris[j]]
+		if ri.group != rj.group {
+			return ri.group < rj.group
+		}
+		return ri.uri < rj.uri
+	})
+}
+
+// peerGroup is who most likely runs a peer: the /24 of an IPv4 address, the
+// /48 of an IPv6 one, else the host name. Two URIs of one group are one
+// operator: it would see the device twice and take two of its few links.
+func peerGroup(uri string) string {
+	host := peerHost(uri)
+	ip := net.ParseIP(host)
+	switch {
+	case ip == nil:
+		return host
+	case ip.To4() != nil:
+		return ip.Mask(net.CIDRMask(24, 32)).String() + "/24"
+	default:
+		return ip.Mask(net.CIDRMask(48, 128)).String() + "/48"
+	}
+}
+
+// selectAndroidBootstrapPeers picks count stable TLS peers in seed's order,
+// IPv4 literals first (no DNS needed), at most one of a group (peerGroup).
+// The port takes no part: the two peers on 443 would otherwise come first
+// on every phone again. On a network that lets only 443 through, the
+// rotation reaches them among the picks within a few swaps.
+func selectAndroidBootstrapPeers(pool []publicPeer, count int, seed []byte) []string {
 	candidates := make([]string, 0, len(pool))
 	for _, peer := range pool {
 		if !peer.stable || peerScheme(peer.uri) != "tls" || peerHostIsIPv6Literal(peer.uri) {
@@ -308,79 +384,92 @@ func selectAndroidBootstrapPeers(pool []publicPeer, count int) []string {
 		}
 		candidates = append(candidates, peer.uri)
 	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		ai, aj := peerHostIsIPv4(candidates[i]), peerHostIsIPv4(candidates[j])
-		if ai != aj {
-			return ai
-		}
-		return publicPeerScore(candidates[i]) > publicPeerScore(candidates[j])
-	})
-	if len(candidates) > count {
-		candidates = candidates[:count]
+	if seed == nil {
+		// No node: the pool's order, the old way (443 first).
+		sort.SliceStable(candidates, func(i, j int) bool {
+			return publicPeerScore(candidates[i]) > publicPeerScore(candidates[j])
+		})
 	}
-	return candidates
+	seededOrder(candidates, seed, func(uri string) int {
+		if peerHostIsIPv4(uri) {
+			return 0
+		}
+		return 1
+	})
+	picks := make([]string, 0, count)
+	groups := make(map[string]bool, len(candidates))
+	for _, uri := range candidates {
+		if len(picks) >= count {
+			break
+		}
+		group := peerGroup(uri)
+		if groups[group] {
+			continue
+		}
+		groups[group] = true
+		picks = append(picks, uri)
+	}
+	return picks
 }
 
 // phonePeerCandidates is a phone's whole pool in the order it tries the
 // peers: its picks first (selectAndroidBootstrapPeers), then every other
 // encrypted peer of the pool in reserve — TLS before QUIC and WebSocket
 // (lightPeer), then stable before unstable, IPv6 literals last (many
-// mobile networks have none). The phone dials only a
-// few at once (phonePeerCount) and swaps one that stays down for the next
-// (peerRotation): with the whole pool behind its picks, a phone whose
-// picks went dead (the list is a snapshot) moves on to peers that still
-// answer instead of going round the dead ones.
-func phonePeerCandidates(pool []publicPeer) []string {
-	picks := selectAndroidBootstrapPeers(pool, phonePeerPoolSize)
+// mobile networks have none), in seed's order within each of those. The
+// phone dials only a few at once (phonePeerCount) and swaps one that stays
+// down for the next (peerRotation): with the whole pool behind its picks, a
+// phone whose picks went dead (the list is a snapshot) moves on to peers
+// that still answer instead of going round the dead ones.
+func phonePeerCandidates(pool []publicPeer, seed []byte) []string {
+	picks := selectAndroidBootstrapPeers(pool, phonePeerPoolSize, seed)
 	taken := make(map[string]bool, len(pool))
 	for _, uri := range picks {
 		taken[uri] = true
 	}
-	reserve := make([]publicPeer, 0, len(pool))
+	reserve := make([]string, 0, len(pool))
+	stable := make(map[string]bool, len(pool))
 	for _, peer := range pool {
 		if taken[peer.uri] || !isEncryptedPeerURI(peer.uri) {
 			continue
 		}
 		taken[peer.uri] = true
-		reserve = append(reserve, peer)
+		stable[peer.uri] = peer.stable
+		reserve = append(reserve, peer.uri)
 	}
-	rank := func(peer publicPeer) int {
+	seededOrder(reserve, seed, func(uri string) int {
 		score := 0
-		if !lightPeer(peer.uri) {
+		if !lightPeer(uri) {
 			score += 4
 		}
-		if peerHostIsIPv6Literal(peer.uri) {
+		if peerHostIsIPv6Literal(uri) {
 			score += 2
 		}
-		if !peer.stable {
+		if !stable[uri] {
 			score++
 		}
 		return score
-	}
-	sort.SliceStable(reserve, func(i, j int) bool {
-		return rank(reserve[i]) < rank(reserve[j])
 	})
-	candidates := append([]string(nil), picks...)
-	for _, peer := range reserve {
-		candidates = append(candidates, peer.uri)
-	}
-	return candidates
+	return append(picks, reserve...)
 }
 
 // desktopPublicPeers is what a desktop dials: the first of the user's list
 // when they made one, else a spread over as many countries as possible —
 // one stable peer per country per round, TLS preferred, encrypted
-// transports only, one URI per host (two links to one node only take a
-// slot), no IPv6 literals (many homes have no IPv6).
-func desktopPublicPeers(count int) []string {
+// transports only, one URI per group (two links to one node only take a
+// slot), no IPv6 literals (many homes have no IPv6), in seed's order.
+func desktopPublicPeers(count int, seed []byte) []string {
 	if uris, ok := firstUserPeers(count); ok {
 		return uris
 	}
-	return builtInDesktopPeers(count)
+	return builtInDesktopPeers(count, seed)
 }
 
-// builtInDesktopPeers is the desktop's spread over the built-in pool.
-func builtInDesktopPeers(count int) []string {
+// builtInDesktopPeers is the desktop's spread over the built-in pool: the
+// countries and the peers of each country in seed's order (a computer
+// dials its whole selection at once, so with one order for all every
+// computer would show itself to the same twenty operators).
+func builtInDesktopPeers(count int, seed []byte) []string {
 	schemeRank := map[string]int{"tls": 0, "quic": 1, "wss": 2}
 	byCountry := map[string][]string{}
 	countries := make([]string, 0)
@@ -393,14 +482,14 @@ func builtInDesktopPeers(count int) []string {
 		}
 		byCountry[peer.country] = append(byCountry[peer.country], peer.uri)
 	}
+	seededOrder(countries, seed, func(string) int { return 0 })
 	for _, country := range countries {
-		list := byCountry[country]
-		sort.SliceStable(list, func(i, j int) bool {
-			return schemeRank[peerScheme(list[i])] < schemeRank[peerScheme(list[j])]
+		seededOrder(byCountry[country], seed, func(uri string) int {
+			return schemeRank[peerScheme(uri)]
 		})
 	}
 	selected := make([]string, 0, count)
-	hosts := map[string]bool{}
+	groups := map[string]bool{}
 	for round := 0; len(selected) < count; round++ {
 		added := false
 		for _, country := range countries {
@@ -409,11 +498,11 @@ func builtInDesktopPeers(count int) []string {
 				continue
 			}
 			added = true
-			host := peerHost(list[round])
-			if hosts[host] {
+			group := peerGroup(list[round])
+			if groups[group] {
 				continue
 			}
-			hosts[host] = true
+			groups[group] = true
 			selected = append(selected, list[round])
 			if len(selected) >= count {
 				break
@@ -437,7 +526,7 @@ func peerHost(uri string) string {
 // desktopRuntimePeers keeps peers the user or the app added that are not
 // public (loopback, LAN) and replaces every public entry with the current
 // spread-out selection.
-func desktopRuntimePeers(existing []string) []string {
+func desktopRuntimePeers(existing []string, seed []byte) []string {
 	peers := make([]string, 0, len(existing)+desktopPublicPeerCount)
 	seen := map[string]bool{}
 	for _, peer := range existing {
@@ -447,7 +536,7 @@ func desktopRuntimePeers(existing []string) []string {
 		seen[peer] = true
 		peers = append(peers, peer)
 	}
-	for _, peer := range desktopPublicPeers(desktopPublicPeerCount) {
+	for _, peer := range desktopPublicPeers(desktopPublicPeerCount, seed) {
 		if !seen[peer] {
 			seen[peer] = true
 			peers = append(peers, peer)
