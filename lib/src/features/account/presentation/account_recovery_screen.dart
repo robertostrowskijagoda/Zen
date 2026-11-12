@@ -187,6 +187,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     } finally {
       identity.lock();
     }
+    // The account's other devices take the password's wrapping (the newest
+    // wins): it protects the key there too.
+    await node.shareWrapping();
     _current.clear();
     _password.clear();
     _repeat.clear();
@@ -314,10 +317,13 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
               h['from'] is String)
             h['from'] as String,
     });
+    // The password just typed is the account password: the key is kept
+    // under it here from the first byte.
     await LedgerIdentity.adoptAccount(
       node.disk,
       candidate.seed,
       deviceName: thisDeviceName,
+      password: _recoverPassword.text,
     );
     // The pyramid key comes from the account key: the place and the
     // wallet come back with the records friends keep.

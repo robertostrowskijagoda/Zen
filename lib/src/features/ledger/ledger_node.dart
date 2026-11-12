@@ -16,6 +16,7 @@ import 'package:zen/src/core/ledger/ledger_store.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
@@ -108,10 +109,34 @@ const String kChatHistoryKind = 'chat_history';
 const String kLedgerPushType = 'lg_push';
 
 /// Own devices share their audience keys and friend levels:
-/// `{type, own, levels}`; `levels` carries the time of each level under
-/// [LedgerNode.levelTimesKey], and the newest change of a friend's level
-/// wins on every device.
+/// `{type, own, levels, wrap?, ok?}`; `levels` carries the time of each
+/// level under [LedgerNode.levelTimesKey], and the newest change of a
+/// friend's level wins on every device. `wrap`: the account key wrapped by
+/// the account password, signed by the account key (the newest wins, see
+/// [LedgerIdentity.takeWrapping]). `ok`: the devices of the account the
+/// sender trusts, device key → `[since, sure]` (see [LedgerNode.confirmDevice];
+/// a receiver takes one trusted only on the sender's own word only when
+/// that trust is older than every cut-off it knows). Devices that do not
+/// know a field ignore it.
 const String kLedgerSiblingType = 'lg_sibling';
+
+/// How far before a device of the account was cut off a device trusted
+/// only on its own word (it proved itself while nothing was cut off, or
+/// another device vouched for it) loses that trust and must be confirmed
+/// again: whoever kept the account key on the cut-off device could have
+/// certified a new device just before.
+const Duration kOwnDeviceTrustWindow = Duration(days: 7);
+
+/// How long the device being linked or copied to (or the one this device
+/// took the account from) is expected at its address and trusted when it
+/// shows up there.
+const Duration kOwnDeviceIntroduction = Duration(days: 1);
+
+/// Most device keys one `ok` list names.
+const int _maxVouches = 64;
+
+/// Most devices of the account one device trusts on another's word.
+const int _maxTrusted = 256;
 
 /// One device of an account, as this node knows it.
 @immutable
@@ -123,6 +148,7 @@ final class AccountDevice {
     this.address,
     this.isThis = false,
     this.issued = 0,
+    this.confirmed = true,
   });
 
   final String account;
@@ -139,6 +165,34 @@ final class AccountDevice {
 
   /// When the account certified it.
   final int issued;
+
+  /// False for a device of this account that appeared after a device was
+  /// cut off and nobody confirmed yet ([LedgerNode.confirmDevice]): nothing
+  /// is synced to it and nothing it writes is taken until then.
+  final bool confirmed;
+}
+
+/// How a device of this account came to be trusted here.
+final class _Trust {
+  const _Trust(this.at, {this.sure = false});
+
+  /// When (ms).
+  final int at;
+
+  /// For sure: the person confirmed it, this device linked it or took the
+  /// account from it, or it is this device. Kept when a device is cut off,
+  /// and taken by the account's other devices on this one's word.
+  /// Otherwise it proved itself before any cut-off or another device
+  /// vouched for it, and a cut-off soon after undoes it
+  /// ([kOwnDeviceTrustWindow]).
+  final bool sure;
+
+  List<int> toJson() => <int>[at, if (sure) 1 else 0];
+
+  static _Trust? fromJson(Object? json) =>
+      json is List && json.length == 2 && json[0] is int && json[1] is int
+      ? _Trust(json[0] as int, sure: json[1] == 1)
+      : null;
 }
 
 final class _DeviceRef {
@@ -447,6 +501,31 @@ final class LedgerNode {
   /// device this one was linked from, or the friends who helped recover
   /// the account. They answer with their certificate.
   final Set<String> _deviceSeeds = <String>{};
+
+  /// This account's devices this device trusts, by device key. Once a
+  /// device of the account was cut off, whoever kept the account key on it
+  /// could certify a new device; so from then on a device of the account
+  /// that is not trusted here gets nothing from this device and nothing
+  /// it wrote is taken ([_gated]), until the person says it is theirs
+  /// ([confirmDevice]), the device this one linked it with names it
+  /// ([expectOwnDevice]), or a trusted device of the account vouches for
+  /// it (`ok` of [kLedgerSiblingType]). Before any cut-off every device
+  /// that proves itself is trusted, as it always was.
+  final Map<String, _Trust> _trusted = <String, _Trust>{};
+
+  /// Addresses where a device of this account is expected, until when
+  /// (ms): the new device this one is linking or copying the account to,
+  /// or the device this one took the account from.
+  final Map<String, int> _introduced = <String, int>{};
+
+  /// Devices of this account whose cut-off was looked at already
+  /// ([_noteCutOffs]).
+  final Set<String> _cutSeen = <String>{};
+
+  /// Whether this account has a device that was cut off (the trust above
+  /// applies).
+  bool _gated = false;
+
   static const String _devicesKey = 'ledger/devices';
   final StreamController<void> _devicesChanged =
       StreamController<void>.broadcast();
@@ -958,6 +1037,8 @@ final class LedgerNode {
     await _loadDevices();
     await _loadOwnApplied();
     await _loadMetPending();
+    // Cut-offs that came while this device was closed (or with a copy).
+    _noteCutOffs();
     await identity.rememberSelfKey(disk);
     for (final String kind in kAccountSpaceKinds) {
       replicator.subscribe(accountSpace(kind, account));
@@ -1572,11 +1653,19 @@ final class LedgerNode {
     final _DeviceRef? ref = _devices[normalized];
     if (ref == null ||
         store.directory.isRevoked(ref.account, ref.device) ||
-        (ref.account != account && !_accounts.containsValue(ref.account))) {
+        (ref.account != account && !_accounts.containsValue(ref.account)) ||
+        (ref.account == account && !_trustsOwn(ref.device))) {
       return null;
     }
     return ref;
   }
+
+  /// Whether [device] of this account may have what this device shares
+  /// with its own devices, and what it wrote is taken ([_trusted]).
+  bool _trustsOwn(String device) =>
+      !_gated ||
+      device == identity.deviceKey.id ||
+      _trusted.containsKey(device);
 
   Iterable<String> _liveDeviceAddresses() => _devices.keys.where(
     (String a) => _liveDevice(a) != null && a != _ownAddress,
@@ -1990,6 +2079,7 @@ final class LedgerNode {
           address: address == null || address.isEmpty ? null : address,
           isThis: isThis,
           issued: cert.issued,
+          confirmed: isThis || _trustsOwn(cert.device),
         ),
       );
     }
@@ -2035,6 +2125,9 @@ final class LedgerNode {
         (acc != account && !_accounts.containsValue(acc))) {
       return false;
     }
+    // A device of this account: trusted, or kept at its address (so the
+    // devices list shows where it is) and waiting for the person's yes.
+    final bool admitted = acc != account || await _admitOwn(n, device);
     // Its newest record named this address: that claim is proven now.
     final _DeviceHint? hint = _deviceHints[device];
     final _DeviceHint? claim =
@@ -2044,7 +2137,7 @@ final class LedgerNode {
         had != null &&
         had.account == acc &&
         had.device == device) {
-      return true;
+      return admitted;
     }
     _devices[n] = claim != null
         ? _DeviceRef(
@@ -2070,7 +2163,184 @@ final class LedgerNode {
     if (learnt && acc != account) {
       onPeerLearnt?.call(n, acc);
     }
+    return admitted;
+  }
+
+  /// Whether [device] of this account, proven at [normalized], is trusted
+  /// here; trusts it when nothing of the account was cut off yet (as
+  /// always), or when it is the device expected at that address (linked or
+  /// copied to from here, or the one this device took the account from).
+  Future<bool> _admitOwn(String normalized, String device) async {
+    if (_trusted.containsKey(device)) {
+      return true;
+    }
+    final int now = _clock.wallMillis();
+    final int? until = _introduced[normalized];
+    if (until != null && until >= now) {
+      _trusted[device] = _Trust(now, sure: true);
+      _introduced.remove(normalized);
+      // The account's other devices take it on this one's word at once.
+      scheduleMicrotask(() {
+        for (final String a in siblingAddresses) {
+          _sendSiblingSync(a);
+        }
+      });
+    } else if (!_gated) {
+      _trusted[device] = _Trust(now);
+    } else {
+      logZenWarning(
+        'Ledger: a new device of this account waits to be confirmed.',
+      );
+      return false;
+    }
+    await _saveDevices();
     return true;
+  }
+
+  /// The devices of this account that wait for the person to say whether
+  /// they are theirs ([AccountDevice.confirmed] false).
+  List<AccountDevice> get unconfirmedDevices => <AccountDevice>[
+    for (final AccountDevice d in ownDevices)
+      if (!d.confirmed) d,
+  ];
+
+  /// The person said [device] of this account is theirs: it gets what the
+  /// account's devices share and what it wrote is taken; the account's
+  /// other devices hear it from this one.
+  Future<void> confirmDevice(String device) async {
+    await start();
+    if (store.directory.isRevoked(account, device) ||
+        _trusted[device]?.sure == true) {
+      return;
+    }
+    _trusted[device] = _Trust(_clock.wallMillis(), sure: true);
+    await _saveDevices();
+    await _trustChanged(<String>{device});
+    for (final String a in siblingAddresses) {
+      _sendSiblingSync(a);
+    }
+  }
+
+  /// A device of this account is expected at [address] (the new device this
+  /// one is linking or copying the account to, or the one this device is
+  /// taking the account from): trusted when it proves itself there within
+  /// [kOwnDeviceIntroduction].
+  Future<void> expectOwnDevice(String address) async {
+    await start();
+    final String n = PeerShareCodec.normalizeAddress(address);
+    if (n.isEmpty || n == _ownAddress) {
+      return;
+    }
+    final int now = _clock.wallMillis();
+    _introduced
+      ..removeWhere((String _, int until) => until < now)
+      ..[n] = now + kOwnDeviceIntroduction.inMilliseconds;
+    await _saveDevices();
+  }
+
+  /// Devices of this account were trusted just now: they are greeted (and
+  /// become this device's own devices again), and what they wrote opens.
+  Future<void> _trustChanged(Set<String> devices) async {
+    _emitDevices();
+    for (final MapEntry<String, _DeviceRef> e in _devices.entries.toList()) {
+      if (e.value.account == account && devices.contains(e.value.device)) {
+        _hello(e.key, force: true);
+      }
+    }
+    await _open(_sealedEntries(ofAccount: account));
+  }
+
+  /// The devices of this account this one vouches for, with how it trusts
+  /// each ([_Trust]): itself, and every device it trusts that was not cut
+  /// off; those it trusts for sure first.
+  Map<String, Object> _vouches() {
+    final List<MapEntry<String, _Trust>> all =
+        <MapEntry<String, _Trust>>[
+          for (final MapEntry<String, _Trust> e in _trusted.entries)
+            if (!store.directory.isRevoked(account, e.key)) e,
+        ]..sort(
+          (MapEntry<String, _Trust> x, MapEntry<String, _Trust> y) =>
+              (y.value.sure ? 1 : 0) - (x.value.sure ? 1 : 0),
+        );
+    return <String, Object>{
+      for (final MapEntry<String, _Trust> e in all.take(_maxVouches))
+        e.key: e.value.toJson(),
+    };
+  }
+
+  /// Whether a device trusted on its own word at [at] (ms) is too close
+  /// to a cut-off of this account: whoever kept the key on the cut-off
+  /// device may have certified it ([kOwnDeviceTrustWindow]).
+  bool _nearCutOff(int at) {
+    for (final DeviceRevocation r in store.directory.revocations) {
+      if (r.account == account &&
+          at >= r.issued - kOwnDeviceTrustWindow.inMilliseconds) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// A trusted device of this account vouched for [items] (device key →
+  /// how it trusts it). One it trusts for sure is taken; one it trusts
+  /// only on its own word only when that trust is older than the window
+  /// before every cut-off known here, as this device would judge its own.
+  /// Taken as trust on another's word: a later cut-off can undo it.
+  Future<void> _takeVouches(Object? items) async {
+    if (items is! Map) {
+      return;
+    }
+    final Set<String> added = <String>{};
+    for (final MapEntry<Object?, Object?> e in items.entries.take(
+      _maxVouches,
+    )) {
+      final Object? d = e.key;
+      final _Trust? t = _Trust.fromJson(e.value);
+      if (d is! String ||
+          d.length > 200 ||
+          t == null ||
+          _trusted.length >= _maxTrusted ||
+          _trusted.containsKey(d) ||
+          store.directory.isRevoked(account, d) ||
+          (!t.sure && _nearCutOff(t.at))) {
+        continue;
+      }
+      _trusted[d] = _Trust(t.sure ? _clock.wallMillis() : t.at);
+      added.add(d);
+    }
+    if (added.isEmpty) {
+      return;
+    }
+    await _saveDevices();
+    await _trustChanged(added);
+  }
+
+  /// Looks at this account's cut-off devices: once one is cut off, the
+  /// trust applies ([_gated]); a device trusted only on its own word since
+  /// shortly before the cut-off ([kOwnDeviceTrustWindow]) must be
+  /// confirmed again — the cut-off device may have certified it.
+  void _noteCutOffs() {
+    bool changed = false;
+    for (final DeviceRevocation r in store.directory.revocations) {
+      if (r.account != account) {
+        continue;
+      }
+      _gated = true;
+      if (!_cutSeen.add(r.device)) {
+        continue;
+      }
+      changed = true;
+      _trusted.remove(r.device);
+      final int since = r.issued - kOwnDeviceTrustWindow.inMilliseconds;
+      _trusted.removeWhere(
+        (String device, _Trust t) =>
+            !t.sure && t.at >= since && device != identity.deviceKey.id,
+      );
+    }
+    if (changed) {
+      unawaitedLogged(_saveDevices(), context: 'Saving the account devices');
+      _emitDevices();
+    }
   }
 
   /// A device record (`{address, name}` in an account's `acts`) is only a
@@ -2261,13 +2531,17 @@ final class LedgerNode {
         if (e.value.device == device) e.key,
       if (claimed != null) claimed.address,
     };
+    // The account's devices as they are before the cut-off: the cut-off
+    // may leave one of them to be confirmed again here, and they must
+    // hear of it all the same.
+    final List<String> siblings = siblingAddresses;
     await replicator.publishRevocation(revocation);
     _devices.removeWhere((_, _DeviceRef r) => r.device == device);
     await _saveDevices();
     _emitDevices();
     // Friends who never heard of this device still get the news through
     // everyone else; the device itself is told too, so it stops.
-    for (final String a in itsAddresses) {
+    for (final String a in <String>{...siblings, ...itsAddresses}) {
       _send(a, <String, dynamic>{
         'type': LedgerMessages.revoke,
         'items': <Map<String, dynamic>>[revocation.toJson()],
@@ -2280,6 +2554,7 @@ final class LedgerNode {
       store.directory.isRevoked(account, identity.deviceKey.id);
 
   void _pruneRevoked() {
+    _noteCutOffs();
     // A friend's device its owner cut off, at the address the friend is
     // known by.
     for (final MapEntry<String, String> e in _addressDevices.entries.toList()) {
@@ -2349,6 +2624,12 @@ final class LedgerNode {
               e.key: e.value.toJson(),
           },
           'seeds': _deviceSeeds.toList(),
+          'ok': <String, Object>{
+            for (final MapEntry<String, _Trust> e in _trusted.entries)
+              e.key: e.value.toJson(),
+          },
+          if (_introduced.isNotEmpty) 'intro': _introduced,
+          'cut': _cutSeen.toList(),
         }),
       ),
     ),
@@ -2356,6 +2637,33 @@ final class LedgerNode {
 
   Future<void> _loadDevices() async {
     final Uint8List? raw = await readOrSetAsideOn(disk, _devicesKey);
+    bool trustSaved = false;
+    try {
+      await _readDevices(raw, () => trustSaved = true);
+    } finally {
+      _trusted[identity.deviceKey.id] = const _Trust(0, sure: true);
+      if (!trustSaved) {
+        // Saved before devices were trusted one by one (or never): the
+        // devices of this account that proved themselves here are trusted
+        // as they were, and earlier cut-offs change nothing of that.
+        for (final _DeviceRef r in _devices.values) {
+          if (r.account == account) {
+            _trusted.putIfAbsent(r.device, () => const _Trust(0));
+          }
+        }
+        for (final DeviceRevocation r in store.directory.revocations) {
+          if (r.account == account) {
+            _cutSeen.add(r.device);
+          }
+        }
+      }
+      _gated = store.directory.revocations.any(
+        (DeviceRevocation r) => r.account == account,
+      );
+    }
+  }
+
+  Future<void> _readDevices(Uint8List? raw, void Function() trustSaved) async {
     if (raw == null) {
       return;
     }
@@ -2363,6 +2671,28 @@ final class LedgerNode {
       final Object? json = jsonDecode(utf8.decode(raw));
       if (json is! Map) {
         return;
+      }
+      final Object? ok = json['ok'];
+      if (ok is Map) {
+        trustSaved();
+        ok.forEach((Object? k, Object? v) {
+          final _Trust? t = _Trust.fromJson(v);
+          if (k is String && t != null) {
+            _trusted[k] = t;
+          }
+        });
+      }
+      final Object? intro = json['intro'];
+      if (intro is Map) {
+        intro.forEach((Object? k, Object? v) {
+          if (k is String && v is int) {
+            _introduced[k] = v;
+          }
+        });
+      }
+      final Object? cut = json['cut'];
+      if (cut is List) {
+        _cutSeen.addAll(cut.whereType<String>());
       }
       final Object? devices = json['devices'];
       if (devices is Map) {
@@ -2839,13 +3169,46 @@ final class LedgerNode {
     if (!_isSibling(to)) {
       return;
     }
+    final PasswordWrappedSeed? wrapped = identity.wrapped;
     _send(to, <String, dynamic>{
       'type': kLedgerSiblingType,
       if (answer) 'ack': true,
       'own': keyring.toJson()['own'],
       // With the time of each ([levelTimesKey]): the newest change wins.
       'levels': _levelsJson(),
+      // The account password's wrapping, once the account key signed it:
+      // the password then protects the key on every device.
+      if (wrapped != null && wrapped.signature != null)
+        'wrap': wrapped.toJson(),
+      'ok': _vouches(),
     });
+  }
+
+  /// Fires when this device took the account password's wrapping from
+  /// another device of the account ([LedgerIdentity.takeWrapping]).
+  Stream<void> get keyChanged => _keyChanged.stream;
+  final StreamController<void> _keyChanged = StreamController<void>.broadcast();
+
+  /// Tells the account's other devices about the account password set or
+  /// changed here (they take its wrapping, the newest wins).
+  Future<void> shareWrapping() async {
+    await start();
+    for (final String a in siblingAddresses) {
+      _sendSiblingSync(a);
+    }
+    if (!_keyChanged.isClosed) {
+      _keyChanged.add(null);
+    }
+  }
+
+  /// The person said "not now" to protecting the account key here
+  /// ([LedgerIdentity.offersKeyGuard]).
+  Future<void> dismissKeyGuard() async {
+    await start();
+    await identity.dismissKeyGuard(disk);
+    if (!_keyChanged.isClosed) {
+      _keyChanged.add(null);
+    }
   }
 
   Future<void> _onSiblingSync(String from, Map<String, dynamic> m) async {
@@ -2858,6 +3221,19 @@ final class LedgerNode {
     final _LevelMerge levels = _mergeLevels(m['levels']);
     final int added = keyring.mergeOwn(m['own']);
     await _applyLevels(levels, keysAdded: added);
+    await _takeVouches(m['ok']);
+    final PasswordWrappedSeed? wrapped = PasswordWrappedSeed.fromJson(
+      m['wrap'],
+    );
+    if (wrapped != null && await identity.takeWrapping(disk, wrapped)) {
+      logZenWarning(
+        'Ledger: the account password set on another device protects the '
+        'account key here too.',
+      );
+      // Passed on: a device that cannot reach the one it was set on gets
+      // it from here.
+      await shareWrapping();
+    }
     // Ours may have reached them before they could prove who we are (and
     // been dropped): answer once with our own, as merged now, never an
     // answer to an answer.
@@ -3705,6 +4081,14 @@ final class LedgerNode {
               e.space == accountSpace('own', account))) {
         continue;
       }
+      // Written by a device of this account nobody confirmed (it appeared
+      // after a cut-off): kept unread until it is ([_trustChanged]). What a
+      // cut-off device wrote before its cut-off stays as it was.
+      if (e.account == account &&
+          !_trustsOwn(e.device) &&
+          !store.directory.isRevoked(account, e.device)) {
+        continue;
+      }
       final Uint8List? selfKey = identity.selfKey;
       final Map<String, dynamic>? plain = e.body['kid'] == kSelfKeyId
           ? (e.account == account && selfKey != null
@@ -4091,6 +4475,7 @@ final class LedgerNode {
     await _storeChanged?.cancel();
     await _devicesChanged.close();
     await _contactsChanged.close();
+    await _keyChanged.close();
     await _peerGreeted.close();
     await _ownEntries.close();
     await _frames?.cancel();

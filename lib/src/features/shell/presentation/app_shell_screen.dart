@@ -34,6 +34,7 @@ import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
+import 'package:zen/src/features/account/presentation/account_key_cards.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/accounts_ui.dart';
 import 'package:zen/src/features/account/presentation/backup_reminder_card.dart';

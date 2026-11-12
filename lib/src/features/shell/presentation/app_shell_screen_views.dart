@@ -520,6 +520,15 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const _RelayQuietCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // A device of the account appeared after one was cut off.
+                const UnconfirmedDevicesCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
+                // The account key here is not kept under the account
+                // password (a device that took the account without it).
+                const AccountKeyGuardCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
                 // Enough friends for the recovery circle and none yet.
                 const CircleReminderCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),

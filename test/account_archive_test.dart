@@ -11,6 +11,7 @@ import 'package:zen/src/features/account/account_archive_collect.dart';
 import 'package:zen/src/features/account/account_backup_io.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
+import 'package:zen/src/features/account/presentation/account_copy_common.dart';
 import 'package:zen/src/features/pebbles/pebble_card.dart';
 import 'package:zen/src/features/pebbles/pebble_store.dart';
 
@@ -568,20 +569,35 @@ void main() {
       );
     });
 
-    test('a copy from a newer Zen says so instead of "damaged"', () async {
+    test('a header from a newer Zen is reported as newer or damaged, never '
+        'as only one of them', () async {
       final Uint8List file = await _write(build, 'dobre hasło 1');
-      // `ZENACCT2`: a newer layout.
+      // `ZENACCT2`: a newer layout, or a damaged byte of it.
       final Uint8List newer = Uint8List.fromList(file)..[7] = 0x32;
       expect(
         (await _read(newer, 'dobre hasło 1')).error,
-        AccountBackupError.newer,
+        AccountBackupError.newerOrDamaged,
       );
-      // A password cost this build does not know (only a newer one picks
-      // it): never tried, reported as newer.
+      // A password cost this build does not know (a newer one picks it, or
+      // a byte was damaged): never tried.
       final Uint8List costlier = Uint8List.fromList(file)..[12] = 99;
       expect(
         (await _read(costlier, 'dobre hasło 1')).error,
-        AccountBackupError.newer,
+        AccountBackupError.newerOrDamaged,
+      );
+      // A damaged salt reads as a wrong password: the text says both.
+      final Uint8List salted = Uint8List.fromList(file)..[20] ^= 1;
+      expect(
+        (await _read(salted, 'dobre hasło 1')).error,
+        AccountBackupError.password,
+      );
+      expect(
+        accountBackupErrorText(AccountBackupError.password),
+        contains('uszkodzony'),
+      );
+      expect(
+        accountBackupErrorText(AccountBackupError.newerOrDamaged),
+        allOf(contains('nowsza'), contains('uszkodzony')),
       );
     });
 

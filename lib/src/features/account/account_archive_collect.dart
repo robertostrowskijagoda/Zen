@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/account/account_archive.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
@@ -78,20 +79,26 @@ abstract interface class AccountArchiveSource {
 
 /// Collects a copy of the account from [source]: the parts in [scope],
 /// with the account key's seed when [AccountScope.keys] is in it (the key
-/// must be unlocked then). [measureOnly]: sizes only, for the estimate.
-/// [appLock]: a backup file — with the settings goes the app's lock.
+/// must be unlocked then), and the seed's [wrapped] form when the account
+/// has a password (the device that takes the copy keeps the key under it).
+/// [measureOnly]: sizes only, for the estimate. [appLock]: a backup file —
+/// with the settings goes the app's lock.
 Future<AccountArchiveBuild> buildAccountArchive(
   AccountArchiveSource source,
   Set<AccountScope> scope, {
   bool measureOnly = false,
   bool appLock = false,
   int? at,
+  PasswordWrappedSeed? wrapped,
 }) async {
-  final AccountArchiveBuilder b = AccountArchiveBuilder(
-    account: source.account,
-    scope: scope,
-    measureOnly: measureOnly,
-  )..seed = source.seed;
+  final AccountArchiveBuilder b =
+      AccountArchiveBuilder(
+          account: source.account,
+          scope: scope,
+          measureOnly: measureOnly,
+        )
+        ..seed = source.seed
+        ..wrapped = wrapped;
   if (b.has(AccountScope.keys) && b.seed == null && !measureOnly) {
     throw StateError('The account key is locked.');
   }

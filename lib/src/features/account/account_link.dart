@@ -7,6 +7,7 @@ import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -30,7 +31,9 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///
 /// Messages (version 2): `al_hello {v: 2, c}` (old → new, commitment),
 /// `al_key {v: 2, e}` (new → old), `al_reveal {e}` (old → new),
-/// `al_seed {n, c}` (old → new), `al_done` (new → old). A hello without a
+/// `al_seed {n, c}` (old → new: the seed, the account, its devices and,
+/// when the account has a password, the seed wrapped by it), `al_done`
+/// (new → old). A hello without a
 /// commitment is ignored; one of another version is answered with
 /// `al_ver {v: [versions spoken here], app}`, so both screens say "update
 /// Zen on both devices" instead of waiting in silence.
@@ -85,10 +88,16 @@ final class LinkedAccount {
     required this.account,
     required this.siblings,
     required this.from,
+    this.wrapped,
   });
 
   /// The account key's seed.
   final Uint8List seed;
+
+  /// The seed wrapped by the account password, when the account has one:
+  /// the new device keeps the key the way the account's other devices do
+  /// (`LedgerIdentity.adoptAccount`).
+  final PasswordWrappedSeed? wrapped;
 
   /// The account (public key).
   final String account;
@@ -253,6 +262,7 @@ final class AccountLinkSender {
     required Uint8List seed,
     required String account,
     required List<String> siblings,
+    PasswordWrappedSeed? wrapped,
   }) async {
     final SecretKey? key = _key;
     if (key == null || _mine == null || _helloKey == null) {
@@ -265,6 +275,9 @@ final class AccountLinkSender {
           'seed': b64(seed),
           'account': account,
           'siblings': siblings,
+          // A device of 1.16.5 does not read it and keeps the key without
+          // the password, as before.
+          if (wrapped != null) 'wrapped': wrapped.toJson(),
         }),
       ),
       secretKey: key,
@@ -547,6 +560,7 @@ final class AccountLinkReceiver {
             ? siblings.whereType<String>().take(16).toList()
             : const <String>[],
         from: f.from,
+        wrapped: PasswordWrappedSeed.fromJson(json['wrapped']),
       );
     } on Object {
       return null;

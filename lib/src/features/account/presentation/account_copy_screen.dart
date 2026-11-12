@@ -123,6 +123,12 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
       return;
     }
     try {
+      // The device the digits were checked with takes the account: it is
+      // trusted when it greets from its address.
+      final String? peer = source.request?.peer;
+      if (peer != null) {
+        await node.expectOwnDevice(peer);
+      }
       await source.allow();
     } on Object catch (error, stackTrace) {
       logZenError('Preparing the account copy failed', error, stackTrace);
@@ -412,6 +418,8 @@ class _AccountCopyReceiveScreenState
         return;
       }
       await node.rememberDeviceAddresses(offer.siblings);
+      // The device the digits were checked with is this account's.
+      await node.expectOwnDevice(ticket.address);
       setState(() {
         _downloading = true;
         _total = offer.totalBytes;

@@ -654,8 +654,10 @@ final class DeviceChatSync {
   /// [kMaxSyncedFileBytes] each), which every own device can take.
   Future<void> _maybeSendHistory() async {
     final List<String> others = <String>[
+      // Not to a device nobody confirmed yet: it gets the history once it
+      // is (LedgerNode.confirmDevice).
       for (final AccountDevice d in node.ownDevices)
-        if (!d.isThis) d.device,
+        if (!d.isThis && d.confirmed) d.device,
     ];
     if (others.isEmpty) {
       return;

@@ -61,7 +61,9 @@ String? accountImportRefusal(AccountImportOutcome? outcome) =>
 
 /// Why a backup file did not open, in words.
 String accountBackupErrorText(AccountBackupError error) => switch (error) {
-  AccountBackupError.password => t('Złe hasło albo plik został zmieniony.'),
+  AccountBackupError.password => t(
+    'Złe hasło albo plik jest uszkodzony (lub został zmieniony).',
+  ),
   AccountBackupError.format => t(
     'To nie jest kopia całego konta Zen albo plik jest uszkodzony lub '
     'niekompletny (brakuje części?).',
@@ -69,6 +71,11 @@ String accountBackupErrorText(AccountBackupError error) => switch (error) {
   AccountBackupError.newer => t(
     'Tę kopię zrobiła nowsza wersja Zen. Zaktualizuj aplikację i otwórz '
     'ją ponownie.',
+  ),
+  AccountBackupError.newerOrDamaged => t(
+    'Tę kopię zrobiła nowsza wersja Zen albo plik jest uszkodzony. '
+    'Zaktualizuj aplikację i otwórz ją ponownie; jeśli to nie pomoże, plik '
+    'jest uszkodzony.',
   ),
 };
 

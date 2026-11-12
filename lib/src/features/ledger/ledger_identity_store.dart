@@ -18,7 +18,10 @@ import 'package:zen/src/features/account/account_recovery.dart';
 /// device). Kept in the app's encrypted storage. Once the account password is set the
 /// account key is stored only wrapped by it: daily work needs just the
 /// device key, and a stolen phone without the password cannot take over
-/// the account.
+/// the account. The wrapping goes along when a device is linked, copied or
+/// restored from a backup ([adoptAccount]), and from device to device when
+/// the password is set or changed on one of them ([takeWrapping]), so the
+/// password protects the key on every device of the account.
 final class LedgerIdentity {
   LedgerIdentity._({
     required this.account,
@@ -29,9 +32,22 @@ final class LedgerIdentity {
     required this.pyramidSeed,
     PasswordWrappedSeed? wrapped,
     Uint8List? selfKey,
+    LedgerDisk? disk,
+    int? keyGuard,
   }) : _accountKey = accountKey,
        _wrapped = wrapped,
-       _selfKey = selfKey;
+       _selfKey = selfKey,
+       _disk = disk,
+       _keyGuard = keyGuard;
+
+  /// Where this identity is kept (a signature added on [unlock] is saved
+  /// there).
+  final LedgerDisk? _disk;
+
+  /// Whether to offer the account password here (`kg`): 1 on a device that
+  /// took the account without its wrapping, 0 once the person said "not
+  /// now"; null otherwise ([offersKeyGuard]).
+  int? _keyGuard;
 
   static const String storageKey = 'ledger/identity';
 
@@ -53,6 +69,27 @@ final class LedgerIdentity {
   PasswordWrappedSeed? _wrapped;
 
   bool get hasPassword => wrapped != null;
+
+  /// Whether this device should offer to protect the account key with the
+  /// account password: it took the account (a link, a copy, a backup, a
+  /// key on paper or in a file) without the password's wrapping, so the
+  /// key lies here behind the app's lock only; or its wrapping is older
+  /// than the signature the account's other devices need to take it (the
+  /// password typed once signs it). Gone once the password is set here,
+  /// or after "not now" ([dismissKeyGuard]).
+  bool get offersKeyGuard {
+    final PasswordWrappedSeed? w = _wrapped;
+    if (w == null) {
+      return _keyGuard == 1;
+    }
+    return w.signature == null && _keyGuard != 0;
+  }
+
+  /// The person said "not now" to [offersKeyGuard].
+  Future<void> dismissKeyGuard(LedgerDisk disk) async {
+    _keyGuard = 0;
+    await _save(disk);
+  }
 
   /// Key only this account's own devices hold (derived from the account
   /// key): seals what goes into the private space — the backup of friends
@@ -181,17 +218,48 @@ final class LedgerIdentity {
   /// Makes this installation a new device of the account with [accountSeed]
   /// (after recovery, or when linking a device). Replaces whatever identity
   /// was there; the app must restart its ledger afterwards.
+  ///
+  /// The account key is kept the way the account's other devices keep it:
+  /// wrapped by the account password from the first byte when [wrapped]
+  /// came along (signed by this very account key; one that is not is
+  /// ignored), or when the person typed the password here ([password], a
+  /// recovery through the circle). Otherwise it is kept behind the app's
+  /// lock only, and this device offers to set the password
+  /// ([offersKeyGuard]); a wrapping set on another device reaches it later
+  /// ([takeWrapping]).
   static Future<LedgerIdentity> adoptAccount(
     LedgerDisk disk,
     Uint8List accountSeed, {
     String deviceName = 'Urządzenie',
     int Function()? now,
+    PasswordWrappedSeed? wrapped,
+    String? password,
+    PasswordCost cost = const PasswordCost(),
   }) async {
+    final LedgerKeyPair account = await LedgerKeyPair.fromSeed(accountSeed);
+    PasswordWrappedSeed? keep;
+    if (wrapped != null && await wrapped.isSignedFor(account.id)) {
+      keep = wrapped;
+    } else if (password != null) {
+      try {
+        // Time 0: the password of the pieces, not a new choice; a newer one
+        // set on a device that is still there wins.
+        keep = await (await PasswordWrappedSeed.wrap(
+          accountSeed,
+          password,
+          cost: cost,
+        )).signedBy(account);
+      } on ArgumentError {
+        keep = null;
+      }
+    }
     final LedgerIdentity identity = await _create(
       disk,
-      await LedgerKeyPair.fromSeed(accountSeed),
+      account,
       deviceName: deviceName,
       now: now,
+      wrapped: keep,
+      keyGuard: keep == null ? 1 : null,
     );
     DamagedIdentityNotice.instance.clear();
     return identity;
@@ -202,6 +270,8 @@ final class LedgerIdentity {
     LedgerKeyPair account, {
     required String deviceName,
     int Function()? now,
+    PasswordWrappedSeed? wrapped,
+    int? keyGuard,
   }) async {
     final LedgerKeyPair device = await LedgerKeyPair.generate();
     final DeviceCertificate cert = await DeviceCertificate.issue(
@@ -218,28 +288,64 @@ final class LedgerIdentity {
       writer: randomId(),
       selfKey: await deriveSelfKey(account.seed),
       pyramidSeed: await derivePyramidSeed(account.seed),
+      wrapped: wrapped,
+      disk: disk,
+      keyGuard: keyGuard,
     );
-    await identity._save(disk);
+    if (wrapped == null) {
+      await identity._save(disk);
+    } else {
+      await identity._saveSealed(disk);
+      identity.lock();
+    }
     return identity;
   }
 
   /// Sets (or changes) the account password: from now on the account key
-  /// is kept only wrapped by it. Needs the key at hand ([unlock] first when
-  /// changing).
+  /// is kept only wrapped by it, signed by the key so the account's other
+  /// devices take it ([takeWrapping]), with the time that makes it the
+  /// newest. Needs the key at hand ([unlock] first when changing).
   Future<void> setPassword(
     LedgerDisk disk,
     String password, {
     PasswordCost cost = const PasswordCost(),
+    int? now,
   }) async {
     final LedgerKeyPair? key = _accountKey;
     if (key == null) {
       throw StateError(t('Najpierw odblokuj konto starym hasłem.'));
     }
-    _wrapped = await PasswordWrappedSeed.wrap(key.seed, password, cost: cost);
-    await _save(disk);
+    _wrapped = await (await PasswordWrappedSeed.wrap(
+      key.seed,
+      password,
+      cost: cost,
+      at: now ?? DateTime.now().millisecondsSinceEpoch,
+    )).signedBy(key);
+    _keyGuard = null;
+    await _saveSealed(disk);
   }
 
-  /// Unwraps the account key with [password]; false if it is wrong.
+  /// Takes the wrapping [w] another device of the account set (the
+  /// password set or changed there): only one the account key signed, and
+  /// only when it is newer than the one here. A key kept here without the
+  /// password is dropped for it. Returns whether it was taken.
+  Future<bool> takeWrapping(LedgerDisk disk, PasswordWrappedSeed w) async {
+    final PasswordWrappedSeed? had = _wrapped;
+    if ((had != null && w.at <= had.at) || !await w.isSignedFor(account)) {
+      return false;
+    }
+    _wrapped = w;
+    if (had == null) {
+      _accountKey = null;
+    }
+    _keyGuard = null;
+    await _saveSealed(disk);
+    return true;
+  }
+
+  /// Unwraps the account key with [password]; false if it is wrong. A
+  /// wrapping set before it carried the account's signature is signed now
+  /// (the key is at hand), so the account's other devices can take it.
   Future<bool> unlock(String password) async {
     final PasswordWrappedSeed? w = wrapped;
     if (w == null) {
@@ -254,6 +360,17 @@ final class LedgerIdentity {
       return false;
     }
     _accountKey = key;
+    final LedgerDisk? disk = _disk;
+    if (w.signature == null && disk != null) {
+      try {
+        _wrapped = await w.signedBy(key);
+        // Also pushes out the earlier copies the store keeps: one may
+        // still hold the key from before the password was set.
+        await _saveSealed(disk);
+      } on Object catch (error) {
+        logZenWarning('Signing the account password wrapping failed: $error');
+      }
+    }
     return true;
   }
 
@@ -278,9 +395,21 @@ final class LedgerIdentity {
       pyramidSeed: pyramidSeed,
       wrapped: _wrapped,
       selfKey: _selfKey,
+      disk: disk,
+      keyGuard: _keyGuard,
     );
     await renewed._save(disk);
     return renewed;
+  }
+
+  /// Saves the identity so that no earlier generation stays behind: the
+  /// store keeps the two copies before each save, and one of them would
+  /// still hold the key without the password (or under a password that
+  /// was changed). Three saves leave only this one.
+  Future<void> _saveSealed(LedgerDisk disk) async {
+    for (int i = 0; i < 3; i++) {
+      await _save(disk);
+    }
   }
 
   Future<void> _save(LedgerDisk disk) async {
@@ -299,6 +428,7 @@ final class LedgerIdentity {
             'pyr': b64(pyramidSeed),
             'cert': certificate.toJson(),
             'writer': writer,
+            'kg': ?_keyGuard,
           }),
         ),
       ),
@@ -359,6 +489,8 @@ final class LedgerIdentity {
       return null;
     }
     final Uint8List? selfKey = unb64(json['self'], length: 32);
+    final Object? kg = json['kg'];
+    final int? keyGuard = kg == 0 || kg == 1 ? kg as int : null;
     final LedgerKeyPair device = await LedgerKeyPair.fromSeed(deviceSeed);
     if (cert.device != device.id || cert.devicePq != device.pqId) {
       return null;
@@ -380,6 +512,8 @@ final class LedgerIdentity {
         writer: writer as String,
         selfKey: selfKey ?? await deriveSelfKey(accountSeed),
         pyramidSeed: await derivePyramidSeed(accountSeed),
+        disk: disk,
+        keyGuard: keyGuard,
       );
     }
     if (json['v'] == _wrappedVersion) {
@@ -403,6 +537,8 @@ final class LedgerIdentity {
         wrapped: w,
         selfKey: selfKey,
         pyramidSeed: pyramidSeed,
+        disk: disk,
+        keyGuard: keyGuard,
       );
     }
     return null;

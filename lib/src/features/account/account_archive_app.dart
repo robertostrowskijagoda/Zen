@@ -12,6 +12,7 @@ import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_collect.dart';
 import 'package:zen/src/features/account/account_media.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_state_sync_app.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
@@ -167,6 +168,7 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       node.disk,
       seed,
       deviceName: thisDeviceName,
+      wrapped: archive.wrapped,
     );
     if (!archive.scope.contains(AccountScope.pyramid)) {
       // Its place and wallet come back from the pyramid's people.
@@ -430,11 +432,15 @@ final Provider<AccountArchiveCollector?> accountArchiveCollectorProvider =
         bool appLock = false,
       }) async {
         await node.start();
+        final PasswordWrappedSeed? wrapped = node.identity.wrapped;
         return buildAccountArchive(
           AppAccountArchiveSource(ref, node),
           scope,
           measureOnly: measureOnly,
           appLock: appLock,
+          // Signed (the key was unlocked for the copy): the device that
+          // takes it keeps the key under the account password.
+          wrapped: wrapped?.signature == null ? null : wrapped,
         );
       };
     });
