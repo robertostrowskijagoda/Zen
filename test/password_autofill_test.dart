@@ -114,6 +114,23 @@ Map<String, Object?> _appRequest() => <String, Object?>{
   'username': true,
 };
 
+/// The bank app's certificate as Android reports it: its SHA-256 and
+/// SHA-512 in hex, and the SHA-512 as Chrome names it in an address.
+final List<int> _bankKey = List<int>.generate(64, (int i) => 250 - i);
+final String _bankKeyHex = <String>[
+  for (final int b in _bankKey) b.toRadixString(16).padLeft(2, '0'),
+].join();
+final String _bankKeySha256 = 'ab' * 32;
+final String _bankKeyAddress =
+    'android://${base64Url.encode(_bankKey)}@com.bank.app/';
+
+/// The bank app, as Android describes it with its certificates.
+Map<String, Object?> _signedAppRequest({String? sha512}) => <String, Object?>{
+  ..._appRequest(),
+  'certificates': <String>[_bankKeySha256, sha512 ?? _bankKeyHex],
+  'certificate': sha512 ?? _bankKeyHex,
+};
+
 Map<String, Object?> _webRequest({bool username = true, bool? password}) =>
     <String, Object?>{
       'id': 'r2',
@@ -381,6 +398,63 @@ void main() {
     expect(android.named('guard').last.arguments, <Object?, Object?>{
       'on': false,
     });
+  });
+
+  testWidgets('an app entry that names a certificate is offered only to the '
+      'app signed with it', (WidgetTester tester) async {
+    final MemoryAppSecurityService security = await _withPassword();
+    final PasswordVaultService vault = _vault(security);
+    final PasswordEntry plain = await vault.add(_bankApp);
+    final PasswordEntry signed = await vault.add(
+      PasswordFields(
+        name: 'Bank z Chrome',
+        login: 'ania-chrome',
+        password: 'bank-haslo-2',
+        address: _bankKeyAddress,
+      ),
+    );
+    final PasswordEntry otherKey = await vault.add(
+      PasswordFields(
+        name: 'Bank z innym kluczem',
+        login: 'ania-inny',
+        password: 'bank-haslo-3',
+        address:
+            'android://${base64Url.encode(List<int>.filled(64, 9))}@com.bank.app/',
+      ),
+    );
+    _android(_signedAppRequest());
+    await _pump(tester, vault: vault, security: security);
+    await _confirm(tester, 'sekret12');
+    expect(find.byKey(Key('autofill-row-${plain.id}')), findsOneWidget);
+    expect(find.byKey(Key('autofill-row-${signed.id}')), findsOneWidget);
+    expect(find.byKey(Key('autofill-row-${otherKey.id}')), findsNothing);
+    // The list shows the package, not the long hash.
+    expect(find.textContaining('android://'), findsNothing);
+  });
+
+  test('the certificates Android reports are read defensively', () {
+    final PasswordAutofillRequest r = PasswordAutofillRequest.fromMap(
+      <String, Object?>{
+        ..._appRequest(),
+        'certificates': <Object?>[
+          _bankKeyHex,
+          _bankKeySha256,
+          _bankKeyHex.toUpperCase(),
+          'xyz',
+          7,
+          'ab' * 20,
+        ],
+        'certificate': 'ab' * 32,
+      },
+    )!;
+    expect(r.appCertificates, <String>[_bankKeyHex, _bankKeySha256]);
+    // Only a SHA-512 is named in a new entry.
+    expect(r.appCertificate, isNull);
+    expect(r.newEntryAddress, 'android-app://com.bank.app');
+    expect(
+      PasswordAutofillRequest.fromMap(_appRequest())!.appCertificates,
+      isEmpty,
+    );
   });
 
   testWidgets('a page in a browser: entries of that site only; the rest '
@@ -1066,6 +1140,12 @@ void main() {
               'android-app://com.android.chrome',
               'com.android.chrome',
             ),
+            // An app with its certificate: named in the address.
+            (
+              PasswordAutofillRequest.fromMap(_signedAppRequest())!,
+              _bankKeyAddress,
+              'Mój Bank',
+            ),
           ];
       for (final (PasswordAutofillRequest request, String address, String name)
           in cases) {
@@ -1088,6 +1168,7 @@ void main() {
           packageName: request.packageName,
           webDomain: request.webDomain,
           webScheme: request.webScheme,
+          appCertificates: request.appCertificates,
         );
         expect(found, hasLength(1), reason: address);
         expect(found.single.kind, PasswordMatchKind.exact, reason: address);

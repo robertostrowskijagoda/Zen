@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/features/passwords/password_csv_import.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/passwords/password_match.dart';
 
@@ -25,15 +28,30 @@ List<String> _offered(
   String? domain,
   String? scheme = 'https',
   String? package,
+  List<String> certificates = const <String>[],
 }) => <String>[
   for (final PasswordMatch m in matchPasswordEntries(
     entries,
     webDomain: domain,
     webScheme: scheme,
     packageName: package,
+    appCertificates: certificates,
   ))
     m.entry.address,
 ];
+
+/// A certificate's SHA-512 (64 bytes) and SHA-256 (32 bytes), in hex and
+/// as Chrome names them in `android://<hash>@package/`.
+final List<int> _bankSha512 = List<int>.generate(64, (int i) => 255 - i * 3);
+final String _bankSha512Hex = _hex(_bankSha512);
+final String _bankHash = base64Url.encode(_bankSha512);
+final List<int> _bankSha256 = List<int>.generate(32, (int i) => 255 - i);
+final String _bankSha256Hex = _hex(_bankSha256);
+final String _otherHex = _hex(List<int>.filled(64, 7));
+
+String _hex(List<int> bytes) => <String>[
+  for (final int b in bytes) b.toRadixString(16).padLeft(2, '0'),
+].join();
 
 void main() {
   test('addresses are read as pages or apps', () {
@@ -44,9 +62,10 @@ void main() {
     expect(p('android-app://com.example.app')!.package, 'com.example.app');
     expect(p('androidapp://com.example.app')!.package, 'com.example.app');
     expect(
-      p('android://AbC_hash==@com.example.app/')!.package,
+      p('android://$_bankHash@com.example.app/')!.package,
       'com.example.app',
     );
+    expect(p('android-app://com.example.app')!.certificate, isNull);
     // `user@host` is the host after the @.
     expect(p('https://example.com@evil.com/')!.host, 'evil.com');
     for (final String bad in <String>[
@@ -176,7 +195,7 @@ void main() {
   test('apps match only their exact package; pages and apps never mix', () {
     final List<PasswordEntry> entries = <PasswordEntry>[
       _entry('android-app://com.bank.app'),
-      _entry('android://h@com.bank.app.evil/'),
+      _entry('android://@com.bank.app.evil/'),
       _entry('https://bank.app'),
       _entry('https://com.bank.app'),
     ];
@@ -185,7 +204,7 @@ void main() {
     ]);
     expect(_offered(entries, package: 'com.bank'), isEmpty);
     expect(_offered(entries, package: 'com.bank.app.evil'), <String>[
-      'android://h@com.bank.app.evil/',
+      'android://@com.bank.app.evil/',
     ]);
     expect(_offered(entries, package: 'not a package'), isEmpty);
     // A page (a browser's form) is matched by the page, not the browser.
@@ -196,5 +215,156 @@ void main() {
     );
     expect(page.first, 'https://bank.app');
     expect(page.where((String a) => a.startsWith('android')), isEmpty);
+  });
+
+  group('an app entry that names its certificate', () {
+    test('the hash is kept: Chrome\'s base64url with padding, the standard '
+        'alphabet, without padding, a SHA-256', () {
+      PasswordAddress? p(String a) => PasswordAddress.parse(a);
+      expect(
+        p('android://$_bankHash@com.bank.app/')!.certificate,
+        _bankSha512Hex,
+      );
+      final String standard = base64.encode(_bankSha512);
+      expect(standard, isNot(_bankHash), reason: 'the two alphabets differ');
+      expect(
+        p('android://$standard@com.bank.app/')!.certificate,
+        _bankSha512Hex,
+      );
+      expect(
+        p(
+          'android://${_bankHash.replaceAll('=', '')}@com.bank.app',
+        )!.certificate,
+        _bankSha512Hex,
+      );
+      expect(
+        p(
+          'android://${base64Url.encode(_bankSha256)}@com.bank.app/',
+        )!.certificate,
+        _bankSha256Hex,
+      );
+      expect(passwordCertificateDigest(_bankHash), _bankSha512Hex);
+      // A hash that is no digest: no app, so it never matches one.
+      for (final String bad in <String>[
+        'android://h@com.bank.app/',
+        'android://AbC_hash==@com.bank.app/',
+        'android://${base64Url.encode(List<int>.filled(20, 1))}@com.bank.app/',
+        'android://a b@com.bank.app/',
+      ]) {
+        expect(p(bad), isNull, reason: bad);
+      }
+    });
+
+    test('imported from Chrome, it matches only the app signed with that '
+        'certificate', () {
+      final List<PasswordEntry> entries = <PasswordEntry>[
+        _entry('android://$_bankHash@com.bank.app/'),
+      ];
+      expect(
+        _offered(
+          entries,
+          package: 'com.bank.app',
+          certificates: <String>[_otherHex, _bankSha512Hex.toUpperCase()],
+        ),
+        hasLength(1),
+      );
+      // The same name, another key: a look-alike installed from elsewhere.
+      expect(
+        _offered(
+          entries,
+          package: 'com.bank.app',
+          certificates: <String>[_otherHex],
+        ),
+        isEmpty,
+      );
+      // Android told nothing about the app: not offered either.
+      expect(_offered(entries, package: 'com.bank.app'), isEmpty);
+      // The right key under another name still is another app.
+      expect(
+        _offered(
+          entries,
+          package: 'com.bank.app2',
+          certificates: <String>[_bankSha512Hex],
+        ),
+        isEmpty,
+      );
+      // An entry with a SHA-256 matches the app's SHA-256.
+      expect(
+        _offered(
+          <PasswordEntry>[
+            _entry('android://${base64.encode(_bankSha256)}@com.bank.app/'),
+          ],
+          package: 'com.bank.app',
+          certificates: <String>[_bankSha256Hex],
+        ),
+        hasLength(1),
+      );
+    });
+
+    test('a Chrome export keeps the hash through the import, and the entry '
+        'it makes matches the signed app only', () {
+      final PasswordCsvParse csv = parsePasswordCsvText(
+        'name,url,username,password,note\r\n'
+        'Bank,android://$_bankHash@com.bank.app/,ania,haslo,\r\n',
+      );
+      final PasswordFields fields = csv.rows.single.fields;
+      expect(fields.address, 'android://$_bankHash@com.bank.app/');
+      final PasswordEntry entry = PasswordEntry(
+        id: 'imported1',
+        versionKey: 'version01',
+        fields: fields,
+        createdAtMillis: 1,
+        changedAtMillis: 1,
+      );
+      expect(
+        _offered(
+          <PasswordEntry>[entry],
+          package: 'com.bank.app',
+          certificates: <String>[_bankSha512Hex],
+        ),
+        hasLength(1),
+      );
+      expect(
+        _offered(
+          <PasswordEntry>[entry],
+          package: 'com.bank.app',
+          certificates: <String>[_otherHex],
+        ),
+        isEmpty,
+      );
+    });
+
+    test('an entry without a hash matches by package, as before', () {
+      expect(
+        _offered(
+          <PasswordEntry>[_entry('android-app://com.bank.app')],
+          package: 'com.bank.app',
+          certificates: <String>[_otherHex],
+        ),
+        hasLength(1),
+      );
+    });
+
+    test('a new entry for an app names its current certificate as Chrome '
+        'does, and finds it again', () {
+      final String address = passwordAppAddress(
+        'com.bank.app',
+        sha512: _bankSha512Hex,
+      );
+      expect(address, 'android://$_bankHash@com.bank.app/');
+      expect(
+        _offered(
+          <PasswordEntry>[_entry(address)],
+          package: 'com.bank.app',
+          certificates: <String>[_bankSha512Hex],
+        ),
+        <String>[address],
+      );
+      expect(passwordAppAddress('com.bank.app'), 'android-app://com.bank.app');
+      expect(
+        passwordAppAddress('com.bank.app', sha512: 'abc'),
+        'android-app://com.bank.app',
+      );
+    });
   });
 }

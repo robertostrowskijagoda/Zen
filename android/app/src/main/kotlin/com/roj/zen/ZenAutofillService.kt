@@ -3,6 +3,7 @@ package com.roj.zen
 import android.app.PendingIntent
 import android.app.assist.AssistStructure
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.BlendMode
 import android.graphics.drawable.Icon
@@ -40,8 +41,8 @@ import androidx.autofill.inline.v1.InlineSuggestionUi
  *
  * What the request carries to that activity is fixed here, in an immutable
  * PendingIntent the requesting app cannot change: the app's package as the
- * system reports it, the page's address only from a known browser
- * ([trustedWebOrigin]), and the ids of the fields the form has (the login,
+ * system reports it, the page's address only from a known browser signed
+ * with its maker's certificate ([trustedWebOrigin]), and the ids of the fields the form has (the login,
  * the password, or both: [chooseLoginFields]). Each new suggestion
  * cancels the one before it (one request code, FLAG_CANCEL_CURRENT).
  *
@@ -96,7 +97,13 @@ class ZenAutofillService : AutofillService() {
         // The page of the password field, or of the login when the form
         // asks for the login alone (the first step of two).
         val anchor = form.fields[chosen.password ?: chosen.username ?: return null]
-        val web = trustedWebOrigin(client, anchor.webDomain, anchor.webScheme)
+        val web = trustedWebOrigin(
+            client,
+            anchor.webDomain,
+            anchor.webScheme,
+            PackageSigningCertificates(packageManager),
+            Build.VERSION.SDK_INT,
+        )
 
         val intent = Intent(this, ZenAutofillActivity::class.java).apply {
             putExtra(ZenAutofillActivity.EXTRA_PACKAGE, client)
@@ -300,4 +307,11 @@ class ZenAutofillService : AutofillService() {
         private const val TITLE_DARK = 0xFFE8EAED.toInt()
         private const val SUBTITLE_DARK = 0xFFBDC1C6.toInt()
     }
+}
+
+/** [SigningCertificateLookup] from Android's package manager (Android 9+). */
+class PackageSigningCertificates(private val pm: PackageManager) : SigningCertificateLookup {
+    override fun isSignedWith(packageName: String, sha256: ByteArray): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            pm.hasSigningCertificate(packageName, sha256, PackageManager.CERT_INPUT_SHA256)
 }

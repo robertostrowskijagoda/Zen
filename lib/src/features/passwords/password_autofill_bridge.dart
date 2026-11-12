@@ -7,15 +7,18 @@ import 'package:zen/src/features/passwords/password_match.dart';
 
 /// A login form in another app or a browser that asked Zen for a login
 /// (Android's autofill, ZenAutofillService.kt). It holds who asked, never
-/// a value: [packageName] is the app as Android reported it; [webDomain]
-/// and [webScheme] the page, only when the app is a known browser (any
-/// other app is matched by its package alone, whatever page it claims).
+/// a value: [packageName] is the app as Android reported it, with its
+/// certificates ([appCertificates]); [webDomain] and [webScheme] the page,
+/// only when the app is a known browser signed by its maker (any other app
+/// is matched by its package alone, whatever page it claims).
 @immutable
 final class PasswordAutofillRequest {
   const PasswordAutofillRequest({
     required this.id,
     required this.packageName,
     this.appLabel,
+    this.appCertificates = const <String>[],
+    this.appCertificate,
     this.webDomain,
     this.webScheme,
     this.hasUsernameField = false,
@@ -40,10 +43,20 @@ final class PasswordAutofillRequest {
     }
     final Object? domain = raw['webDomain'];
     final Object? scheme = raw['webScheme'];
+    final Object? certificates = raw['certificates'];
+    final Object? certificate = raw['certificate'];
     return PasswordAutofillRequest(
       id: id,
       packageName: package,
       appLabel: _label(raw['label']),
+      appCertificates: <String>[
+        if (certificates is List)
+          for (final Object? c in certificates.take(64))
+            if (c is String && _digest.hasMatch(c)) c,
+      ],
+      appCertificate: certificate is String && _sha512.hasMatch(certificate)
+          ? certificate
+          : null,
       webDomain: domain is String && domain.isNotEmpty && domain.length <= 253
           ? domain
           : null,
@@ -59,6 +72,8 @@ final class PasswordAutofillRequest {
   static final RegExp _package = RegExp(
     r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$',
   );
+  static final RegExp _digest = RegExp(r'^([0-9a-f]{64}|[0-9a-f]{128})$');
+  static final RegExp _sha512 = RegExp(r'^[0-9a-f]{128}$');
 
   /// An app's own name, on one short line (any app can call itself
   /// anything: it is only ever shown next to the package).
@@ -84,6 +99,16 @@ final class PasswordAutofillRequest {
   final String id;
   final String packageName;
   final String? appLabel;
+
+  /// The SHA-256 and SHA-512 digests (lower-case hex) of the certificates
+  /// the app is signed with or proved it rotated from: an entry that names
+  /// a certificate matches only one of these ([matchPasswordEntries]).
+  /// Empty for a page, or when Android does not tell.
+  final List<String> appCertificates;
+
+  /// The SHA-512 of the certificate the app is signed with now; null for a
+  /// page, an app with several signers, or when Android does not tell.
+  final String? appCertificate;
   final String? webDomain;
   final String? webScheme;
 
@@ -125,12 +150,15 @@ final class PasswordAutofillRequest {
   /// The address a new entry for this form is saved under, so that the
   /// next request from the same page or app finds it as an exact match
   /// ([matchPasswordEntries]): the page's scheme, host and port as the
-  /// browser reported them, or the app's package. Taken from the request
-  /// alone, never from anything the page or app wrote. Null when the page's
-  /// address is not a host.
+  /// browser reported them, or the app's package with the certificate it
+  /// is signed with now ([passwordAppAddress]: on another phone an app
+  /// under the same name but signed by someone else does not get it; an
+  /// app whose key rotates keeps it, as Android reports the old certificate
+  /// with the new). Taken from the request alone, never from anything the
+  /// page or app wrote. Null when the page's address is not a host.
   String? get newEntryAddress {
     if (!isWeb) {
-      return 'android-app://$packageName';
+      return passwordAppAddress(packageName, sha512: appCertificate);
     }
     final ({String scheme, String host, int? port})? page = _page;
     if (page == null) {

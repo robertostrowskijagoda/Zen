@@ -418,7 +418,10 @@ class _PasswordAutofillScreenState
     final PasswordAutofillRequest r = widget.request;
     final List<PasswordMatch> found = r.isWeb
         ? _vault.matchesFor(webDomain: r.webDomain, webScheme: r.webScheme)
-        : _vault.matchesFor(packageName: r.packageName);
+        : _vault.matchesFor(
+            packageName: r.packageName,
+            appCertificates: r.appCertificates,
+          );
     final bool none = !found.any((PasswordMatch m) => _fills(m.entry));
     return <Widget>[
       for (final PasswordMatch m in found)

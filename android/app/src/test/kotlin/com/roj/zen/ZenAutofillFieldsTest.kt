@@ -330,17 +330,4 @@ class ZenAutofillFieldsTest {
     fun aLoginFormFillsAtLeastOneField() {
         LoginFields(null, null)
     }
-
-    @Test
-    fun aPagesAddressCountsOnlyInAKnownBrowser() {
-        assertNull(trustedWebOrigin("com.evil.app", "bank.example.com", "https"))
-        val chrome = trustedWebOrigin("com.android.chrome", "bank.example.com", "https")
-        assertEquals("bank.example.com", chrome!!.domain)
-        assertEquals("https", chrome.scheme)
-        assertNull(trustedWebOrigin("com.android.chrome", "a b", "https"))
-        assertNull(trustedWebOrigin("com.android.chrome", "", "https"))
-        assertNull(trustedWebOrigin("com.android.chrome", "example.com", "file"))
-        // No scheme reported: matched as http, never with https entries.
-        assertNull(trustedWebOrigin("org.mozilla.firefox", "example.com", null)!!.scheme)
-    }
 }

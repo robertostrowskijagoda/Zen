@@ -284,7 +284,9 @@ class _PasswordSetupPanelState extends ConsumerState<PasswordSetupPanel>
   List<Widget> _browsers(ZenColors zen, PasswordSetupState state) {
     final bool englishWords = state.browsers.any(
       (BrowserSetup b) =>
-          b.needsAction || b.needs == BrowserAutofillNeeds.unverified,
+          b.needsAction ||
+          (b.signature == BrowserSignature.maker &&
+              b.needs == BrowserAutofillNeeds.unverified),
     );
     return <Widget>[
       Padding(

@@ -259,15 +259,18 @@ void main() {
 
     test('Zen\'s list is the autofill\'s list of browsers, and Android lets '
         'Zen see each of them', () {
-      final String fields = File(
-        'android/app/src/main/kotlin/com/roj/zen/ZenAutofillFields.kt',
+      final String trust = File(
+        'android/app/src/main/kotlin/com/roj/zen/ZenAutofillTrust.kt',
       ).readAsStringSync();
-      final String list = RegExp(
-        r'val autofillBrowsers: Set<String> = setOf\(([^)]*)\)',
-      ).firstMatch(fields)!.group(1)!;
+      final int start = trust.indexOf(
+        'val autofillBrowsers: Map<String, List<String>> = mapOf(',
+      );
+      expect(start, greaterThanOrEqualTo(0));
+      final String list = trust.substring(start, trust.indexOf('\n)\n', start));
       final Set<String> autofill = RegExp(
-        r'"([^"]+)"',
+        r'"([A-Za-z0-9_.]+)" to listOf\(',
       ).allMatches(list).map((RegExpMatch m) => m.group(1)!).toSet();
+      expect(autofill, isNotEmpty);
       final Set<String> known = <String>{
         for (final KnownBrowser b in kKnownBrowsers) b.packageName,
       };
@@ -286,6 +289,73 @@ void main() {
       }
     });
 
+    test('a copy of a browser that is not its maker\'s says so, and has '
+        'nothing to set up', () async {
+      final FakeSetupPlatform platform = FakeSetupPlatform(
+        installed: <BrowserProbe>[
+          const BrowserProbe(
+            packageName: 'com.android.chrome',
+            label: 'Chrome',
+            state: BrowserSwitchState.off,
+            canOpenSettings: true,
+            signature: BrowserSignature.other,
+          ),
+          const BrowserProbe(
+            packageName: 'org.mozilla.fennec_fdroid',
+            label: 'Fennec',
+            signature: BrowserSignature.other,
+          ),
+          const BrowserProbe(
+            packageName: 'com.kiwibrowser.browser',
+            label: 'Kiwi',
+            signature: BrowserSignature.unconfirmed,
+          ),
+          const BrowserProbe(
+            packageName: 'org.chromium.chrome',
+            label: 'Chromium',
+            state: BrowserSwitchState.off,
+            signature: BrowserSignature.unconfirmed,
+          ),
+          const BrowserProbe(
+            packageName: 'com.sec.android.app.sbrowser',
+            label: 'Samsung Internet',
+            signature: BrowserSignature.unconfirmed,
+          ),
+        ],
+      );
+      final PasswordSetupState state = await readPasswordSetup(platform);
+      final Map<String, BrowserSetup> by = <String, BrowserSetup>{
+        for (final BrowserSetup b in state.browsers) b.browser.packageName: b,
+      };
+      final BrowserSetup chrome = by['com.android.chrome']!;
+      expect(chrome.signature, BrowserSignature.other);
+      expect(chrome.line, startsWith('Ta kopia przeglądarki nie jest '));
+      expect(chrome.line, contains('jak każdą inną aplikację'));
+      expect(chrome.state, isNull);
+      expect(chrome.canOpenSettings, isFalse);
+      expect(chrome.steps, isNull);
+      expect(chrome.needsAction, isFalse);
+      expect(
+        by['org.mozilla.fennec_fdroid']!.line,
+        startsWith('Ta kopia przeglądarki nie jest podpisana przez jej twórcę'),
+      );
+      expect(
+        by['com.kiwibrowser.browser']!.line,
+        startsWith('Zen nie zna potwierdzonego podpisu'),
+      );
+      // Without a confirmed certificate: filled as an app, but its own
+      // switch still decides whether it asks Zen at all.
+      final BrowserSetup chromium = by['org.chromium.chrome']!;
+      expect(chromium.line, startsWith('Zen nie zna potwierdzonego podpisu'));
+      expect(chromium.state, BrowserSwitchState.off);
+      expect(chromium.steps, isNotNull);
+      // One that probably never asks Zen keeps the line on that.
+      expect(
+        by['com.sec.android.app.sbrowser']!.line,
+        startsWith('Zen może się tu nie pojawić'),
+      );
+    });
+
     test('the Android side\'s answer is read defensively', () {
       expect(BrowserProbe.fromMap(null), isNull);
       expect(BrowserProbe.fromMap('com.android.chrome'), isNull);
@@ -300,6 +370,25 @@ void main() {
       expect(odd.label, isNull);
       expect(odd.state, BrowserSwitchState.unknown);
       expect(odd.canOpenSettings, isFalse);
+      // No word on the signature: not taken for the maker's.
+      expect(odd.signature, BrowserSignature.unconfirmed);
+      for (final (Object? raw, BrowserSignature want)
+          in <(Object?, BrowserSignature)>[
+            ('maker', BrowserSignature.maker),
+            ('other', BrowserSignature.other),
+            ('unconfirmed', BrowserSignature.unconfirmed),
+            ('MAKER', BrowserSignature.unconfirmed),
+            (1, BrowserSignature.unconfirmed),
+          ]) {
+        expect(
+          BrowserProbe.fromMap(<String, Object?>{
+            'package': 'com.android.chrome',
+            'signature': raw,
+          })!.signature,
+          want,
+          reason: '$raw',
+        );
+      }
       expect(
         BrowserProbe.fromMap(<String, Object?>{
           'package': 'com.android.chrome',
@@ -343,6 +432,7 @@ void main() {
               'label': 'Chrome',
               'state': 1,
               'settings': true,
+              'signature': 'maker',
             },
             'junk',
           ],
@@ -541,6 +631,48 @@ void main() {
       expect(find.byKey(const Key('password-setup-how')), findsOneWidget);
       expect(find.byKey(const Key('password-setup-import')), findsNothing);
       expect(find.byKey(const Key('password-setup-elsewhere')), findsNothing);
+    });
+
+    testWidgets('a copy that is not its maker\'s: the honest line, no '
+        'switch, no button', (WidgetTester tester) async {
+      await _pumpSetup(
+        tester,
+        FakeSetupPlatform(
+          installed: <BrowserProbe>[
+            const BrowserProbe(
+              packageName: 'com.android.chrome',
+              label: 'Chrome',
+              state: BrowserSwitchState.off,
+              canOpenSettings: true,
+              signature: BrowserSignature.other,
+            ),
+          ],
+        ),
+      );
+      expect(
+        _text(tester, _line('com.android.chrome')),
+        startsWith('Ta kopia przeglądarki nie jest podpisana przez jej twórcę'),
+      );
+      expect(
+        find.byKey(
+          const Key('password-setup-browser-state-com.android.chrome-off'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('password-setup-browser-open-com.android.chrome')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(
+          const Key('password-setup-browser-steps-com.android.chrome'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('password-setup-english-note')),
+        findsNothing,
+      );
     });
 
     testWidgets('coming back to Zen reads everything again', (

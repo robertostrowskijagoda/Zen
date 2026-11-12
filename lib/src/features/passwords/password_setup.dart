@@ -41,9 +41,10 @@ final class KnownBrowser {
 }
 
 /// The browsers the setup looks for, in the order it lists them. A copy of
-/// the names in `autofillBrowsers` (ZenAutofillFields.kt), the browsers
-/// whose pages the autofill matches by address; a browser added there
-/// belongs here too (and in the manifest's `<queries>`).
+/// the names in `autofillBrowsers` (ZenAutofillTrust.kt), the browsers
+/// whose pages the autofill matches by address when the installed copy is
+/// signed with its maker's certificate; a browser added there belongs here
+/// too (and in the manifest's `<queries>`).
 const List<KnownBrowser> kKnownBrowsers = <KnownBrowser>[
   KnownBrowser('com.android.chrome', 'Chrome', BrowserAutofillNeeds.ownSwitch),
   KnownBrowser(
@@ -136,6 +137,19 @@ const List<KnownBrowser> kKnownBrowsers = <KnownBrowser>[
 /// A browser's own switch, as far as it can be read.
 enum BrowserSwitchState { on, off, unknown }
 
+/// Whether an installed browser is the one its package name says
+/// (`browserSignature` in ZenAutofillTrust.kt).
+enum BrowserSignature {
+  /// Signed with its maker's certificate: Zen believes it about the page.
+  maker,
+
+  /// Signed by someone else: Zen fills it like any other app.
+  other,
+
+  /// Zen has no confirmed certificate of this browser: like any other app.
+  unconfirmed,
+}
+
 /// What the phone says about one installed browser ([PasswordSetupPlatform]).
 @immutable
 final class BrowserProbe {
@@ -144,10 +158,11 @@ final class BrowserProbe {
     this.label,
     this.state = BrowserSwitchState.unknown,
     this.canOpenSettings = false,
+    this.signature = BrowserSignature.maker,
   });
 
   /// One entry of the Android side's answer; null when it does not look
-  /// right.
+  /// right. A signature it does not name is taken as unconfirmed.
   static BrowserProbe? fromMap(Object? raw) {
     if (raw is! Map) {
       return null;
@@ -166,6 +181,11 @@ final class BrowserProbe {
         _ => BrowserSwitchState.unknown,
       },
       canOpenSettings: raw['settings'] == true,
+      signature: switch (raw['signature']) {
+        'maker' => BrowserSignature.maker,
+        'other' => BrowserSignature.other,
+        _ => BrowserSignature.unconfirmed,
+      },
     );
   }
 
@@ -177,6 +197,7 @@ final class BrowserProbe {
 
   /// Its page with the switch opens in that browser itself.
   final bool canOpenSettings;
+  final BrowserSignature signature;
 }
 
 /// One installed browser as the setup shows it.
@@ -187,10 +208,17 @@ final class BrowserSetup {
     required this.name,
     this.state,
     this.canOpenSettings = false,
+    this.signature = BrowserSignature.maker,
   });
 
   final KnownBrowser browser;
   final String name;
+
+  /// Whether this copy is its maker's: only then does Zen match its pages
+  /// by their address. Any other copy is filled like an app; one signed by
+  /// someone else has nothing to set up for Zen (its switch is not shown),
+  /// one Zen has no confirmed certificate of keeps its switch.
+  final BrowserSignature signature;
 
   /// Its own switch; null for a browser without one (or not known to have
   /// one).
@@ -201,10 +229,30 @@ final class BrowserSetup {
 
   /// Whether the person still has something to do in it.
   bool get needsAction =>
-      needs == BrowserAutofillNeeds.ownSwitch && state != BrowserSwitchState.on;
+      signature != BrowserSignature.other &&
+      needs == BrowserAutofillNeeds.ownSwitch &&
+      state != BrowserSwitchState.on;
 
   /// One line on where it stands.
-  String get line => switch (needs) {
+  String get line => switch (signature) {
+    // One that probably never asks Zen: that is the line that matters.
+    BrowserSignature.unconfirmed
+        when needs == BrowserAutofillNeeds.compatibilityMode =>
+      _makersLine,
+    BrowserSignature.other => t(
+      'Ta kopia przeglądarki nie jest podpisana przez jej twórcę: Zen '
+      'wypełnia ją jak każdą inną aplikację i nie wierzy jej, jaka strona '
+      'jest otwarta. Loginy do stron pokaże dopiero po ostrzeżeniu.',
+    ),
+    BrowserSignature.unconfirmed => t(
+      'Zen nie zna potwierdzonego podpisu tej przeglądarki: wypełnia ją jak '
+      'każdą inną aplikację i nie wierzy jej, jaka strona jest otwarta. '
+      'Loginy do stron pokaże dopiero po ostrzeżeniu.',
+    ),
+    BrowserSignature.maker => _makersLine,
+  };
+
+  String get _makersLine => switch (needs) {
     BrowserAutofillNeeds.nothing => t(
       'Nic nie trzeba ustawiać: ta przeglądarka zwykle sama korzysta z '
       'autouzupełniania Androida.',
@@ -234,7 +282,9 @@ final class BrowserSetup {
   };
 
   /// Where its switch is; null when there is nothing to look for.
-  String? get steps => needs == BrowserAutofillNeeds.ownSwitch
+  String? get steps =>
+      signature != BrowserSignature.other &&
+          needs == BrowserAutofillNeeds.ownSwitch
       ? t(
           'W przeglądarce: Ustawienia → Usługi autouzupełniania („Autofill '
           'services”) → autouzupełnianie przez inną usługę („Autofill using '
@@ -390,9 +440,17 @@ Future<PasswordSetupState> readPasswordSetup(
           BrowserSetup(
             browser: b,
             name: browserLabel(p.label) ?? b.name,
-            state: b.needs == BrowserAutofillNeeds.ownSwitch ? p.state : null,
+            // A copy signed by someone else has no switch that matters.
+            state:
+                b.needs == BrowserAutofillNeeds.ownSwitch &&
+                    p.signature != BrowserSignature.other
+                ? p.state
+                : null,
             canOpenSettings:
-                b.needs == BrowserAutofillNeeds.ownSwitch && p.canOpenSettings,
+                b.needs == BrowserAutofillNeeds.ownSwitch &&
+                p.signature != BrowserSignature.other &&
+                p.canOpenSettings,
+            signature: p.signature,
           ),
     ],
   );

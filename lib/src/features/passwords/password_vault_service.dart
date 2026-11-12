@@ -190,17 +190,20 @@ final class PasswordVaultService extends ChangeNotifier {
   /// How many entries [removeDuplicates] would remove.
   int get duplicateCount => _removableDuplicates(entries).length;
 
-  /// The entries the autofill may offer in the app [packageName] or on the
-  /// page [webDomain] ([matchPasswordEntries]).
+  /// The entries the autofill may offer in the app [packageName] (signed
+  /// with [appCertificates]) or on the page [webDomain]
+  /// ([matchPasswordEntries]).
   List<PasswordMatch> matchesFor({
     String? packageName,
     String? webDomain,
     String? webScheme,
+    Iterable<String> appCertificates = const <String>[],
   }) => matchPasswordEntries(
     entries,
     packageName: packageName,
     webDomain: webDomain,
     webScheme: webScheme,
+    appCertificates: appCertificates,
   );
 
   /// Drops everything read from the vault from memory (Zen locked).

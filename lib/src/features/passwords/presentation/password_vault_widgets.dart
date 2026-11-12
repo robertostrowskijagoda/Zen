@@ -3,6 +3,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/passwords/password_generator.dart';
+import 'package:zen/src/features/passwords/password_match.dart';
 import 'package:zen/src/features/passwords/password_vault_service.dart';
 
 /// The name every page of "Hasła" is pushed under: when Zen locks, all of
@@ -140,12 +141,16 @@ String? passwordWebAddress(String address) {
   return bare != null && bare.host.contains('.') ? 'https://$a' : null;
 }
 
-/// The host of [address] for the list ("bank.example.com"), or the
-/// address itself.
+/// The host of [address] for the list ("bank.example.com"), an app's
+/// package (without the certificate's long hash), or the address itself.
 String passwordAddressLabel(String address) {
   final String? web = passwordWebAddress(address);
   final String host = web == null ? '' : Uri.parse(web).host;
-  return host.isNotEmpty ? host : address.trim();
+  if (host.isNotEmpty) {
+    return host;
+  }
+  final PasswordAddress? app = PasswordAddress.parse(address);
+  return app?.kind == PasswordAddressKind.app ? app!.package! : address.trim();
 }
 
 /// A password: dots until shown, then in the monospace face. The dots do

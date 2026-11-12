@@ -2,6 +2,7 @@ package com.roj.zen
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.service.autofill.Dataset
@@ -109,6 +110,9 @@ class ZenAutofillActivity : Activity() {
         return ZenAutofillBridge.Request(
             packageName = pkg,
             appLabel = appLabel(pkg),
+            // A page in a browser is matched by its address, not by the
+            // browser's certificate.
+            signing = if (intent.hasExtra(EXTRA_WEB_DOMAIN)) null else appSigningOf(pkg),
             webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN),
             webScheme = intent.getStringExtra(EXTRA_WEB_SCHEME),
             usernameId = usernameId,
@@ -136,6 +140,36 @@ class ZenAutofillActivity : Activity() {
         packageManager.getApplicationLabel(info).toString().trim().takeIf { it.isNotEmpty() }
     } catch (_: Exception) {
         null
+    }
+
+    /**
+     * The certificates [pkg] is signed with ([appSigning]); null when
+     * Android does not show Zen that app or tells nothing.
+     */
+    private fun appSigningOf(pkg: String): AppSigning? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return null
+        }
+        return try {
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(
+                    pkg,
+                    PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+                )
+            } else {
+                packageManager.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+            }
+            val signing = info.signingInfo ?: return null
+            val multiple = signing.hasMultipleSigners()
+            val certificates = if (multiple) {
+                signing.apkContentsSigners
+            } else {
+                signing.signingCertificateHistory
+            }
+            appSigning(certificates.orEmpty().map { it.toByteArray() }, multiple)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     companion object {

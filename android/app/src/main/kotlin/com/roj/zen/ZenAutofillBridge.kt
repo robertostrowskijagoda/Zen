@@ -47,12 +47,15 @@ internal fun autofillTimeoutAfter(openedAt: Long, now: Long, holding: Boolean): 
  * Dart (`zen/autofill`, the app's engine only; password_autofill_bridge.dart).
  *
  * At most one request is open: a newer one cancels the older. It holds the
- * requesting app's package and name, the page's address when a known
- * browser reported it, and the ids of the login field, the password field
+ * requesting app's package, name and certificates, the page's address when
+ * a known browser signed by its maker reported it, and the ids of the login field, the password field
  * or both; never a password. Dart is told `changed` whenever a request
  * opens or ends, and asks:
- * * `pending` → {id, package, label, webDomain, webScheme, username,
- *   password} or null (username, password: whether the form has that field);
+ * * `pending` → {id, package, label, certificates, certificate, webDomain,
+ *   webScheme, username, password} or null (certificates: the SHA-256 and
+ *   SHA-512 digests of the app's certificates, certificate: the SHA-512 of
+ *   the one it is signed with now, see [AppSigning]; username, password:
+ *   whether the form has that field);
  * * `fill` {id, login, password}: fills the form of the open request [id]
  *   with exactly that login and password (each only where the form has its
  *   field), ends it and goes back to the app; false when [id] is no longer
@@ -82,6 +85,8 @@ object ZenAutofillBridge {
     class Request(
         val packageName: String,
         val appLabel: String?,
+        /** The app's certificates; null for a page, or when unknown. */
+        val signing: AppSigning?,
         val webDomain: String?,
         val webScheme: String?,
         val usernameId: AutofillId?,
@@ -249,6 +254,8 @@ object ZenAutofillBridge {
             "id" to it.id,
             "package" to it.packageName,
             "label" to it.appLabel,
+            "certificates" to it.signing?.digests,
+            "certificate" to it.signing?.current,
             "webDomain" to it.webDomain,
             "webScheme" to it.webScheme,
             "username" to (it.usernameId != null),

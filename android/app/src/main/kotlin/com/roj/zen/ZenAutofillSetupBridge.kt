@@ -51,14 +51,23 @@ fun thirdPartyModeState(value: Int?): Int = when (value) {
     else -> BROWSER_SWITCH_UNKNOWN
 }
 
+/** [signature] as the setup's answer names it: `maker`, `other` or `unconfirmed`. */
+fun setupSignature(signature: BrowserSignature): String = when (signature) {
+    BrowserSignature.MAKER -> "maker"
+    BrowserSignature.OTHER -> "other"
+    BrowserSignature.UNCONFIRMED -> "unconfirmed"
+}
+
 /**
  * The browsers' side of the password manager's setup (`zen/autofill_setup`,
  * password_setup.dart). Dart names the browsers; this only says which are
  * installed and what they answer:
- * * `browsers` {packages, switches} → [{package, label, state, settings}]
- *   for every installed one of [packages]; for those also in [switches],
- *   `state` is their "Autofill using another service" switch (1 on, 0 off,
- *   -1 unknown) and `settings` whether their page with it can be opened;
+ * * `browsers` {packages, switches} → [{package, label, state, settings,
+ *   signature}] for every installed one of [packages]; for those also in
+ *   [switches], `state` is their "Autofill using another service" switch
+ *   (1 on, 0 off, -1 unknown) and `settings` whether their page with it can
+ *   be opened; `signature` whether the installed copy is signed by its maker
+ *   ([setupSignature]: only then is it believed about the page it shows);
  * * `openBrowserSettings` {package}: that page, only when it resolves in
  *   that very package (never a chooser).
  *
@@ -154,6 +163,9 @@ object ZenAutofillSetupBridge {
             "label" to label,
             "state" to if (hasSwitch) readSwitch(context, browser) else BROWSER_SWITCH_UNKNOWN,
             "settings" to (hasSwitch && resolves(pm, browser)),
+            "signature" to setupSignature(
+                browserSignature(browser, PackageSigningCertificates(pm), Build.VERSION.SDK_INT),
+            ),
         )
     }
 
