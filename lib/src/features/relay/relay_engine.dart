@@ -863,10 +863,13 @@ const String _groupMessageType = 'group_message';
 /// app said it has it ([reportReliableKept]). Acknowledged on arrival, a
 /// message the app then failed to write (the app killed in between, a full
 /// disk) was gone for good while its sender showed it delivered: the sender
-/// stopped trying and every later copy was dropped as seen.
+/// stopped trying and every later copy was dropped as seen. An edit is one
+/// of them too: one that comes before its message only waits in memory,
+/// and a restart before the message comes would lose it.
 const Set<String> _keptByAppTypes = <String>{
   _chatMessageType,
   _groupMessageType,
+  'msg_edit',
 };
 
 /// A payload of [_keptByAppTypes] handed to the app, waiting for its word.

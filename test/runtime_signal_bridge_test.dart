@@ -7,6 +7,10 @@ import 'package:zen/src/app/app.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
+import 'package:zen/src/features/relay/relay_state_store.dart';
+import 'package:zen/src/features/relay/reliable_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -615,6 +619,71 @@ void main() {
     },
   );
 
+  testWidgets('a chat message that came while the snapshot is unreadable is '
+      'not confirmed to its sender: it is to come again', (
+    WidgetTester tester,
+  ) async {
+    final MemorySignalTransport wire = MemorySignalTransport();
+    final MemoryRelayStateStore relayState = MemoryRelayStateStore();
+    final RelayEngine engine = RelayEngine(
+      store: relayState,
+      peers: const _NoFriendsYet(),
+      send: (String to, Map<String, dynamic> payload) =>
+          wire.send(remoteAddress: to, payload: payload),
+    );
+    final ReliableSignalTransport transport = ReliableSignalTransport(
+      delegate: wire,
+      engine: engine,
+      tickInterval: const Duration(days: 1),
+      idleTickInterval: const Duration(days: 1),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          signalTransportProvider.overrideWithValue(transport),
+          relayEngineProvider.overrideWithValue(engine),
+          socialSnapshotStoreProvider.overrideWithValue(
+            _UnreadableSnapshotStore(),
+          ),
+        ],
+        child: const ZenRewriteApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(AppShellScreen)),
+    );
+    expect(
+      container.read(socialHubControllerProvider).snapshotUnreadable,
+      isTrue,
+    );
+
+    // A friend whose entry could not be read writes.
+    await wire.injectIncoming(
+      from: _adaAddress,
+      payload: const <String, dynamic>{
+        'type': 'message',
+        'msgId': 'm-1',
+        'text': 'hej',
+        kReliableIdKey: 'r-1',
+      },
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      wire.sentSignals.where(
+        (({String remoteAddress, Map<String, dynamic> payload}) s) =>
+            s.payload['type'] == 'rly_ack',
+      ),
+      isEmpty,
+      reason: 'nothing was kept: its sender must keep it and try again',
+    );
+    await tester.pumpWidget(const SizedBox());
+    // Its engine's next tick is not waited for.
+    await transport.stop();
+  });
+
   testWidgets('runtime signal bridge subscribes to frames before starting', (
     WidgetTester tester,
   ) async {
@@ -643,6 +712,24 @@ void main() {
 }
 
 /// A snapshot whose file and backup both fail to read (app unlocked).
+/// The relay layer's view of the friends before they are known: every
+/// sender is taken as a contact.
+final class _NoFriendsYet implements RelayPeerSource {
+  const _NoFriendsYet();
+
+  @override
+  String get localAddress => '';
+
+  @override
+  bool get isReady => false;
+
+  @override
+  List<RelayFriend> acceptedFriends() => const <RelayFriend>[];
+
+  @override
+  List<RelayFriend> groupContacts() => const <RelayFriend>[];
+}
+
 final class _UnreadableSnapshotStore implements SocialSnapshotStore {
   @override
   Future<SocialHubState?> load() async {

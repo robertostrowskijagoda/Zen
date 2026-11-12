@@ -398,6 +398,13 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// nothing.
   bool _snapshotLoaded = false;
 
+  /// Set while one signal is taken in (`receiveSignal`, one at a time) when
+  /// it was neither kept nor refused for good, only put off: it is to come
+  /// again (the friend list could not be read, an edit whose message is not
+  /// here yet). Its sender is then not told it arrived, and its next copy
+  /// is taken in like the first.
+  bool _signalWaits = false;
+
   /// Logged once per run: saving is paused over an unreadable snapshot.
   bool _loggedPausedSave = false;
 

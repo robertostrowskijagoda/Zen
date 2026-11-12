@@ -778,17 +778,17 @@ final class RuntimeSignalModule extends ZenModule {
 
   /// One frame, then the word to the relay layer on whether what it
   /// carries is kept ([reportReliableKept]): a chat message is acknowledged
-  /// to its sender only after the hub stored it, and one the hub failed to
-  /// store (or that came while this module was stopping) comes again.
+  /// to its sender only after the hub stored it (or refused it for good),
+  /// and one the hub failed to store, only put off (the friend list could
+  /// not be read) or that came while this module was stopping comes again.
   Future<void> _handleFrame(SignalTransportFrame frame) async {
     bool kept = false;
     try {
       if (_live) {
-        await _handleFrameOnce(frame);
-        // Still running: the hub did the work. Gone meanwhile (Zen closing,
-        // another account), its work may have been skipped: said not kept,
-        // and a copy that comes again is found on file if it was.
-        kept = _live;
+        // Gone meanwhile (Zen closing, another account), the hub's work may
+        // have been skipped: said not kept, and a copy that comes again is
+        // found on file if it was.
+        kept = await _handleFrameOnce(frame) && _live;
       }
     } finally {
       unawaitedLogged(
@@ -798,9 +798,11 @@ final class RuntimeSignalModule extends ZenModule {
     }
   }
 
-  Future<void> _handleFrameOnce(SignalTransportFrame frame) async {
+  /// Whether the frame is settled ([SocialHubController.receiveSignal]);
+  /// presence, and what cannot be read at all, always is.
+  Future<bool> _handleFrameOnce(SignalTransportFrame frame) async {
     if (!_live) {
-      return;
+      return false;
     }
     final String from = PeerShareCodec.normalizeAddress(frame.from);
     final String type = frame.payload['type'] as String? ?? '';
@@ -814,7 +816,7 @@ final class RuntimeSignalModule extends ZenModule {
       // The friends are not known: not read yet (locked app), or the stored
       // list could not be read at all. Every friend would look like a
       // stranger here, so presence waits - no answer, nothing recorded.
-      return;
+      return true;
     }
     // Presence traffic is friend-gated: never reveal our state to, or accept
     // state from, peers we have not accepted.
@@ -823,12 +825,12 @@ final class RuntimeSignalModule extends ZenModule {
         !isAcceptedFriend && _isAcceptedFriendOrGroupMember(from);
     if (type == 'ping') {
       if (transport == null) {
-        return;
+        return true;
       }
       if (!isAcceptedFriend && !isGroupMember) {
         // No answer at all to a peer we do not know: any reply would confirm
         // that this device is online at this address.
-        return;
+        return true;
       }
       final bool seesPresence =
           isAcceptedFriend &&
@@ -861,7 +863,7 @@ final class RuntimeSignalModule extends ZenModule {
         await _notePresence(hub, from, frame);
         await _notePeerVersion(hub, from, frame.payload);
       }
-      return;
+      return true;
     }
     if (type == kPresenceAwayType) {
       if (isAcceptedFriend) {
@@ -870,30 +872,31 @@ final class RuntimeSignalModule extends ZenModule {
         // stops receiving (an iPhone).
         await _notePresence(hub, from, frame);
       }
-      return;
+      return true;
     }
     if (type == 'pong') {
       if (!isAcceptedFriend && !isGroupMember) {
         // Not taken, and not answered either (see the ping above).
-        return;
+        return true;
       }
       await _notePresence(hub, from, frame);
       if (isAcceptedFriend) {
         await _notePeerVersion(hub, from, frame.payload);
       }
-      return;
+      return true;
     }
     final ZenSignal? signal = zenSignalFromTransportPayload(
       sender: from,
       payload: frame.payload,
     );
     if (signal == null) {
-      return;
+      // Nothing this app reads: it never will.
+      return true;
     }
     // The phone may be asleep but for this frame (the app in the
     // background, screen off): awake until it is handled (a message kept,
     // a notice shown, a call ringing), then free to sleep again.
-    await ZenWake.holdWhile(
+    return ZenWake.holdWhile(
       () => hub.receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis),
       tag: 'signal-work',
       limit: const Duration(seconds: 15),

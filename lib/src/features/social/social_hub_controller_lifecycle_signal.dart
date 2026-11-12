@@ -465,8 +465,17 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   /// together and the caller re-sends the invite once a second, so both would
   /// decide the call is brand new and both would raise the ringing
   /// notification — over and over, on a call that was already answered.
-  Future<void> receiveSignal(ZenSignal signal, {int? receivedAtMillis}) {
+  ///
+  /// True once the signal is settled here: kept, or refused for good (a
+  /// stranger past the limits, someone outside the group, a copy already
+  /// on file). False when it was only put off and is to come again (see
+  /// [_signalWaits]), or when the hub went away before it was done (Zen
+  /// closing, another account): only then may the relay layer leave its
+  /// sender without a confirmation. A failure to store it throws.
+  Future<bool> receiveSignal(ZenSignal signal, {int? receivedAtMillis}) {
+    bool settled = false;
     final Future<void> handled = _enqueueStateWork(() async {
+      _signalWaits = false;
       if (!_hydrationCompleted) {
         // Locked app: the stored friends are not read yet, so every friend
         // would look like a stranger, and whatever this signal adds would be
@@ -494,6 +503,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           return;
         }
       }
+      settled = !_signalWaits;
       if ((askedThemToo || friendsAlready) &&
           state
                   .friendByAddress(
@@ -519,7 +529,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     });
     // Any signal proves the peer is reachable right now: the moment to hand
     // it the group invites it missed while it was offline.
-    return handled.whenComplete(() {
+    final Future<void> done = handled.whenComplete(() {
       if (_controllerDisposed || !ref.mounted) {
         return;
       }
@@ -564,6 +574,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         context: 'Syncing group invites after a signal failed',
       );
     });
+    return done.then((_) => settled);
   }
 
   /// When each member still writing into a group this device left was
@@ -768,10 +779,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         signal,
         receivedAtMillis: receivedAtMillis,
       );
-      // An edit that came before this message waited for it.
+      // An edit that came before this message waited for it. Whether that
+      // edit is put off again says nothing of this message.
+      final bool waits = _signalWaits;
       await _applyChangeThatWaited(
         signal.withSender(PeerShareCodec.normalizeAddress(signal.sender)),
       );
+      _signalWaits = waits;
     } on Object {
       if (_controllerDisposed || !ref.mounted) {
         return;
@@ -831,6 +845,12 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     if (!_isSignalAllowedFromPeer(state, signal)) {
       // Dropped without a word: an answer would tell anyone probing an
       // address that the device is online right there.
+      if (state.snapshotUnreadable) {
+        // Only because the friends and groups could not be read: a friend's
+        // message is not refused, it comes again once they can be (its
+        // sender keeps it, and so do its mailboxes, until then).
+        _signalWaits = true;
+      }
       return;
     }
     // Invitations are the one thing anyone may send. Beyond the caps on what
