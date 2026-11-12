@@ -25,6 +25,9 @@ typedef RecoveryCircleMember = ({
   String name,
   String? inviteCode,
   bool confirmed,
+
+  /// Confirmed, but has not answered for [kAckFresh]: no longer counted.
+  bool silent,
 });
 
 /// Who holds this account's pieces, with names from [social]: the close
@@ -49,6 +52,7 @@ List<RecoveryCircleMember> recoveryCircleMembers(
         confirmed: current
             ? acks[address] == g.generation
             : acks.containsKey(address),
+        silent: current && service.isSilent(address),
       ),
   ];
 }
@@ -197,16 +201,31 @@ class RecoveryCircleMembersView extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Icon(
-                            m.confirmed
+                            m.silent
+                                ? Icons.portable_wifi_off_rounded
+                                : m.confirmed
                                 ? Icons.check_circle_rounded
                                 : Icons.schedule_rounded,
                             size: 18,
-                            color: m.confirmed ? zen.success : zen.textMuted,
+                            color: m.silent
+                                ? zen.warning
+                                : m.confirmed
+                                ? zen.success
+                                : zen.textMuted,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              m.confirmed
+                              m.silent
+                                  ? t(
+                                      '{name} (nie odpowiada od ponad {weeks} '
+                                      'tygodni: nie liczy się do zgody)',
+                                      {
+                                        'name': m.name,
+                                        'weeks': kAckFresh.inDays ~/ 7,
+                                      },
+                                    )
+                                  : m.confirmed
                                   ? m.name
                                   : t('{name} (jeszcze nie potwierdził(a))', {
                                       'name': m.name,

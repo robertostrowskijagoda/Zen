@@ -831,12 +831,14 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             icon: Icons.diversity_3_rounded,
             tone: zen.tone(ZenTone.privacy),
             title: t('Klucz u przyjaciół'),
+            // Those who answered lately ([kAckFresh]), not every
+            // confirmation ever.
             status: pieces
                 ? ZenPill(
                     key: const Key('recovery-pieces-acked'),
-                    text: '${g.acked}/${g.threshold}',
-                    tone: g.complete ? zen.success : zen.warning,
-                    icon: g.complete ? Icons.check_rounded : null,
+                    text: '${p.acked}/${g.threshold}',
+                    tone: p.acked >= g.threshold ? zen.success : zen.warning,
+                    icon: p.acked >= g.threshold ? Icons.check_rounded : null,
                   )
                 : null,
           ),
@@ -844,7 +846,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             zen,
             t(
               'Każdy, kogo oznaczysz jako „Przyjaciel”, sam dostaje kawałek '
-              'klucza Twojego konta, a kto przestanie nim być, traci go. Na '
+              'klucza Twojego konta, a kto przestanie nim być, traci go '
+              '(gdy kawałki ma mieć mniej osób niż dotąd, po tygodniu). Na '
               'nowym telefonie odzyskasz konto hasłem konta i zgodą kilku '
               'z nich: 2, gdy kawałki ma do 4 osób, 3 przy 5–9, 4 przy 10 '
               'i więcej.',
@@ -877,6 +880,48 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                     <String, Object?>{'t': g.threshold, 'n': g.holders.length},
                   ),
           ),
+          if (p.reduction case final RecoveryReduction r) ...<Widget>[
+            const SizedBox(height: 8),
+            ZenInfo(
+              key: const Key('recovery-pieces-reduction'),
+              icon: Icons.hourglass_top_rounded,
+              tone: zen.warning,
+              text: r.holders == 0
+                  ? t(
+                      'Masz mniej niż 2 osoby oznaczone jako „Przyjaciel”: '
+                      '{date} przyjaciele usuną kawałki klucza i konta nie '
+                      'da się odzyskać z ich pomocą. Jeśli to pomyłka, '
+                      'przywróć im ten poziom.',
+                      <String, Object?>{
+                        'date': ZenFormat.dateTime(
+                          DateTime.fromMillisecondsSinceEpoch(r.due),
+                        ),
+                      },
+                    )
+                  : t(
+                      '{date} kawałki klucza będzie mieć mniej przyjaciół '
+                      '({n}). Jeśli to pomyłka, przywróć im poziom '
+                      '„Przyjaciel”.',
+                      <String, Object?>{
+                        'date': ZenFormat.dateTime(
+                          DateTime.fromMillisecondsSinceEpoch(r.due),
+                        ),
+                        'n': r.holders,
+                      },
+                    ),
+            ),
+            if (service.handsOut)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton(
+                  key: const Key('recovery-pieces-reduce-now'),
+                  onPressed: _busy
+                      ? null
+                      : () => unawaited(_confirmReduction(service)),
+                  child: Text(t('Zrób to od razu (hasło konta)')),
+                ),
+              ),
+          ],
           if (p.legacy > 0) ...<Widget>[
             const SizedBox(height: 8),
             ZenInfo(
@@ -904,6 +949,61 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Fewer people are to hold pieces (a week from the change): made at
+  /// once only with the account password, which someone holding the
+  /// unlocked phone for a minute does not know.
+  Future<void> _confirmReduction(RecoveryService service) async {
+    final TextEditingController password = TextEditingController();
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialog) => AlertDialog(
+        title: Text(t('Mniej osób z kawałkami klucza')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              t(
+                'Kto przestaje mieć kawałek, usunie go od razu. Wpisz hasło '
+                'konta, aby to potwierdzić.',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('recovery-pieces-reduce-password'),
+              controller: password,
+              obscureText: true,
+              autofocus: true,
+              decoration: InputDecoration(labelText: t('Hasło konta')),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialog).pop(true),
+            child: Text(t('Potwierdź')),
+          ),
+        ],
+      ),
+    );
+    final String typed = password.text;
+    password.dispose();
+    if (ok != true) {
+      return;
+    }
+    await _run(
+      () async => await service.confirmReduction(typed)
+          ? t(
+              'Zrobione: przyjaciele dostaną nowe kawałki albo prośbę o usunięcie.',
+            )
+          : t('To nie jest hasło konta.'),
     );
   }
 

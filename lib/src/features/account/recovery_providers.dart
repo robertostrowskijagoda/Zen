@@ -159,6 +159,32 @@ final Provider<RecoveryService?> recoveryServiceProvider =
             ),
             context: 'Powiadomienie o wydaniu klucza',
           );
+        }
+        ..onReduction = (RecoveryReduction reduction) {
+          unawaitedLogged(
+            post(
+              'recovery-reduction',
+              t('Mniej osób będzie mieć kawałki klucza'),
+              reduction.holders == 0
+                  ? t(
+                      'Za {days} dni przyjaciele usuną kawałki klucza Twojego '
+                      'konta: masz mniej niż 2 osoby oznaczone jako '
+                      '„Przyjaciel”. Jeśli to nie Ty, przywróć je. '
+                      'Ustawienia → Konto i odzyskiwanie.',
+                      <String, Object?>{'days': kReductionDelay.inDays},
+                    )
+                  : t(
+                      'Za {days} dni kawałki klucza Twojego konta będzie mieć '
+                      'mniej przyjaciół ({n}). Jeśli to nie Ty, przywróć ich. '
+                      'Ustawienia → Konto i odzyskiwanie.',
+                      <String, Object?>{
+                        'days': kReductionDelay.inDays,
+                        'n': reduction.holders,
+                      },
+                    ),
+            ),
+            context: 'Powiadomienie o mniejszej ochronie konta',
+          );
         };
       unawaitedLogged(
         service.start(),

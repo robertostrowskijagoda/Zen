@@ -409,6 +409,14 @@ final class RecoverySeal {
     );
   }
 
+  /// Whether [password] is the one this seal was made with.
+  Future<bool> opensWith(String password) async =>
+      await _open(
+        _innerKey(await derivePasswordKey(password, salt, cost: cost)),
+        box,
+      ) !=
+      null;
+
   /// The box as bytes (nonce, then cipher text with its tag): what the
   /// circle box of a generation seals.
   Uint8List get boxBytes => Uint8List.fromList(<int>[
