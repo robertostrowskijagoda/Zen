@@ -30,6 +30,7 @@ import 'package:zen/src/features/pyramid/pyramid_court.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/social/presentation/block_person_dialog.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -1274,6 +1275,11 @@ class DatingProfileScreen extends ConsumerWidget {
                     return;
                   }
                   if (v == 'block') {
+                    // The person everywhere, not only this profile: said
+                    // first.
+                    if (!await confirmBlockPerson(context, p.name)) {
+                      return;
+                    }
                     await dating.block(p.key);
                     if (context.mounted) {
                       Navigator.of(context).pop();

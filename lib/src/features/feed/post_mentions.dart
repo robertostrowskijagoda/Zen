@@ -394,6 +394,7 @@ final class PostMentionService {
     required this.privacy,
     this.friendOfFriend,
     this.held,
+    this.blocked,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -419,6 +420,11 @@ final class PostMentionService {
 
   /// Posts fetched from beyond friends (`post_reach.dart`).
   final HeldPosts? held;
+
+  /// Whether the writer (an account) or the device that sent the notice
+  /// (an address) is someone this person blocked: then nothing is told.
+  final bool Function({required String account, required String address})?
+  blocked;
   final int Function() _now;
 
   StreamSubscription<LogEntry>? _added;
@@ -664,7 +670,8 @@ final class PostMentionService {
     final int now = _now();
     final Object? text = body['text'];
     if (text is! String ||
-        entry.hlc.millis < now - kMentionNoticeMaxAge.inMilliseconds) {
+        entry.hlc.millis < now - kMentionNoticeMaxAge.inMilliseconds ||
+        (blocked?.call(account: entry.account, address: from) ?? false)) {
       return false;
     }
     final List<Mention> mentions = mentionsFromJson(body[kMentionsKey]);

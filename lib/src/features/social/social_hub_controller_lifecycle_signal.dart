@@ -788,6 +788,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     final int timestamp =
         receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final FriendProfile? knownPeer = state.friendByAddress(signal.sender);
+    if (_blockedPersonAt(signal.sender)) {
+      // Another device or address of someone blocked (here, in Dating, "W
+      // pobliżu" or among followers): nothing of theirs comes in, no
+      // message, invitation or group invitation, exactly as from the
+      // blocked address itself.
+      return;
+    }
     if (signal.type == ZenSignalType.friendAccept) {
       // What it means is the book's to say (see meaningOfAccept).
       switch (state.book.meaningOfAccept(signal.sender)) {

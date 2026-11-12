@@ -474,6 +474,63 @@ void main() {
     expect(again.nearby.blockedCount, 0);
   });
 
+  test('one block list: someone blocked elsewhere in the app cannot write '
+      'here; a block made here blocks them everywhere, and "Odblokuj '
+      'wszystkich" lifts it there too', () async {
+    final _Air air = _Air();
+    final Map<String, _Phone> mesh = <String, _Phone>{};
+    final String a = PeerShareCodec.normalizeAddress('200::a1');
+    final String b = PeerShareCodec.normalizeAddress('200::b2');
+    final _Phone ania = _Phone(air, mesh, a, <String>[]);
+    final _Phone bob = _Phone(air, mesh, b, <String>[]);
+    final Set<String> elsewhere = <String>{};
+    final List<String> blockedEverywhere = <String>[];
+    int lifted = 0;
+    bob.nearby
+      ..blockedElsewhere = elsewhere.contains
+      ..onBlock = ((String address, String name) async {
+        blockedEverywhere.add(address);
+      })
+      ..onUnblockAll = (() async {
+        lifted++;
+      });
+    await ania.nearby.setVisible(true);
+    await bob.nearby.setVisible(true);
+    await ania.nearby.startScanning();
+    await bob.nearby.startScanning();
+    ania.radio.broadcast();
+    bob.radio.broadcast();
+    await _settle();
+    final NearbySession mine = (await ania.nearby.wave(
+      ania.nearby.people.single,
+      'Cześć',
+    ))!;
+    await _settle();
+    final NearbySession theirs = bob.nearby.sessions.single;
+    expect(await bob.nearby.send(theirs, 'Hej'), isTrue);
+    await _until(() => mine.address != null);
+    expect(await ania.nearby.send(mine, 'Jestem Ania'), isTrue);
+    await _settle();
+    expect(theirs.address, a);
+
+    // Bob blocked Ania in the messenger (or in Dating): nothing comes.
+    elsewhere.add(a);
+    await ania.nearby.send(mine, 'halo?');
+    await _settle();
+    expect(theirs.lines.last.text, 'Jestem Ania');
+    // Unblocked there: her words come again.
+    elsewhere.remove(a);
+    await ania.nearby.send(mine, 'to ja');
+    await _settle();
+    expect(theirs.lines.last.text, 'to ja');
+
+    bob.nearby.block(theirs);
+    await _settle();
+    expect(blockedEverywhere, <String>[a]);
+    await bob.nearby.unblockAll();
+    expect(lifted, 1);
+  });
+
   test('visibility is on by default and remembered', () async {
     expect(MeetBook().nearbyVisible, isTrue);
     expect(MeetBook.fromJson(<String, dynamic>{'v': 1}).nearbyVisible, isTrue);

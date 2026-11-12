@@ -16,6 +16,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -55,6 +56,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'groups',
     'friendships',
     'friendshipClock',
+    'blocks',
     // Read only: what 1.15 test builds kept before [FriendshipBook]
     // records (taken into them).
     'removedFriends',
@@ -250,6 +252,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     final Map<String, bool> groupNotifyAll = <String, bool>{};
     final Map<String, String> peerAppVersions = <String, String>{};
     final Map<String, FriendshipRecord> records = <String, FriendshipRecord>{};
+    Map<String, BlockRecord> blocks = const <String, BlockRecord>{};
     Hlc clock = Hlc.zero;
     final int extensionCount = reader.readUint32();
     for (int i = 0; i < extensionCount; i++) {
@@ -426,6 +429,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         backgroundAlerts = _withInboxMessages(backgroundAlerts, inboxMessages);
       }
       records.addAll(friendshipRecordsFromJson(decoded['friendships']));
+      // Blocks by person (from 1.17.0; older builds ignore them).
+      blocks = blockRecordsFromJson(decoded['blocks']);
       final Object? clockValue = decoded['friendshipClock'];
       if (clockValue is int && clockValue > 0) {
         clock = Hlc.fromInt(clockValue);
@@ -485,6 +490,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         records: records,
         clock: clock,
       ),
+      blocks: BlockBook.restore(blocks),
       groups: groups,
       inbox: inbox,
       pendingSignalCount: pendingSignalCount,
@@ -741,6 +747,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           'friendships': friendshipRecordsToJson(state.book.records),
         if (state.book.clock != Hlc.zero)
           'friendshipClock': state.book.clock.toInt(),
+        if (!state.blocks.isEmpty)
+          'blocks': blockRecordsToJson(state.blocks.records),
       }),
     );
 
@@ -807,6 +815,7 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       lifecycle: state.lifecycle,
       // Immutable: shared as it is.
       book: state.book,
+      blocks: state.blocks,
       groups: Map<String, GroupProfile>.from(state.groups),
       inbox: List<InboxEntry>.from(state.inbox, growable: false),
       pendingSignalCount: state.pendingSignalCount,

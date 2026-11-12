@@ -475,7 +475,18 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
-  Future<void> blockFriend({required String peerAddress, String? note}) async {
+  /// Blocks [peerAddress] in the messenger and the person behind it
+  /// everywhere ([SocialHubState.blocks]): their account when the ledger
+  /// knows it, with every address and dating key ([datingKeys]) known to be
+  /// theirs. [origin]: the feature the block was made in; [name]: what the
+  /// list of blocked people shows when the entry has no name.
+  Future<void> blockFriend({
+    required String peerAddress,
+    String? note,
+    List<String> datingKeys = const <String>[],
+    BlockOrigin origin = BlockOrigin.messenger,
+    String name = '',
+  }) async {
     final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
     if (canonical.isEmpty) {
       return;
@@ -489,6 +500,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
             note: note?.trim().isNotEmpty == true ? note!.trim() : null,
           )
           .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+    );
+    // The same decision, by person: the stamp the messenger's record got.
+    final FriendProfile? entry = book.profileOf(canonical);
+    final BlockBook blocks = state.blocks.block(
+      account: _blockAccountOf(canonical) ?? '',
+      addresses: <String>[canonical],
+      datingKeys: datingKeys,
+      name: name.trim().isNotEmpty
+          ? name
+          : entry != null && entry.hasProfileName
+          ? entry.displayLabel
+          : '',
+      origin: origin,
+      tick: _friendshipTick,
+      at: book.recordOf(canonical)?.stamp,
     );
 
     final List<InboxEntry> nextInbox = _removeEntriesForPeer(
@@ -516,6 +542,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
 
     state = state.copyWith(
       book: book,
+      blocks: blocks,
       inbox: nextInbox,
       backgroundAlerts: nextAlerts,
       pendingSignalCount: nextQueue.length,
@@ -527,23 +554,216 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
+  /// Lifts the block of [peerAddress] in the messenger and of the person
+  /// behind it everywhere.
   Future<void> unblockFriend({required String peerAddress}) async {
     final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
     final FriendProfile? current = state.friendByAddress(canonical);
     if (current == null || current.status != FriendRelationshipStatus.blocked) {
+      final BlockBook blocks = state.blocks.lift(
+        account: _blockAccountOf(canonical) ?? '',
+        addresses: <String>[canonical],
+        tick: _friendshipTick,
+      );
+      if (!identical(blocks, state.blocks)) {
+        state = state.copyWith(blocks: blocks);
+        await _persistState();
+      }
       return;
     }
-
+    final FriendshipBook book = state.book.unblock(
+      canonical,
+      _friendshipTick,
+      shape: (FriendProfile base) => _friendReducer
+          .applyRemoved(current: base)
+          .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+    );
+    // Lifted by the same decision as the messenger's.
     state = state.copyWith(
-      book: state.book.unblock(
-        canonical,
-        _friendshipTick,
-        shape: (FriendProfile base) => _friendReducer
-            .applyRemoved(current: base)
-            .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+      book: book,
+      blocks: state.blocks.lift(
+        account: _blockAccountOf(canonical) ?? '',
+        addresses: <String>[canonical],
+        tick: _friendshipTick,
+        at: book.recordOf(canonical)?.stamp,
       ),
     );
     await _persistState();
+  }
+
+  /// Blocks a person known by [address], [account] or [datingKey] in every
+  /// feature (see [blockFriend]). Without an address (a dating profile
+  /// whose owner is not known, a follower) it is a block by account or by
+  /// key, which becomes one by address as soon as that is known
+  /// ([learnBlocked]).
+  Future<void> blockPerson({
+    String address = '',
+    String account = '',
+    String datingKey = '',
+    String name = '',
+    BlockOrigin origin = BlockOrigin.messenger,
+  }) async {
+    final String canonical = PeerShareCodec.normalizeAddress(address);
+    final List<String> keys = <String>[if (datingKey.isNotEmpty) datingKey];
+    if (canonical.isNotEmpty && isRoutablePeerAddress(canonical)) {
+      await blockFriend(
+        peerAddress: canonical,
+        datingKeys: keys,
+        origin: origin,
+        name: name,
+      );
+      if (account.isNotEmpty) {
+        await learnBlocked(address: canonical, account: account);
+      }
+      return;
+    }
+    final BlockBook blocks = state.blocks.block(
+      account: account,
+      datingKeys: keys,
+      name: name,
+      origin: origin,
+      tick: _friendshipTick,
+    );
+    if (identical(blocks, state.blocks)) {
+      return;
+    }
+    state = state.copyWith(blocks: blocks);
+    await _persistState();
+  }
+
+  /// Lifts the block [id] of [SocialHubState.blocks] (and the messenger's
+  /// block of every address it names).
+  Future<void> unblockPerson(String id) async {
+    final BlockRecord? record = state.blocks.records[id];
+    if (record == null || !record.on) {
+      return;
+    }
+    for (final String a in record.addresses) {
+      await unblockFriend(peerAddress: a);
+    }
+    final BlockBook blocks = state.blocks.liftId(id, _friendshipTick);
+    if (!identical(blocks, state.blocks)) {
+      state = state.copyWith(blocks: blocks);
+      await _persistState();
+    }
+  }
+
+  /// Lifts every block of [account] (a follower unblocked).
+  Future<void> unblockAccount(String account) async {
+    if (account.isEmpty) {
+      return;
+    }
+    final List<String> ids = <String>[
+      for (final MapEntry<String, BlockRecord> e
+          in state.blocks.covering(account: account).entries)
+        if (e.value.on) e.key,
+    ];
+    for (final String id in ids) {
+      await unblockPerson(id);
+    }
+  }
+
+  /// Lifts every block made in [origin] ("W pobliżu": "Odblokuj
+  /// wszystkich").
+  Future<void> unblockAllFrom(BlockOrigin origin) async {
+    final List<String> ids = <String>[
+      for (final MapEntry<String, BlockRecord> e
+          in state.blocks.records.entries)
+        if (e.value.on && e.value.origin == origin) e.key,
+    ];
+    for (final String id in ids) {
+      await unblockPerson(id);
+    }
+  }
+
+  /// What became known about someone blocked: another [address] or
+  /// [datingKey] of theirs, or their [account]. A block known only by a
+  /// dating key whose owner turns out to be at [address] becomes a block of
+  /// that person everywhere, the messenger included. Nothing for someone
+  /// not blocked.
+  Future<void> learnBlocked({
+    String address = '',
+    String account = '',
+    String datingKey = '',
+  }) async {
+    final String canonical = PeerShareCodec.normalizeAddress(address);
+    final List<String> addrs = <String>[if (canonical.isNotEmpty) canonical];
+    final List<String> keys = <String>[if (datingKey.isNotEmpty) datingKey];
+    final String who = account.isNotEmpty
+        ? account
+        : canonical.isEmpty
+        ? ''
+        : _blockAccountOf(canonical) ?? '';
+    final Map<String, BlockRecord> before = state.blocks.covering(
+      account: who,
+      addresses: addrs,
+      datingKeys: keys,
+    )..removeWhere((String _, BlockRecord r) => !r.on);
+    if (before.isEmpty) {
+      return;
+    }
+    final BlockBook blocks = state.blocks.learn(
+      account: who,
+      addresses: addrs,
+      datingKeys: keys,
+    );
+    if (!identical(blocks, state.blocks)) {
+      state = state.copyWith(blocks: blocks);
+      await _persistState();
+    }
+    final bool keyOnly = before.values.every(
+      (BlockRecord r) => r.account.isEmpty && r.addresses.isEmpty,
+    );
+    final FriendProfile? entry = canonical.isEmpty
+        ? null
+        : state.friendByAddress(canonical);
+    if (keyOnly &&
+        canonical.isNotEmpty &&
+        isRoutablePeerAddress(canonical) &&
+        entry?.status != FriendRelationshipStatus.blocked) {
+      final BlockRecord first = before.values.first;
+      await blockFriend(
+        peerAddress: canonical,
+        datingKeys: keys,
+        origin: first.origin,
+        name: first.name,
+      );
+    }
+  }
+
+  /// Puts the blocks by person in line with the messenger's and with what
+  /// the ledger knows of accounts ([accountOf] an address): blocks made by
+  /// Zen 1.16.5 become records, and a record that names an address whose
+  /// account is known now becomes a block of the account.
+  Future<void> noteBlockedAccounts(
+    String? Function(String address) accountOf,
+  ) async {
+    final String own =
+        ref.read(accountDirectoryHolderProvider).directory?.ownAccount ?? '';
+    String? lookup(String address) {
+      final String? account = accountOf(address);
+      return account == null || account.isEmpty || account == own
+          ? null
+          : account;
+    }
+
+    BlockBook blocks = state.blocks.reconcile(state.book, accountOf: lookup);
+    for (final BlockRecord r in blocks.active.toList()) {
+      if (r.account.isNotEmpty) {
+        continue;
+      }
+      for (final String a in r.addresses) {
+        final String? account = lookup(a);
+        if (account != null) {
+          blocks = blocks.learn(account: account, addresses: <String>[a]);
+          break;
+        }
+      }
+    }
+    if (!identical(blocks, state.blocks)) {
+      state = state.copyWith(blocks: blocks);
+      await _persistState();
+    }
   }
 
   Future<void> sendCallInvite({

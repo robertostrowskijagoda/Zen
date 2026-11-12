@@ -22,6 +22,7 @@ import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/settings/storage_breakdown.dart';
 import 'package:zen/src/features/settings/storage_limit_warning.dart';
 import 'package:zen/src/features/shell/shell_location.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -271,6 +272,12 @@ feedMaintenanceProvider = Provider<FeedMaintenance?>((Ref ref) {
         return null;
       },
       held: reach,
+      // Someone blocked mentions nobody here.
+      blocked: ({required String account, required String address}) {
+        final BlockedPeople people = blockedPeopleNow(ref);
+        return people.account(account) ||
+            (address.isNotEmpty && people.address(address));
+      },
     ),
     notifier: ReactionSystemNotifier(
       node: node,

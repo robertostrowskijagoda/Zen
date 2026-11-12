@@ -156,6 +156,16 @@ final class FollowLedger {
   final Map<String, LogEntry> _latest = <String, LogEntry>{};
   final Map<String, Follower> _followers = <String, Follower>{};
   final Map<String, String> _blocked = <String, String>{};
+
+  /// Accounts blocked elsewhere in the app (the messenger, Dating, "W
+  /// pobliżu"): left out of the followers and their notices ignored, as
+  /// for a follower blocked here. Only this account's own [block] is told
+  /// to its threads' readers.
+  bool Function(String account)? blockedElsewhere;
+
+  bool _refused(String account) =>
+      _blocked.containsKey(account) ||
+      (blockedElsewhere?.call(account) ?? false);
   final StreamController<void> _changes = StreamController<void>.broadcast();
   StreamSubscription<LogEntry>? _added;
   Future<void>? _ready;
@@ -338,7 +348,7 @@ final class FollowLedger {
     DeviceCertificate? certificate,
   }) async {
     await ready;
-    if (_blocked.containsKey(account) || account == node.account) {
+    if (_refused(account) || account == node.account) {
       return false;
     }
     final LogEntry? e = await verifiedEntry(notice, certificate: certificate);
@@ -417,7 +427,7 @@ final class FollowLedger {
       for (final Follower f in _followers.values)
         if (now - f.seen <= kFollowerTtl.inMilliseconds &&
             !friends.contains(f.account) &&
-            !_blocked.containsKey(f.account))
+            !_refused(f.account))
           f,
     ]..sort((Follower a, Follower b) => b.since.compareTo(a.since));
   }

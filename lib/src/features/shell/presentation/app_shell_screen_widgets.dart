@@ -993,40 +993,8 @@ Future<void> _confirmAndBlockFriend(
   ProviderContainer container,
   ConversationPreview conversation,
 ) async {
-  final bool? confirmed = await showDialog<bool>(
-    context: context,
-    builder: (BuildContext dialogContext) {
-      final ZenColors zen = ZenColors.of(dialogContext);
-      return AlertDialog(
-        scrollable: true,
-        icon: Icon(Icons.block_rounded, color: zen.danger, size: 30),
-        title: Text(t('Zablokować użytkownika?')),
-        content: Text(
-          t(
-            'Czy na pewno chcesz zablokować {name}? Nie będziesz otrzymywać '
-            'wiadomości ani połączeń od tego kontaktu.',
-            {'name': conversation.name},
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(t('Anuluj')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: zen.danger,
-              foregroundColor: ZenColors.foregroundFor(zen.danger),
-            ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(t('Zablokuj')),
-          ),
-        ],
-      );
-    },
-  );
-
-  if (confirmed == true) {
+  // What blocking covers: the person everywhere, on every device.
+  if (await confirmBlockPerson(context, conversation.name)) {
     await container
         .read(socialHubControllerProvider.notifier)
         .blockFriend(peerAddress: conversation.address);

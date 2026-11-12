@@ -31,6 +31,7 @@ import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -523,6 +524,23 @@ BackgroundCapabilityDraft backgroundCapabilityDraftOf(
   if (directory != null && directory.ownAccount.isNotEmpty) {
     friends.addAll(directory.addressesOf(directory.ownAccount).map(normal));
   }
+  // One block list: every address known to be a blocked person's — named
+  // by a block made in any feature, or another device of a blocked account
+  // — is refused while the app is locked too. A friend's own entry decides
+  // for itself.
+  blocked.addAll(state.blocks.addresses.map(normal));
+  if (directory != null) {
+    final Set<String> accounts = <String>{
+      ...state.blocks.accounts,
+      for (final String a in blocked) ?directory.accountOf(a),
+    }..remove(directory.ownAccount);
+    for (final String account in accounts) {
+      blocked.addAll(directory.addressesOf(account).map(normal));
+    }
+  }
+  blocked
+    ..removeAll(friends)
+    ..remove('');
   final Set<String> members = <String>{};
   for (final GroupProfile group in state.groups.values) {
     if (group.isInvitePending) {
@@ -562,6 +580,9 @@ String backgroundContactsSignature(SocialHubState state) {
   final List<String> parts = <String>[
     for (final FriendProfile friend in state.friends.values)
       '${friend.status.name}:${friend.address}',
+    for (final MapEntry<String, BlockRecord> b in state.blocks.records.entries)
+      if (b.value.on)
+        'b:${b.key}:${b.value.account}:${b.value.addresses.join(',')}',
     for (final GroupProfile group in state.groups.values)
       if (!group.isInvitePending)
         'g:${group.id}:${group.createdById}:'

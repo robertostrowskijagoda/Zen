@@ -40,6 +40,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -69,21 +70,41 @@ List<String> acceptedFriendAddresses(SocialHubState state) => <String>[
     if (f.status == FriendRelationshipStatus.accepted) f.address,
 ];
 
-/// The accounts of the people blocked in the messenger, as far as [node]
-/// can tell: the account a hello from a blocked address proved, or the one
-/// it had while it was a friend. The wall leaves their likes and comments
-/// out (`buildFeed`).
-Set<String> blockedAccountsOf(LedgerNode node, SocialHubState state) {
-  if (!node.isReady) {
-    return const <String>{};
-  }
-  return <String>{
-    for (final FriendProfile f in state.friends.values)
-      if (f.status == FriendRelationshipStatus.blocked)
-        ?(node.accountOfAnyAddress(f.address) ??
-            node.formerAccountOf(f.address)),
-  }..remove(node.account);
+/// The accounts of the people blocked here, as far as [node] can tell: the
+/// accounts the blocks by person name, and for an address blocked in the
+/// messenger the account a hello from it proved, or the one it had while
+/// it was a friend. The wall and films leave their likes and comments out
+/// (`buildFeed`, `buildFilms`).
+Set<String> blockedAccountsOf(LedgerNode node, SocialHubState state) =>
+    blockedPeopleOf(node, state).accounts;
+
+/// Who is blocked here, as every feature asks it ([BlockedPeople]): the
+/// blocks by person, the messenger's blocked addresses, and the ledger's
+/// knowledge of accounts, so another device of a blocked person counts as
+/// them as soon as it proves itself. Without a ready [node] only what the
+/// blocks name.
+BlockedPeople blockedPeopleOf(LedgerNode? node, SocialHubState state) {
+  final bool ready = node != null && node.isReady;
+  return BlockedPeople(
+    book: state.blocks,
+    blockedAddresses: <String>[
+      for (final FriendProfile f in state.friends.values)
+        if (f.status == FriendRelationshipStatus.blocked) f.address,
+    ],
+    accountOf: ready
+        ? (String a) => node.accountOfAnyAddress(a) ?? node.formerAccountOf(a)
+        : null,
+    addressesOf: ready ? node.anyAddressesOf : null,
+    ownAccount: ready ? node.account : '',
+  );
 }
+
+/// [blockedPeopleOf] the app's state now (read when asked, so a block made
+/// a moment ago counts).
+BlockedPeople blockedPeopleNow(Ref ref) => blockedPeopleOf(
+  ref.read(ledgerNodeProvider),
+  ref.read(socialHubControllerProvider),
+);
 
 /// What the account routing (several devices) asks the ledger.
 final class LedgerAccountDirectory implements AccountDeviceDirectory {
@@ -368,7 +389,10 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     () => unawaitedLogged(mailPush.stop(), context: 'Stopping entry pushes'),
   );
   // Follows are signed entries; followers learn of them from hellos.
-  final FollowLedger follows = FollowLedger.of(node);
+  final FollowLedger follows = FollowLedger.of(node)
+    // Someone blocked anywhere is no follower here either.
+    ..blockedElsewhere = (String account) =>
+        ref.mounted && blockedPeopleNow(ref).account(account);
   ref.onDispose(
     () =>
         unawaitedLogged(follows.dispose(), context: 'Zatrzymanie obserwowania'),
@@ -438,6 +462,20 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   // change is saved (sealed) in the private space, and what another device
   // saved is taken in.
   Timer? contactsTimer;
+  // Blocks by person name the accounts the ledger knows: a block of an
+  // address becomes a block of the account behind it (and of its other
+  // devices) once the ledger knows it.
+  Future<void> noteBlockedAccounts() async {
+    if (!ref.mounted || !node.isReady) {
+      return;
+    }
+    await ref
+        .read(socialHubControllerProvider.notifier)
+        .noteBlockedAccounts(
+          (String a) => node.accountOfAnyAddress(a) ?? node.formerAccountOf(a),
+        );
+  }
+
   Future<void> takeContacts() async {
     final Map<String, dynamic>? backup = node.latestContacts();
     if (backup != null && ref.mounted) {
@@ -449,6 +487,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
         removedAt: node.contactRemovals(),
         backupAt: node.latestContactsMillis,
       );
+      await noteBlockedAccounts();
       if (ref.mounted && hub.contactsBackupBehind(backup)) {
         // This device knows of a removal (or a friendship) the newest copy
         // lacks: its own copy goes out, so the devices end up agreeing
@@ -556,9 +595,12 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     (String? previous, String next) => syncKnownPeers(),
     fireImmediately: true,
   );
-  final StreamSubscription<void> knownDevicesSub = node.devicesChanged.listen(
-    (_) => syncKnownPeers(),
-  );
+  final StreamSubscription<void> knownDevicesSub = node.devicesChanged.listen((
+    _,
+  ) {
+    syncKnownPeers();
+    unawaitedLogged(noteBlockedAccounts(), context: 'Blocked accounts');
+  });
   ref.onDispose(() => unawaited(knownDevicesSub.cancel()));
   unawaited(node.settled.then((_) => syncKnownPeers()));
   // The profile you edit is mirrored into the public profile space,

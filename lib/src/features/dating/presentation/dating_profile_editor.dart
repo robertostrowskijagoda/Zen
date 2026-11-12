@@ -914,6 +914,17 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                   ),
               ],
             ),
+            if (social.blockedFriends.isNotEmpty ||
+                social.blocks.active.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                t(
+                  'Osoby zablokowane są ukryte zawsze, razem z kręgiem: '
+                  'nie trzeba ich tu wybierać.',
+                ),
+                style: TextStyle(color: zen.textMuted, fontSize: 13.5),
+              ),
+            ],
             ZenSection(t('Znajomi o mnie')),
             ListenableBuilder(
               listenable: _dating,

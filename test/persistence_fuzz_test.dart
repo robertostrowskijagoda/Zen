@@ -23,6 +23,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/update/update_notice.dart';
@@ -510,7 +511,7 @@ final class _Device {
   static const String _friend = '200:1111:2222:3333:4444:5555:6666:7777';
 
   /// What [use] left that is not there (read straight after the start):
-  /// the name, the theme, the friend, the group, the message.
+  /// the name, the theme, the friend, the group, the block, the message.
   Future<List<String>> missing() async {
     final List<String> out = <String>[];
     final UserProfile? profile = await _container
@@ -529,6 +530,9 @@ final class _Device {
     }
     if (hub.groups.isEmpty) {
       out.add('the group');
+    }
+    if (hub.blocks.active.isEmpty) {
+      out.add('the block');
     }
     final List<ChatMessage> messages = await _container
         .read(messageTimelineStoreProvider)
@@ -558,6 +562,12 @@ final class _Device {
       memberAddresses: <String>[friend],
     );
     await hub.sendLocalMessage(peerAddress: friend, text: 'cześć');
+    // A block by person (one of a dating profile whose owner is unknown).
+    await hub.blockPerson(
+      datingKey: 'fuzz-dating-key',
+      name: 'Ktoś',
+      origin: BlockOrigin.dating,
+    );
     // Stores write in the background; give them a moment.
     await Future<void>.delayed(const Duration(milliseconds: 300));
   }

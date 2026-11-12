@@ -11,6 +11,8 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
+import 'package:zen/src/features/social/block_book.dart';
+import 'package:zen/src/features/social/presentation/block_person_dialog.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -69,11 +71,28 @@ class _FollowersSheetState extends ConsumerState<FollowersSheet> {
       builder: (BuildContext dialog) => AlertDialog(
         scrollable: true,
         title: Text(t('Zablokować: {name}?', {'name': name})),
-        content: Text(
-          t(
-            'Zniknie z listy obserwujących, a jej polubienia i komentarze '
-            'znikną spod Twoich postów. Posty publiczne nadal może czytać.',
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              t(
+                'Zniknie z listy obserwujących, a jej polubienia i komentarze '
+                'znikną spod Twoich postów. Posty publiczne nadal może czytać.',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              t(
+                'Blokada obejmuje też tę osobę w całym Zen i na wszystkich '
+                'Twoich urządzeniach: wiadomości i połączenia, Randki, W '
+                'pobliżu, tablicę i filmy, kamyki, przedstawienia i '
+                'wzmianki.',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(blockLimitText()),
+          ],
         ),
         actions: <Widget>[
           TextButton(
@@ -90,7 +109,23 @@ class _FollowersSheetState extends ConsumerState<FollowersSheet> {
     );
     if (sure ?? false) {
       await _follows.block(f.account, name: f.name);
+      // And the person everywhere else.
+      await ref
+          .read(socialHubControllerProvider.notifier)
+          .blockPerson(
+            address: f.address,
+            account: f.account,
+            name: f.name,
+            origin: BlockOrigin.follower,
+          );
     }
+  }
+
+  Future<void> _unblock(String account) async {
+    await _follows.unblock(account);
+    await ref
+        .read(socialHubControllerProvider.notifier)
+        .unblockAccount(account);
   }
 
   @override
@@ -224,7 +259,7 @@ class _FollowersSheetState extends ConsumerState<FollowersSheet> {
                 ),
                 trailing: TextButton(
                   key: Key('follower-unblock-${b.key}'),
-                  onPressed: () => unawaited(_follows.unblock(b.key)),
+                  onPressed: () => unawaited(_unblock(b.key)),
                   child: Text(t('Odblokuj')),
                 ),
               ),

@@ -88,6 +88,8 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
           disk: ref.read(ledgerDiskProvider),
           nameOf: _nameOf,
           mailboxes: relay?.announcedMailboxes,
+          blockedAccounts: () =>
+              blockedAccountsOf(node, ref.read(socialHubControllerProvider)),
         );
         _own = c;
         _backend = c;

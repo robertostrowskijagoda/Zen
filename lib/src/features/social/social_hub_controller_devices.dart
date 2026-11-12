@@ -577,10 +577,21 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
           added++;
         }
       }
-      if (identical(book, before) && groups.length == state.groups.length) {
+      // Blocks by person: the later decision wins, what is known of the
+      // person is put together; a block a device of Zen 1.16.5 made or
+      // lifted in the messenger comes in line ([BlockBook.reconcile]).
+      final BlockBook blocks = state.blocks
+          .mergeAll(
+            BlockBook.restore(blockRecordsFromJson(backup['bk'])),
+            wallMillis: tick.wallMillis,
+          )
+          .reconcile(book, accountOf: _blockAccountOf);
+      if (identical(book, before) &&
+          identical(blocks, state.blocks) &&
+          groups.length == state.groups.length) {
         return;
       }
-      state = state.copyWith(book: book, groups: groups);
+      state = state.copyWith(book: book, blocks: blocks, groups: groups);
       await _persistState();
     });
     return added;
@@ -600,7 +611,9 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
         return true;
       }
     }
-    return false;
+    return state.blocks.aheadOf(
+      BlockBook.restore(blockRecordsFromJson(backup['bk'])),
+    );
   }
 }
 
@@ -656,6 +669,10 @@ Map<String, dynamic> contactsBackupOf(SocialHubState state) =>
           ),
       if (state.book.records.isNotEmpty)
         'r': friendshipRecordsToJson(state.book.records),
+      // Blocks by person (`bk`, see [BlockBook]), lifted ones included, so
+      // no device and no copy brings a lifted block back. Zen 1.16.5
+      // ignores it.
+      if (!state.blocks.isEmpty) 'bk': blockRecordsToJson(state.blocks.records),
     };
 
 /// The records [backup] holds ([contactsBackupOf]). A copy of Zen 1.14.0

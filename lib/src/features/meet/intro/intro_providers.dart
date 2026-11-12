@@ -21,10 +21,10 @@ final class AppIntroFriending implements IntroFriending {
 
   final Ref ref;
 
+  /// Blocked anywhere in the app: the address itself, or any device of a
+  /// blocked person's account.
   @override
-  bool isBlocked(String address) =>
-      ref.read(socialHubControllerProvider).friendByAddress(address)?.status ==
-      FriendRelationshipStatus.blocked;
+  bool isBlocked(String address) => blockedPeopleNow(ref).address(address);
 
   @override
   Future<void> befriend(

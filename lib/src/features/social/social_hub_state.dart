@@ -9,6 +9,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -177,6 +178,7 @@ final class SocialHubState {
   const SocialHubState({
     required this.lifecycle,
     this.book = FriendshipBook.empty,
+    this.blocks = BlockBook.empty,
     this.groups = const <String, GroupProfile>{},
     required this.inbox,
     required this.pendingSignalCount,
@@ -296,6 +298,10 @@ final class SocialHubState {
   /// Who is a friend, who is invited, who is blocked or was removed: the
   /// only way to change it (see [FriendshipBook]).
   final FriendshipBook book;
+
+  /// Who is blocked, by person, in every feature (see [BlockBook]); the
+  /// messenger's own blocks are in [book] too.
+  final BlockBook blocks;
 
   /// Every entry of [book] by normalized address (read only).
   Map<String, FriendProfile> get friends => book.profiles;
@@ -507,6 +513,7 @@ final class SocialHubState {
   SocialHubState copyWith({
     LifecycleSnapshot? lifecycle,
     FriendshipBook? book,
+    BlockBook? blocks,
     Map<String, GroupProfile>? groups,
     List<InboxEntry>? inbox,
     int? pendingSignalCount,
@@ -529,6 +536,7 @@ final class SocialHubState {
     return SocialHubState(
       lifecycle: lifecycle ?? this.lifecycle,
       book: book ?? this.book,
+      blocks: blocks ?? this.blocks,
       groups: groups ?? this.groups,
       inbox: inbox ?? this.inbox,
       pendingSignalCount: pendingSignalCount ?? this.pendingSignalCount,

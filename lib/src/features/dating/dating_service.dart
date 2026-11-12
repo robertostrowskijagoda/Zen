@@ -18,6 +18,7 @@ import 'package:zen/src/features/relay/relay_engine.dart' show kSendOnceKey;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 abstract final class DatingTypes {
@@ -245,6 +246,9 @@ final class DatingService extends ChangeNotifier {
     this.raiseAlarm,
     this.isBanned,
     this.isHiddenByMe,
+    this.blocked,
+    this.onBlock,
+    this.onBlockedKey,
     this.pyramidKey,
     this.canPay,
     this.pay,
@@ -283,6 +287,25 @@ final class DatingService extends ChangeNotifier {
   /// Dating keys this person hid after reporting them: left out of
   /// the lists until they choose to see them anyway ([hiddenProfiles]).
   final bool Function(String datingKey)? isHiddenByMe;
+
+  /// The people this person blocked, in any feature ([BlockedPeople]):
+  /// their profiles are never shown here, and this person's profile is
+  /// never given to them — they are on the hide list with their circle,
+  /// and every dating key known to be theirs is refused.
+  final BlockedPeople Function()? blocked;
+
+  /// "Zablokuj" on a dating profile: the person is blocked everywhere —
+  /// by the address its owner is known by ([accountOf]), or by the key
+  /// while nobody here knows whose it is.
+  final Future<void> Function(String datingKey, String? address, String name)?
+  onBlock;
+
+  /// A dating key turned out to be a blocked person's: their phone (or
+  /// another device of theirs) told it from the address, or a key blocked
+  /// on its own turned out to be that address's. The block then covers the
+  /// key on every device of the account, and a key block becomes a block
+  /// of that person.
+  final void Function(String datingKey, String address)? onBlockedKey;
 
   /// This person's pyramid key, when they are a member (sent along with an
   /// introduction, so the pair can thank the matchmaker).
@@ -555,23 +578,88 @@ final class DatingService extends ChangeNotifier {
   /// The matches that may reach this person ([_shown]), newest first. A
   /// match whose profile is switched off stays stored (with its chat), so it
   /// comes back when that ends (a report withdrawn, a ban lifted).
-  List<SeenProfile> get matches =>
-      <SeenProfile>[
-        for (final String k in _matches.keys)
-          if (_profiles[k] != null && _shown(k)) _profiles[k]!,
-      ]..sort(
-        (SeenProfile a, SeenProfile b) => (_matches[b.profile.key] ?? 0)
-            .compareTo(_matches[a.profile.key] ?? 0),
-      );
+  List<SeenProfile> get matches {
+    final BlockedPeople people = _people();
+    return <SeenProfile>[
+      for (final String k in _matches.keys)
+        if (_profiles[k] != null && _shown(k, people)) _profiles[k]!,
+    ]..sort(
+      (SeenProfile a, SeenProfile b) => (_matches[b.profile.key] ?? 0)
+          .compareTo(_matches[a.profile.key] ?? 0),
+    );
+  }
 
   bool _hiddenByMe(String key) => isHiddenByMe?.call(key) ?? false;
 
+  /// The people blocked here, as they are now.
+  BlockedPeople _people() => blocked?.call() ?? BlockedPeople.nobody;
+
+  /// Keys already told to [onBlockedKey] (memory only).
+  final Set<String> _toldBlockedKeys = <String>{};
+
+  /// Whether the dating key [key] is a blocked person's: a key blocked by
+  /// person (on any device of the account), a key blocked on this phone
+  /// whose block was not lifted since, or the key of a blocked person's
+  /// address — the one their phone told this one, or one they asked with
+  /// from one step away.
+  bool _blockedKey(String key, [BlockedPeople? people]) {
+    final BlockedPeople b = people ?? _people();
+    final bool? byPerson = b.datingKey(key);
+    if (byPerson ?? false) {
+      return true;
+    }
+    if (byPerson == null && _blocked.contains(key)) {
+      return true;
+    }
+    if (b.isEmpty) {
+      return false;
+    }
+    final String? owner = accountOf(key);
+    if (owner != null && b.address(owner)) {
+      _tellBlockedKey(key, owner);
+      return true;
+    }
+    for (final String a in b.addresses) {
+      if (_friendKeys[a] == key ||
+          (_friendOtherKeys[a]?.contains(key) ?? false)) {
+        _tellBlockedKey(key, a);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _tellBlockedKey(String key, String address) {
+    final void Function(String, String)? tell = onBlockedKey;
+    if (tell == null || _toldBlockedKeys.length > 5000) {
+      return;
+    }
+    if (_toldBlockedKeys.add('$key|$address')) {
+      tell(key, address);
+    }
+  }
+
+  /// Everyone this phone hides the profile from: the hide list
+  /// ([hiddenAddresses]) and every address of a blocked person.
+  Set<String> _hiddenFrom([BlockedPeople? people]) => <String>{
+    ...hiddenAddresses(),
+    ...(people ?? _people()).addresses,
+  };
+
+  /// Of [_hiddenFrom], those hidden from together with their circle: the
+  /// circles chosen ([hiddenCircles]) and every blocked person.
+  Set<String> _hiddenCirclesAll([BlockedPeople? people]) => <String>{
+    ...hiddenCircles(),
+    ...(people ?? _people()).addresses,
+  };
+
   /// The one rule for whether the profile [key] may reach this person — in
   /// the lists, with messages, notifications and counters, and in what this
-  /// person can send about it: not blocked, not switched off by the pyramid
-  /// or by a report of a minor, not hidden after a report.
-  bool _shown(String key) =>
-      !_blocked.contains(key) &&
+  /// person can send about it: not blocked (here or anywhere in the app),
+  /// not switched off by the pyramid or by a report of a minor, not hidden
+  /// after a report.
+  bool _shown(String key, [BlockedPeople? people]) =>
+      !_blockedKey(key, people) &&
       !(isBanned?.call(key) ?? false) &&
       !isMinorOff(key) &&
       !_hiddenByMe(key);
@@ -622,17 +710,21 @@ final class DatingService extends ChangeNotifier {
 
   /// Profiles this person reported as a minor, still on this phone: each
   /// report can be withdrawn ([withdrawMinor]).
-  List<SeenProfile> get reportedMinors => <SeenProfile>[
-    for (final String k in _minorSelf.keys)
-      if (_profiles[k] != null && !_blocked.contains(k)) _profiles[k]!,
-  ];
+  List<SeenProfile> get reportedMinors {
+    final BlockedPeople people = _people();
+    return <SeenProfile>[
+      for (final String k in _minorSelf.keys)
+        if (_profiles[k] != null && !_blockedKey(k, people)) _profiles[k]!,
+    ];
+  }
 
   Iterable<SeenProfile> _visible() {
     final int t = _now();
+    final BlockedPeople people = _people();
     return (_profiles.values
         .where(
           (SeenProfile s) =>
-              _shown(s.profile.key) &&
+              _shown(s.profile.key, people) &&
               t - s.at < kDatingProfileLife.inMilliseconds,
         )
         .toList()
@@ -641,14 +733,17 @@ final class DatingService extends ChangeNotifier {
 
   /// Profiles this person hid after reporting them and has not blocked:
   /// each can be shown anyway.
-  List<SeenProfile> get hiddenProfiles => <SeenProfile>[
-    for (final SeenProfile s in _profiles.values)
-      if (_hiddenByMe(s.profile.key) &&
-          !_blocked.contains(s.profile.key) &&
-          !isMinorOff(s.profile.key) &&
-          !(isBanned?.call(s.profile.key) ?? false))
-        s,
-  ]..sort((SeenProfile a, SeenProfile b) => b.at.compareTo(a.at));
+  List<SeenProfile> get hiddenProfiles {
+    final BlockedPeople people = _people();
+    return <SeenProfile>[
+      for (final SeenProfile s in _profiles.values)
+        if (_hiddenByMe(s.profile.key) &&
+            !_blockedKey(s.profile.key, people) &&
+            !isMinorOff(s.profile.key) &&
+            !(isBanned?.call(s.profile.key) ?? false))
+          s,
+    ]..sort((SeenProfile a, SeenProfile b) => b.at.compareTo(a.at));
+  }
 
   SeenProfile? profile(String key) => _profiles[key];
 
@@ -1148,8 +1243,11 @@ final class DatingService extends ChangeNotifier {
   Future<void> saveMine(void Function(MyDating me) change) async {
     change(me);
     await _save();
+    final BlockedPeople people = _people();
     for (final String a in hiddenAddresses()) {
-      if (!_friendKeys.containsKey(a) && (host.isFriend(a) || _isPeer(a))) {
+      if (!_friendKeys.containsKey(a) &&
+          (host.isFriend(a) || _isPeer(a)) &&
+          !people.address(a)) {
         await _sendKey(a, want: true);
       }
     }
@@ -1252,8 +1350,9 @@ final class DatingService extends ChangeNotifier {
         'l': lantern.toJson(),
       });
     }
+    final BlockedPeople people = _people();
     for (final String g in gateContacts?.call().map(_n) ?? const <String>[]) {
-      if (!friends.contains(g)) {
+      if (!friends.contains(g) && !people.address(g)) {
         await _send(g, <String, dynamic>{
           'type': DatingTypes.lantern,
           'id': id,
@@ -1294,7 +1393,13 @@ final class DatingService extends ChangeNotifier {
     final int before = _keySent.length;
     _keySent.removeWhere((String a, int _) => !to.contains(a));
     bool changed = before != _keySent.length;
+    final BlockedPeople people = _people();
     for (final String a in to) {
+      if (people.address(a)) {
+        // Nothing goes to someone blocked; their phone tells its key to the
+        // people of its groups anyway, and that is taken.
+        continue;
+      }
       final int? last = _keySent[a];
       if (last != null && t - last < kDatingPublishEvery.inMilliseconds) {
         continue;
@@ -1323,6 +1428,18 @@ final class DatingService extends ChangeNotifier {
       final String gone = _friendKeys.keys.first;
       _friendKeys.remove(gone);
       _friendOtherKeys.remove(gone);
+    }
+    final BlockedPeople people = _people();
+    if (people.address(from)) {
+      // A blocked person's key: refused from now on, on every device of
+      // the account; nothing of this phone's goes back.
+      _tellBlockedKey(k, from);
+      await _save();
+      return;
+    }
+    if (people.datingKey(k) ?? false) {
+      // A key blocked on its own: now it is known whose it is.
+      _tellBlockedKey(k, from);
     }
     final int? last = _keySent[from];
     if (p['w'] == true &&
@@ -1588,7 +1705,7 @@ final class DatingService extends ChangeNotifier {
   bool _noteMinorReports(String sender, Object? reported) {
     if ((reported != null && reported is! List) ||
         sender == myKey ||
-        _blocked.contains(sender)) {
+        _blockedKey(sender)) {
       return false;
     }
     final List<Object?> list = reported is List ? reported : const <Object?>[];
@@ -1663,12 +1780,21 @@ final class DatingService extends ChangeNotifier {
     _minorSeen.removeWhere((String _, Map<String, int> by) => by.isEmpty);
   }
 
+  /// "Zablokuj": the profile [key] is blocked here at once (its match and
+  /// chat go) and the person behind it everywhere in the app ([onBlock]):
+  /// by the address its owner is known by, or by the key until that is
+  /// known.
   Future<void> block(String key) async {
     _blocked.add(key);
     _matches.remove(key);
     _chats.remove(key);
     _pairKeys.remove(key);
     await _save();
+    await onBlock?.call(
+      key,
+      accountOf(key),
+      _profiles[key]?.profile.name ?? '',
+    );
   }
 
   /// Removes the profile [key] from this phone ("Usuń z mojego urządzenia"
@@ -2104,7 +2230,7 @@ final class DatingService extends ChangeNotifier {
 
   /// Whether [datingKey] is the (known) dating key of someone this person
   /// hides from.
-  bool _hiddenKey(String datingKey) => hiddenAddresses().any(
+  bool _hiddenKey(String datingKey) => _hiddenFrom().any(
     (String a) =>
         _friendKeys[a] == datingKey ||
         (_friendOtherKeys[a]?.contains(datingKey) ?? false),
@@ -2523,10 +2649,13 @@ final class DatingService extends ChangeNotifier {
         final String from = _n(frame.from);
         // Friends send anything; people across an opened gate only lanterns
         // and what travels back (and their key); the people of one's groups
-        // only their key.
+        // only their key. Someone blocked only their key (so it is known
+        // to be theirs and refused).
+        final bool blockedSender = _people().address(from);
         final bool allowed =
-            host.isFriend(from) ||
-            (DatingTypes.viaGate.contains(type) && _isGate(from)) ||
+            (!blockedSender &&
+                (host.isFriend(from) ||
+                    (DatingTypes.viaGate.contains(type) && _isGate(from)))) ||
             (type == DatingTypes.key && (_isPeer(from) || _isGate(from)));
         if (allowed) {
           await _handle(type, from, frame.payload);
@@ -2808,8 +2937,9 @@ final class DatingService extends ChangeNotifier {
       final Set<String> friends = host.friends().map(_n).toSet();
       final Set<String> gates =
           gateContacts?.call().map(_n).toSet() ?? <String>{};
+      final BlockedPeople people = _people();
       for (final String f in <String>{...friends, ...gates}) {
-        if (f == from) {
+        if (f == from || people.address(f)) {
           continue;
         }
         final bool acrossGate = gate || !friends.contains(f);
@@ -2978,19 +3108,20 @@ final class DatingService extends ChangeNotifier {
     bool vouched = true;
     if (d >= 2 && origin != null) {
       vouched = origin == '-'
-          ? hiddenAddresses().isEmpty
+          ? _hiddenFrom().isEmpty
           : ephemeral != null &&
                 origin == datingOriginTag(senderKey, ephemeral);
     }
     final int reach = datingReachOf(d, gate: gate);
+    final BlockedPeople people = _people();
     final bool open =
         active &&
         theirKey &&
         vouched &&
         (lantern.intro || reach <= me.wants.hops) &&
-        !(d == 1 && !lantern.intro && hiddenAddresses().contains(from)) &&
-        !hiddenCircles().contains(from) &&
-        !_blocked.contains(senderKey) &&
+        !(d == 1 && !lantern.intro && _hiddenFrom(people).contains(from)) &&
+        !_hiddenCirclesAll(people).contains(from) &&
+        !_blockedKey(senderKey, people) &&
         !(isBanned?.call(senderKey) ?? false) &&
         !isMinorOff(senderKey) &&
         !_hiddenKey(senderKey);
@@ -3122,7 +3253,7 @@ final class DatingService extends ChangeNotifier {
     Map<dynamic, dynamic>? intro,
   }) async {
     if (profile.key == myKey ||
-        _blocked.contains(profile.key) ||
+        _blockedKey(profile.key) ||
         isMinorOff(profile.key)) {
       return false;
     }
@@ -3366,7 +3497,7 @@ final class DatingService extends ChangeNotifier {
     final bool proven =
         answered['open'] == true &&
         active &&
-        !_blocked.contains(senderKey) &&
+        !_blockedKey(senderKey) &&
         !(isBanned?.call(senderKey) ?? false) &&
         !isMinorOff(senderKey) &&
         !_hiddenKey(senderKey) &&
@@ -3663,7 +3794,7 @@ final class DatingService extends ChangeNotifier {
     }
     final String sender = base64Url.encode(opened.$1);
     final Map<String, dynamic> msg = opened.$2;
-    if (_blocked.contains(sender)) {
+    if (_blockedKey(sender)) {
       return;
     }
     // Answers to the sender go back the way this came. (An introduction's

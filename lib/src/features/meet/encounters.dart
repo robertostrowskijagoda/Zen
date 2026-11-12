@@ -302,9 +302,14 @@ final class EncounterLog extends ChangeNotifier {
   /// Whether passing people is written down ("Zapisuj, kogo mijam").
   bool get recording => _saved.on;
 
+  /// People blocked since: what was written of them is not shown (it goes
+  /// with the rest after [kEncountersKeep]).
+  bool Function(String friend)? leaveOut;
+
   int get _oldest => _now() - kEncountersKeep.inMilliseconds;
 
-  /// Friends passed, newest first (what is still to be written included).
+  /// Friends passed, newest first (what is still to be written included),
+  /// without those [leaveOut] names.
   List<Encounter> get encounters {
     List<Encounter> all = <Encounter>[
       for (final Encounter e in _saved.encounters)
@@ -313,7 +318,13 @@ final class EncounterLog extends ChangeNotifier {
     for (final Encounter e in _pending) {
       all = mergeEncounter(all, e);
     }
-    return all;
+    final bool Function(String)? out = leaveOut;
+    return out == null
+        ? all
+        : <Encounter>[
+            for (final Encounter e in all)
+              if (!out(e.friend)) e,
+          ];
   }
 
   /// Hours with people who could not be told apart, newest first.

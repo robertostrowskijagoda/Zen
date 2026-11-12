@@ -67,6 +67,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/mentions.dart';
@@ -1193,6 +1194,47 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required String peerAddress,
     required String messageId,
   });
+
+  /// The account behind [address] as the ledger tells it (a friend, a
+  /// friend's other device, a device that proved itself), never this
+  /// account's own; null when unknown.
+  String? _blockAccountOf(String address) {
+    final AccountDeviceDirectory? dir = ref
+        .read(accountDirectoryHolderProvider)
+        .directory;
+    final String? account = dir?.accountOf(address);
+    return account == null || account.isEmpty || account == dir!.ownAccount
+        ? null
+        : account;
+  }
+
+  /// Whether [address] is a blocked person's although its own entry is not
+  /// blocked: another device of a blocked account, or an address a block
+  /// made elsewhere (Dating, "W pobliżu", followers) names. A friend's own
+  /// entry decides for itself.
+  bool _blockedPersonAt(String address) {
+    final FriendProfile? own = state.friendByAddress(address);
+    if (own?.status == FriendRelationshipStatus.accepted ||
+        own?.status == FriendRelationshipStatus.blocked) {
+      return false;
+    }
+    if (state.blocks.blocksAddress(address)) {
+      return true;
+    }
+    final String? account = _blockAccountOf(address);
+    if (account == null) {
+      return false;
+    }
+    if (state.blocks.blocksAccount(account)) {
+      return true;
+    }
+    for (final FriendProfile f in state.blockedFriends) {
+      if (_blockAccountOf(f.address) == account) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   /// Whether [address] is this device or another device of this account.
   bool _isOwnDeviceAddress(String address) {
