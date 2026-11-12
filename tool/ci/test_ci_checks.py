@@ -35,6 +35,22 @@
   the runner's own, and a third time; an update that could not name the
   archive is such a failure, with no install after it; every job of
   ci.yml that installs packages goes through it.
+- apt_install.sh also reads an update that reached no archive of Ubuntu
+  or Debian (cannot connect, timed out, 5xx) as a failed one, and leaves
+  alone what a healthy update says (ignored indexes, 404, third-party
+  repositories); no workflow installs packages any other way.
+- The release workflow: the tagged commit must be on main (preflight), a
+  pipe into gzip fails with its left side, and the attach job completes a
+  draft that earlier files are in (the same bytes stay, a cut-off upload
+  is made again, another build's file stops it) and never touches a
+  published release.
+- Every Go fuzz target of the tree is in the list the CI step runs
+  (tool/ci/go_fuzz_targets.sh, which fails on none), within the step's time.
+- pages.yml starts for a promoted pre-release too, never cancels a started
+  deployment and tries it up to three times.
+- android_smoke.sh upgrade fails when it read no file of the old version.
+- Lists kept by hand: the docs job runs every tool/ci/test_*.py, and the
+  release before the newest has its upgrade fixture.
 - Mutation testing: no runner of mutation.yml gets more files of
   tool/mutation_targets.json than fit in its time.
 
@@ -782,10 +798,14 @@ class QrStickersTest(unittest.TestCase):
 class AptInstallTest(unittest.TestCase):
     """apt_install.sh, with a made-up apt-get and sudo first on the PATH."""
 
-    def install(self, failures, unnamed=0):
+    DNS = ("W: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/dists/noble/"
+           "InRelease  Temporary failure resolving 'azure.archive.ubuntu.com'")
+
+    def install(self, failures, unnamed=0, says=DNS, noise=""):
         """Runs the script while `apt-get install` fails [failures] times
-        and `apt-get update` cannot name the archive [unnamed] times (it
-        says so and still ends well, as the real one does).
+        and `apt-get update` fails [unnamed] times, saying [says] (it
+        still ends well, as the real one does); every other update says
+        [noise] and works.
 
         Returns (exit code, the apt-get calls, the resolver file's lines).
         """
@@ -797,16 +817,19 @@ class AptInstallTest(unittest.TestCase):
         left = os.path.join(folder, "failures.txt")
         deaf = os.path.join(folder, "unnamed.txt")
         resolv = os.path.join(folder, "resolv.conf")
+        said = os.path.join(folder, "says.txt")
+        quiet = os.path.join(folder, "noise.txt")
         scripts = {
             "apt-get": '#!/bin/sh\n'
                        'echo "$*" >> "$FAKE_LOG"\n'
                        'if [ "$1" = update ]; then\n'
                        '  unnamed=$(cat "$FAKE_UNNAMED")\n'
-                       '  [ "$unnamed" -gt 0 ] || exit 0\n'
-                       '  echo $((unnamed - 1)) > "$FAKE_UNNAMED"\n'
-                       '  echo "W: Failed to fetch http://azure.archive.ubuntu.com/"'
-                       '"ubuntu/dists/noble/InRelease  Temporary failure resolving"'
-                       '" \'azure.archive.ubuntu.com\'" >&2\n'
+                       '  if [ "$unnamed" -gt 0 ]; then\n'
+                       '    echo $((unnamed - 1)) > "$FAKE_UNNAMED"\n'
+                       '    cat "$FAKE_SAYS" >&2\n'
+                       '  else\n'
+                       '    cat "$FAKE_NOISE" >&2\n'
+                       '  fi\n'
                        '  exit 0\n'
                        'fi\n'
                        'left=$(cat "$FAKE_LEFT")\n'
@@ -821,11 +844,12 @@ class AptInstallTest(unittest.TestCase):
                 f.write(text)
             os.chmod(path, 0o755)
         for path, text in ((left, "%d\n" % failures), (deaf, "%d\n" % unnamed), (log, ""),
+                           (said, says + "\n"), (quiet, noise + "\n"),
                            (resolv, "# the runner's own\nnameserver 127.0.0.53\n")):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
         env = dict(os.environ, FAKE_LOG=log, FAKE_LEFT=left, FAKE_UNNAMED=deaf,
-                   APT_INSTALL_RESOLV_CONF=resolv, APT_INSTALL_PAUSE="0",
+                   FAKE_SAYS=said, FAKE_NOISE=quiet, APT_INSTALL_RESOLV_CONF=resolv, APT_INSTALL_PAUSE="0",
                    PATH=tools + os.pathsep + os.environ["PATH"])
         done = subprocess.run(
             ["sh", os.path.join(ROOT, "tool", "ci", "apt_install.sh"), "one", "two"],
@@ -875,20 +899,437 @@ class AptInstallTest(unittest.TestCase):
                               capture_output=True)
         self.assertEqual(done.returncode, 2)
 
+    # What `apt-get update` says when it ends well and still reached no
+    # archive (or one that answered with an error), as apt words it.
+    BLACKHOLED = ("W: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/dists/noble/"
+                  "InRelease  Connection timed out [IP: 20.1.2.3 80]\n"
+                  "W: Some index files failed to download. They have been ignored, "
+                  "or old ones used instead.")
+    REFUSED = ("Err:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease\n"
+               "  Could not connect to azure.archive.ubuntu.com:80 (20.1.2.3), "
+               "connection timed out")
+    UNAVAILABLE = ("Hit:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease\n"
+                   "Err:2 http://security.ubuntu.com/ubuntu noble-security InRelease\n"
+                   "  503  Service Unavailable [IP: 91.189.91.82 80]")
+    DEBIAN = ("Err:1 http://deb.debian.org/debian bookworm InRelease\n"
+              "  Cannot initiate the connection to deb.debian.org:80 (2a04::1).")
+
+    def test_an_archive_that_cannot_be_reached_is_a_failed_update(self):
+        # The install after such an update waits for every package in turn.
+        for name in ("BLACKHOLED", "REFUSED", "UNAVAILABLE", "DEBIAN"):
+            says = getattr(self, name)
+            code, calls, resolv = self.install(failures=0, unnamed=1, says=says)
+            self.assertEqual(code, 0, name)
+            self.assertEqual(calls, ["update"] + self.ATTEMPT, name)
+            self.assertIn("nameserver 1.1.1.1", resolv, name)
+            code, calls, _ = self.install(failures=0, unnamed=3, says=says)
+            self.assertNotEqual(code, 0, name)
+            self.assertEqual(calls, ["update"] * 3, name)
+
+    def test_an_update_with_a_stray_error_is_not_a_failed_one(self):
+        # What the runner images' updates say all the time must not cost
+        # the job its tries: ignored optional indexes, a missing index
+        # (404), a bad signature or an unreachable repository of a third
+        # party, and sizes such as "512 kB" on the line after an error.
+        noise = "\n".join((
+            "Hit:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease",
+            "Ign:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 Contents",
+            "Err:3 http://azure.archive.ubuntu.com/ubuntu noble/universe Translation-pl",
+            "  404  Not Found [IP: 20.1.2.3 80]",
+            "Err:4 http://azure.archive.ubuntu.com/ubuntu noble/main Optional",
+            "Get:5 http://azure.archive.ubuntu.com/ubuntu noble/main Packages [512 kB]",
+            "Err:6 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease",
+            "  Could not connect to packages.microsoft.com:443 (13.1.2.3), "
+            "connection timed out",
+            "W: Failed to fetch https://dl.google.com/linux/chrome/deb/dists/stable/"
+            "InRelease  503  Service Unavailable",
+            "Err:7 https://example.org/repo noble InRelease",
+            "  The following signatures couldn't be verified: NO_PUBKEY 0123456789ABCDEF",
+            "W: Some index files failed to download. They have been ignored, "
+            "or old ones used instead.",
+        ))
+        code, calls, resolv = self.install(failures=0, noise=noise)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, self.ATTEMPT)
+        self.assertEqual(resolv, ["# the runner's own", "nameserver 127.0.0.53"])
+
     def test_every_job_that_installs_packages_uses_it(self):
-        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
-            jobs = WorkflowTest.jobs(f.read())
-        for name, job in jobs.items():
-            if name == "deb-install":
-                # Bare containers without a checkout: the same steps, written out.
-                self.assertIn("install_deb || { sleep 30; install_deb; }", job)
-                self.assertIn("nameserver 1.1.1.1", job)
-                self.assertIn("! grep -Eq 'Temporary failure resolving|Could not resolve'", job)
+        # Every workflow, not only the one the rule was first written for:
+        # a bare apt-get is neither tried again nor stopped when the update
+        # reached nothing.
+        folder = os.path.join(ROOT, ".github", "workflows")
+        seen = {}
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith((".yml", ".yaml")):
                 continue
-            self.assertNotIn("apt-get install", job, name)
-            self.assertNotIn("apt-get update", job, name)
-        for name in ("qr-stickers", "linux", "packaging"):
-            self.assertIn("sh tool/ci/apt_install.sh", jobs[name], name)
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                jobs = WorkflowTest.jobs(f.read())
+            for job_name, job in jobs.items():
+                seen[(name, job_name)] = job
+                code = "\n".join(line for line in job.splitlines()
+                                 if not line.strip().startswith("#"))
+                self.assertNotRegex(
+                    code, r"\bapt(-get)? (install|update|upgrade)\b",
+                    "%s, job %s: install packages with `sh tool/ci/apt_install.sh "
+                    "PACKAGE...`, not with apt-get" % (name, job_name))
+        for name, job in (("ci.yml", "qr-stickers"), ("ci.yml", "linux"),
+                          ("ci.yml", "packaging"), ("release.yml", "linux"),
+                          ("release.yml", "flatpak")):
+            self.assertIn("sh tool/ci/apt_install.sh", seen[(name, job)], (name, job))
+        # The bare containers have no checkout: the script comes with the
+        # package, from the job that built it.
+        self.assertIn("cp tool/ci/apt_install.sh deb/", seen[("ci.yml", "linux")])
+        self.assertIn("sh deb/apt_install.sh ./deb/zen.deb", seen[("ci.yml", "deb-install")])
+
+
+def steps_of(job):
+    """The steps of a job's text: a list of the text of each step."""
+    code = "\n".join(line for line in job.splitlines() if not line.strip().startswith("#"))
+    return re.split(r"(?m)^      - (?=\S)", code)[1:]
+
+
+def run_of(job, name):
+    """The shell text of the step called [name] in [job], unindented."""
+    for step in steps_of(job):
+        if step.startswith("name: " + name + "\n"):
+            at = step.index("        run: |\n") + len("        run: |\n")
+            lines = []
+            for line in step[at:].splitlines():
+                if line.strip() and not line.startswith("          "):
+                    break
+                lines.append(line[10:])
+            return "\n".join(lines) + "\n"
+    raise AssertionError("no step called %r" % name)
+
+
+class ReleaseWorkflowHardeningTest(unittest.TestCase):
+    def setUp(self):
+        with open(os.path.join(ROOT, ".github/workflows/release.yml"), encoding="utf-8") as f:
+            self.jobs = WorkflowTest.jobs(f.read())
+
+    def test_the_tagged_commit_must_be_on_main(self):
+        preflight = self.jobs["preflight"]
+        # The history is there to ask for, and the signing waits for this job.
+        self.assertIn("fetch-depth: 0", preflight)
+        script = run_of(preflight, "The tagged commit is on main")
+        self.assertIn('git merge-base --is-ancestor "$GITHUB_SHA" origin/main', script)
+        self.assertRegex(preflight, r"name: The tagged commit is on main\n"
+                                    r"        if: startsWith\(github\.ref, 'refs/tags/v'\)")
+        self.assertIn("needs.preflight.result == 'success'", self.jobs["sign"])
+
+    def test_a_pipe_into_gzip_or_a_loop_fails_with_its_left_side(self):
+        # GitHub's default bash has no pipefail: a tar that failed halfway
+        # would leave a cut-off archive that is signed like a whole one.
+        # With pipefail, `grep -q` at the end of a pipe makes the left side
+        # die of the closed pipe, so it is not used there.
+        for name, job in self.jobs.items():
+            for step in steps_of(job):
+                if "shell: pwsh" in step or "run: " not in step:
+                    continue
+                if re.search(r"\|\s*\\?\n?\s*(gzip|awk)\b", step):
+                    self.assertIn("        shell: bash\n", step, "%s: %s" % (name, step[:80]))
+                if "        shell: bash\n" in step:
+                    self.assertNotRegex(step, r"\| *grep -\w*q", "%s: %s" % (name, step[:80]))
+        linux = run_of(self.jobs["linux"], "Release files")
+        self.assertIn("| gzip -9n >", linux)
+
+    def test_nothing_in_the_release_installs_packages_by_itself(self):
+        for name, job in self.jobs.items():
+            self.assertNotRegex(job, r"(?m)^\s*(sudo )?apt-get (install|update)", name)
+
+
+class AttachTest(unittest.TestCase):
+    """The attach job's script on a made-up gh: a draft is completed, never
+    changed."""
+
+    TAG = "v9.9.9"
+
+    def setUp(self):
+        if not shutil.which("bash"):
+            self.skipTest("needs bash")
+        with open(os.path.join(ROOT, ".github/workflows/release.yml"), encoding="utf-8") as f:
+            job = WorkflowTest.jobs(f.read())["attach"]
+        self.script = run_of(job, "Attach to the release")
+        self.assertIn("        shell: bash\n", job)
+
+    def attach(self, releases=(), assets=(), dist=None):
+        """Runs the script. [releases]: ("id", "true"/"false") rows the list
+        shows for the tag; [assets]: (id, state, name, content) of the draft;
+        [dist]: file name -> content of this run. Returns (exit code, the
+        output, the gh calls, the names in the draft at the end)."""
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        work = os.path.join(folder, "work")
+        state = os.path.join(folder, "state")
+        tools = os.path.join(folder, "bin")
+        for path in (os.path.join(work, "dist"), os.path.join(state, "files"), tools,
+                     os.path.join(folder, "tmp")):
+            os.makedirs(path)
+        dist = {"SHA256SUMS": "sums", "Zen-a.zip": "aaa", "Zen-b.zip": "bbb"} \
+            if dist is None else dist
+        for name, content in dist.items():
+            with open(os.path.join(work, "dist", name), "w", newline="\n") as f:
+                f.write(content)
+        with open(os.path.join(state, "releases.txt"), "w", newline="\n") as f:
+            f.write("".join("%s %s\n" % row for row in releases))
+        with open(os.path.join(state, "assets.txt"), "w", newline="\n") as f:
+            f.write("".join("%s %s %s\n" % row[:3] for row in assets))
+        for row in assets:
+            with open(os.path.join(state, "files", str(row[0])), "w", newline="\n") as f:
+                f.write(row[3])
+        with open(os.path.join(state, "calls.txt"), "w") as f:
+            f.write("")
+        fake = r'''#!/bin/bash
+echo "$*" >> "$STATE/calls.txt"
+case "$1" in
+  api)
+    case "$*" in
+      *--paginate*) cat "$STATE/releases.txt" ;;
+      *"-X DELETE"*) last=${@: -1}; id=${last##*/}; grep -v "^$id " "$STATE/assets.txt" > "$STATE/a.tmp"; mv "$STATE/a.tmp" "$STATE/assets.txt" ;;
+      *octet-stream*) last=${@: -1}; cat "$STATE/files/${last##*/}" ;;
+      *'select(.state'*) awk '$2 == "uploaded" { print $3 }' "$STATE/assets.txt" ;;
+      *) cat "$STATE/assets.txt" ;;
+    esac ;;
+  release)
+    if [ "$2" = create ]; then
+      echo "7 true" >> "$STATE/releases.txt"
+    else
+      shift 3
+      while [ "$#" -gt 0 ] && [ "$1" != --repo ]; do
+        n=$(( $(wc -l < "$STATE/assets.txt") + 100 ))
+        echo "$n uploaded $(basename "$1")" >> "$STATE/assets.txt"
+        cp "$1" "$STATE/files/$n"
+        shift
+      done
+    fi ;;
+esac
+'''
+        with open(os.path.join(tools, "gh"), "w", newline="\n") as f:
+            f.write(fake)
+        os.chmod(os.path.join(tools, "gh"), 0o755)
+        script = os.path.join(folder, "attach.sh")
+        with open(script, "w", newline="\n") as f:
+            f.write(self.script)
+        env = dict(os.environ, STATE=state, GITHUB_REPOSITORY="o/r", TAG=self.TAG,
+                   RUNNER_TEMP=os.path.join(folder, "tmp"), GH_TOKEN="x",
+                   PATH=tools + os.pathsep + os.environ["PATH"])
+        done = subprocess.run(["bash", "-eo", "pipefail", script], cwd=work, env=env,
+                              capture_output=True, text=True)
+        with open(os.path.join(state, "calls.txt")) as f:
+            calls = f.read().splitlines()
+        with open(os.path.join(state, "assets.txt")) as f:
+            names = sorted(line.split()[2] for line in f if line.split()[1] == "uploaded")
+        return done.returncode, done.stdout + done.stderr, calls, names
+
+    @staticmethod
+    def uploads(calls):
+        return [c for c in calls if c.startswith("release upload")]
+
+    def test_a_new_draft_is_made_for_an_existing_tag_and_gets_every_file(self):
+        code, out, calls, names = self.attach()
+        self.assertEqual(code, 0, out)
+        create = [c for c in calls if c.startswith("release create")]
+        self.assertEqual(len(create), 1)
+        self.assertIn("--draft --verify-tag", create[0])
+        self.assertEqual(names, ["SHA256SUMS", "Zen-a.zip", "Zen-b.zip"])
+
+    def test_a_published_release_is_never_touched(self):
+        code, out, calls, _ = self.attach(releases=[("7", "false")])
+        self.assertEqual(code, 1)
+        self.assertIn("already published", out)
+        self.assertEqual(self.uploads(calls), [])
+
+    def test_two_releases_of_one_tag_stop_it(self):
+        code, _, calls, _ = self.attach(releases=[("7", "true"), ("8", "true")])
+        self.assertEqual(code, 1)
+        self.assertEqual(self.uploads(calls), [])
+
+    def test_a_re_run_completes_a_draft_and_leaves_its_files_alone(self):
+        code, out, calls, names = self.attach(
+            releases=[("7", "true")],
+            assets=[(1, "uploaded", "Zen-a.zip", "aaa"),
+                    (2, "starter", "Zen-b.zip", "b")])
+        self.assertEqual(code, 0, out)
+        # The cut-off upload is removed and made again; the whole one stays.
+        self.assertTrue(any("-X DELETE" in c and c.endswith("/assets/2") for c in calls))
+        self.assertFalse(any("-X DELETE" in c and c.endswith("/assets/1") for c in calls))
+        self.assertEqual(len(self.uploads(calls)), 1)
+        self.assertNotIn("Zen-a.zip", self.uploads(calls)[0])
+        self.assertIn("Zen-b.zip", self.uploads(calls)[0])
+        self.assertEqual(names, ["SHA256SUMS", "Zen-a.zip", "Zen-b.zip"])
+
+    def test_a_complete_draft_uploads_nothing(self):
+        code, out, calls, _ = self.attach(
+            releases=[("7", "true")],
+            assets=[(1, "uploaded", "Zen-a.zip", "aaa"), (2, "uploaded", "Zen-b.zip", "bbb"),
+                    (3, "uploaded", "SHA256SUMS", "sums")])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.uploads(calls), [])
+
+    def test_files_of_another_build_stop_it_before_anything_is_added(self):
+        code, out, calls, _ = self.attach(
+            releases=[("7", "true")], assets=[(1, "uploaded", "Zen-a.zip", "OTHER")])
+        self.assertEqual(code, 1)
+        self.assertIn("differs", out)
+        self.assertEqual(self.uploads(calls), [])
+        code, out, calls, _ = self.attach(
+            releases=[("7", "true")], assets=[(1, "uploaded", "Zen-old.zip", "x")])
+        self.assertEqual(code, 1)
+        self.assertIn("did not make", out)
+        self.assertEqual(self.uploads(calls), [])
+
+
+class GoFuzzTargetsTest(unittest.TestCase):
+    BRIDGE = os.path.join(ROOT, "native", "yggdrasil_bridge")
+
+    @staticmethod
+    def listed(folder):
+        done = subprocess.run(["sh", os.path.join(ROOT, "tool", "ci", "go_fuzz_targets.sh"),
+                               "."], cwd=folder, capture_output=True, text=True)
+        return done.returncode, [line.split("\t") for line in done.stdout.splitlines()]
+
+    @unittest.skipUnless(shutil.which("sh"), "needs sh")
+    def test_every_fuzz_target_of_the_tree_is_in_the_list_the_step_runs(self):
+        code, rows = self.listed(self.BRIDGE)
+        self.assertEqual(code, 0)
+        found = set()
+        for folder, _, files in os.walk(self.BRIDGE):
+            if "testdata" in folder.split(os.sep):
+                continue
+            for name in files:
+                if name.endswith("_test.go"):
+                    with open(os.path.join(folder, name), encoding="utf-8") as f:
+                        for target in re.findall(r"(?m)^func (Fuzz\w*)\(", f.read()):
+                            found.add((os.path.relpath(folder, self.BRIDGE)
+                                       .replace(os.sep, "/"), target))
+        self.assertTrue(found)
+        listed = set()
+        for module, package, target in rows:
+            self.assertTrue(os.path.isfile(os.path.join(self.BRIDGE, module, "go.mod")), module)
+            listed.add((os.path.normpath(os.path.join(module, package)).replace(os.sep, "/"),
+                        target))
+        listed = {("." if folder == "." else folder, target) for folder, target in listed}
+        self.assertEqual(sorted(found - listed), [],
+                         "a fuzz target the CI step does not run: tool/ci/go_fuzz_targets.sh "
+                         "must list it (is its file under native/yggdrasil_bridge?)")
+        self.assertEqual(sorted(listed - found), [])
+        self.assertEqual(len(rows), len({tuple(r) for r in rows}))
+
+    @unittest.skipUnless(shutil.which("sh"), "needs sh")
+    def test_a_tree_without_a_target_is_an_error_and_a_nested_module_is_named(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        os.makedirs(os.path.join(folder, "inner", "pkg"))
+        for path, text in (("go.mod", "module a\n"), ("inner/go.mod", "module b\n"),
+                           ("a_test.go", "package a\nfunc TestX(t *testing.T) {}\n"),
+                           ("inner/pkg/p_test.go",
+                            "package pkg\nfunc FuzzIn(f *testing.F) {}\n")):
+            with open(os.path.join(folder, path), "w", newline="\n") as f:
+                f.write(text)
+        code, rows = self.listed(folder)
+        self.assertEqual((code, rows), (0, [["./inner", "./pkg", "FuzzIn"]]))
+        with open(os.path.join(folder, "inner", "pkg", "p_test.go"), "w") as f:
+            f.write("package pkg\n")
+        code, rows = self.listed(folder)
+        self.assertEqual((code, rows), (1, []))
+
+    def test_the_ci_step_runs_the_list_within_its_time(self):
+        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
+            go = WorkflowTest.jobs(f.read())["go"]
+        step = [s for s in steps_of(go) if s.startswith("name: Fuzz the wire parsers")][0]
+        self.assertIn("go_fuzz_targets.sh", step)
+        self.assertNotIn("wire_fuzz_test.go", run_of(go, "Fuzz the wire parsers"))
+        # 24+ targets of 8 seconds each, and a limit of its own below the job's.
+        self.assertIn("-fuzztime 8s", step)
+        step_limit = int(re.search(r"timeout-minutes: (\d+)", step).group(1))
+        job_limit = int(re.search(r"timeout-minutes: (\d+)", go).group(1))
+        self.assertLess(step_limit, job_limit)
+        code, rows = self.listed(self.BRIDGE) if shutil.which("sh") else (0, [None] * 24)
+        self.assertLess(len(rows) * (8 + 20), step_limit * 60,
+                        "more fuzz targets than fit in the step's time: raise its "
+                        "timeout-minutes (and the job's) or shorten -fuzztime")
+
+
+class PagesWorkflowTest(unittest.TestCase):
+    def setUp(self):
+        with open(os.path.join(ROOT, ".github/workflows/pages.yml"), encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = WorkflowTest.jobs(self.text)
+
+    def test_a_promoted_pre_release_starts_it_too(self):
+        # `published` does not fire when a pre-release is promoted; `released` does.
+        self.assertIn("  release:\n    types: [published, released]\n", self.text)
+
+    def test_a_started_deployment_is_never_cancelled(self):
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'release' }}", self.text)
+
+    def test_the_deployment_is_tried_again(self):
+        deploy = self.jobs["deploy"]
+        self.assertEqual(deploy.count("uses: actions/deploy-pages@"), 3)
+        for step in steps_of(deploy):
+            if "uses: actions/deploy-pages@" in step and "id: deployment_last" not in step:
+                self.assertIn("continue-on-error: true", step)
+        self.assertIn("id: deployment_last", deploy)
+        limit = int(re.search(r"timeout-minutes: (\d+)", deploy).group(1))
+        # Three deployments of at most 5 minutes, the two pauses (90 s, 240 s) and
+        # two minutes for the steps before.
+        self.assertGreaterEqual(limit * 60, 3 * 300 + 90 + 240 + 120)
+        self.assertIn("for attempt in 1 2 3; do", self.jobs["kick"])
+
+
+class SmokeUpgradeTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("sh"), "needs sh")
+    def test_an_upgrade_that_read_no_file_does_not_pass(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        tools = os.path.join(folder, "bin")
+        os.mkdir(tools)
+        log = os.path.join(folder, "calls.txt")
+        for name, text in (("adb", '#!/bin/sh\nexit 0\n'), ("sleep", '#!/bin/sh\nexit 0\n'),
+                           ("flutter", '#!/bin/sh\necho "$*" >> "$FAKE_LOG"\nexit 1\n')):
+            with open(os.path.join(tools, name), "w", newline="\n") as f:
+                f.write(text)
+            os.chmod(os.path.join(tools, name), 0o755)
+        env = dict(os.environ, FAKE_LOG=log, PATH=tools + os.pathsep + os.environ["PATH"])
+        done = subprocess.run(
+            ["sh", os.path.join(ROOT, "tool", "ci", "android_smoke.sh"), "upgrade", "x.apk"],
+            cwd=folder, env=env, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("No file of the previous version could be read", done.stdout)
+        # It stopped before building anything, and did not say it passed.
+        self.assertFalse(os.path.exists(log))
+        self.assertNotIn("still there", done.stdout)
+
+
+class ListsKeptByHandTest(unittest.TestCase):
+    """Lists that are kept in step by hand have a check that fails."""
+
+    def test_the_docs_job_runs_every_ci_self_test(self):
+        with open(os.path.join(ROOT, ".github/workflows/ci.yml"), encoding="utf-8") as f:
+            docs = WorkflowTest.jobs(f.read())["docs"]
+        tests = sorted(n for n in os.listdir(os.path.join(ROOT, "tool", "ci"))
+                       if n.startswith("test_") and n.endswith(".py"))
+        self.assertTrue(tests)
+        for name in tests:
+            self.assertIn("python3 tool/ci/%s\n" % name, docs,
+                          "tool/ci/%s is run by no job: add the line `python3 tool/ci/%s` "
+                          "to the step \"Release contract\" of the docs job in "
+                          ".github/workflows/ci.yml" % (name, name))
+
+    def test_the_release_before_the_newest_left_its_upgrade_fixture(self):
+        # The release after a version starts on the data that version wrote
+        # (test/start_upgrade_test.dart). The newest release cannot have its
+        # fixture yet (it is made from its tag, afterwards), the one before
+        # it must: so a release is not cut without the fixture of the last.
+        with open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8") as f:
+            versions = re.findall(r"(?m)^## (\d+\.\d+\.\d+) ", f.read())
+        self.assertGreaterEqual(len(versions), 2)
+        previous = versions[1]
+        folder = os.path.join(ROOT, "test", "fixtures", "upgrade", previous)
+        self.assertTrue(os.path.isdir(folder),
+                        "No upgrade fixture of %s (the release before %s): make it from the "
+                        "tag v%s and commit test/fixtures/upgrade/%s (docs/TESTING.md, "
+                        "\"Upgrade fixtures\")." % (previous, versions[0], previous, previous))
 
 
 class GoBridgeExportsTest(unittest.TestCase):

@@ -42,7 +42,9 @@
 #     * Required reviewers: the maintainer, so every tag run waits for one
 #       approval before the sign job (and the keys) starts;
 #     * Deployment branches and tags: "Selected branches and tags", one tag
-#       rule "v*";
+#       rule; "v*" lets in a tag such as "vX" or "v9-test" too, so the
+#       narrower v[0-9]*.[0-9]*.[0-9]* is better (a tag on a commit that is
+#       not on main stops in preflight in any case);
 #     * Environment secrets: ANDROID_KEYSTORE_BASE64 (the .jks file, base64),
 #       ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD;
 #       then delete them from the repository secrets, so that no other job
@@ -130,9 +132,30 @@ jobs:
             exit 1
           fi
 
+      # The whole history: the next step asks whether the tagged commit is
+      # an ancestor of main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      # Only a commit that went through main (its pull request, its checks)
+      # is built and signed: a tag pushed on any other branch would
+      # otherwise reach the approval with code nobody reviewed. docs/RELEASES.md
+      # merges the release commit first (a merge commit) and tags after.
+      - name: The tagged commit is on main
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # The checkout fetched every branch (and dropped its token, so
+          # nothing is fetched here); a missing main is a failure too.
+          git rev-parse --verify --quiet refs/remotes/origin/main > /dev/null || {
+            echo "::error::origin/main is not in the checkout."
+            exit 1
+          }
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::The commit of $GITHUB_REF_NAME ($GITHUB_SHA) is not on main: merge the release commit into main first, then push the tag."
+            exit 1
+          fi
 
       # The app reports the version of pubspec.yaml and treats the tag as
       # the release's version: if they differ, every build would keep
@@ -495,11 +518,10 @@ jobs:
       # encoder (OpenH264, built from source), dpkg-dev for the .deb.
       - name: Build tools and libraries
         run: |
-          sudo apt-get update
           # Ubuntu 22.04 runners carry libunwind-14-dev, which conflicts
           # with the libunwind-dev that libgstreamer1.0-dev needs.
           sudo apt-get remove -y libunwind-14-dev || true
-          sudo apt-get install -y --no-install-recommends \
+          sh tool/ci/apt_install.sh \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             make g++ \
             libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
@@ -544,14 +566,19 @@ jobs:
           # SHA-256 pinned in tool/ci/libwebrtc.sha256.
           python3 tool/ci/check_libwebrtc.py --strict "linux-$ARCH" "$bundle"
 
+      # bash with pipefail: a `tar | gzip` whose tar failed halfway would
+      # otherwise leave a cut-off archive that is signed like a whole one.
       - name: Release files
+        shell: bash
         env:
           ARCH: ${{ matrix.arch }}
         run: |
           bundle="build/linux/$ARCH/release/bundle"
           test -f "$bundle/lib/libyggdrasil_bridge.so"
-          # Built with the media player (GStreamer), not without it.
-          ldd "$bundle/zen" | grep -q 'libgstreamer-1.0'
+          # Built with the media player (GStreamer), not without it. Not
+          # `grep -q`: it stops at the first line, and ldd then dies of the
+          # closed pipe, which pipefail reports.
+          ldd "$bundle/zen" | grep 'libgstreamer-1.0' > /dev/null
           mkdir -p dist
           # zen-app.marker lists everything in the folder: the app updates
           # itself in place only in a folder that holds exactly that
@@ -598,13 +625,13 @@ jobs:
 
       - name: Flatpak tools and the tray libraries
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sh tool/ci/apt_install.sh \
             flatpak flatpak-builder elfutils libayatana-appindicator3-1 libgtk-3-0t64
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
 
       - name: Build
+        shell: bash
         run: |
           work="$RUNNER_TEMP/flatpak"
           mkdir -p "$work/extra-lib" dist
@@ -948,32 +975,92 @@ jobs:
           name: zen-release
           path: dist
 
-      # Never --clobber: a file once attached is not replaced by a re-run
-      # (delete it by hand in the draft first), and a published release is
-      # never changed.
+      # Safe to run again, by a re-run or after a cut-off attempt. It never
+      # replaces a file (no --clobber) and never touches a published release.
+      # A draft that already holds files is completed, not changed: a file
+      # with the very bytes of this run's is left as it is, a file whose
+      # upload never ended is removed and uploaded again, and a file that
+      # differs, or one this run did not make, stops the job, because files
+      # of two builds must never share a release (the signed SHA256SUMS
+      # belongs to one build). Then delete the draft in the GitHub UI and
+      # run the job again. The draft is looked up in the list of releases,
+      # not by its tag (a draft has no tag page, and a second draft of the
+      # same tag must never be made), and `--verify-tag` stops the creation
+      # when the tag no longer exists (gh would make it on main).
       - name: Attach to the release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
-            if [ "$draft" != "true" ]; then
-              echo "::error::Release $TAG is already published; its files are never replaced."
-              exit 1
-            fi
-          else
+          set -u
+          repo="$GITHUB_REPOSITORY"
+          test -s dist/SHA256SUMS || { echo "::error::dist/SHA256SUMS is missing."; exit 1; }
+          lookup() {
+            gh api --paginate "repos/$repo/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == env.TAG) | "\(.id) \(.draft)"'
+          }
+          found=$(lookup)
+          if [ "$(printf '%s\n' "$found" | grep -c .)" -gt 1 ]; then
+            echo "::error::There is more than one release of $TAG: delete the extra ones by hand."
+            exit 1
+          fi
+          if [ -z "$found" ]; then
             notes="Draft release. What changed: see CHANGELOG.md. Verify your download against the SHA-256 sums (SHA256SUMS), their signature (SHA256SUMS.sig) and the signing certificate fingerprint before installing."
             # The note the app shows (whats-new.json), in English, on top.
             if [ -s dist/whats-new.json ]; then
               news=$(jq -r '.lines.en[] | "- " + .' dist/whats-new.json)
               notes=$(printf "What's new:\n%s\n\n%s" "$news" "$notes")
             fi
-            gh release create "$TAG" --draft --title "$TAG" \
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" \
               --notes "$notes" \
-              --repo "$GITHUB_REPOSITORY"
+              --repo "$repo"
+            found=$(lookup)
           fi
-          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"
+          id=${found% *}
+          if [ "${found#* }" != true ]; then
+            echo "::error::Release $TAG is already published; its files are never replaced."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/attached"
+          : > "$RUNNER_TEMP/kept.txt"
+          gh api "repos/$repo/releases/$id" \
+            --jq '.assets[] | "\(.id) \(.state) \(.name)"' > "$RUNNER_TEMP/assets.txt"
+          while read -r asset state name; do
+            if [ "$state" != uploaded ]; then
+              echo "::warning::$name was not uploaded completely before: removed, to be uploaded again."
+              gh api -X DELETE "repos/$repo/releases/assets/$asset"
+              continue
+            fi
+            if [ ! -f "dist/$name" ]; then
+              echo "::error::The draft holds $name, which this run did not make: files of an earlier build. Delete the draft and run this job again."
+              exit 1
+            fi
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$repo/releases/assets/$asset" > "$RUNNER_TEMP/attached/$name"
+            if ! cmp -s "$RUNNER_TEMP/attached/$name" "dist/$name"; then
+              echo "::error::The draft holds a $name that differs from this run's: files of an earlier build. Delete the draft and run this job again."
+              exit 1
+            fi
+            echo "$name is attached already (the same bytes)."
+            echo "$name" >> "$RUNNER_TEMP/kept.txt"
+          done < "$RUNNER_TEMP/assets.txt"
+          todo=()
+          for file in dist/*; do
+            grep -qxF -- "${file#dist/}" "$RUNNER_TEMP/kept.txt" || todo+=("$file")
+          done
+          if [ "${#todo[@]}" -gt 0 ]; then
+            gh release upload "$TAG" "${todo[@]}" --repo "$repo"
+          fi
+          # The draft ends up with exactly this run's files, all complete.
+          have=$(gh api "repos/$repo/releases/$id" \
+            --jq '.assets[] | select(.state == "uploaded") | .name' | LC_ALL=C sort)
+          want=$(ls dist | LC_ALL=C sort)
+          if [ "$have" != "$want" ]; then
+            echo "::error::The draft does not hold exactly the files of this run. It has:"
+            echo "$have"
+            exit 1
+          fi
 
   # A run from a branch has no APKs and signs nothing: the other files with
   # their SHA256SUMS, as an artifact of the run (to try a build before

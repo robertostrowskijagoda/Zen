@@ -602,21 +602,30 @@ jobs:
         run: go test -race -count=1 ./... 2>&1 | tee -a go-test.log
 
       # Random input for every parser of what comes from the network or a
-      # nearby device (wire_fuzz_test.go): each target a few seconds on
-      # every run, beyond the seeds `go test` runs above. A finding is
-      # written to testdata/fuzz/<target>/ and printed; it becomes a seed
-      # once committed.
+      # nearby device: every `func Fuzz…` of every *_test.go file of the
+      # bridge and of the ironwood module under third_party (a module of
+      # its own, which the steps above do not enter), found by
+      # tool/ci/go_fuzz_targets.sh, which fails when it finds none. Each
+      # target 8 seconds on every run, beyond the seeds `go test` runs
+      # above: 24 targets are about 3.2 minutes of fuzzing, with the
+      # start of each go test (and the first instrumented build) some
+      # 5 to 8 minutes in all; the step is stopped after 15, the job after
+      # 35. A finding is written to testdata/fuzz/<target>/ and printed; it
+      # becomes a seed once committed.
       - name: Fuzz the wire parsers
         id: fuzz
+        timeout-minutes: 15
         shell: bash
         env:
           CGO_ENABLED: '1'
         run: |
-          for target in $(grep -oE '^func (Fuzz[A-Za-z0-9]+)' wire_fuzz_test.go | cut -d' ' -f2); do
-            echo "::group::$target"
-            go test -run '^$' -fuzz "^$target\$" -fuzztime 8s . 2>&1 | tee -a go-test.log
+          log="$PWD/go-test.log"
+          targets=$(sh ../../tool/ci/go_fuzz_targets.sh .)
+          while IFS=$'\t' read -r module package target; do
+            echo "::group::$module $package $target"
+            (cd "$module" && go test -run '^$' -fuzz "^$target\$" -fuzztime 8s "$package") 2>&1 | tee -a "$log"
             echo "::endgroup::"
-          done
+          done <<< "$targets"
 
       - name: Summary
         if: ${{ !cancelled() }}
@@ -849,11 +858,14 @@ jobs:
           mkdir -p deb
           sh linux/packaging/build_deb.sh build/linux/x64/release/bundle x64 deb/zen.deb
           dpkg-deb --info deb/zen.deb
+          # The bare containers of deb-install have no checkout: they take
+          # the installing script along with the package.
+          cp tool/ci/apt_install.sh deb/
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-linux-deb
-          path: deb/zen.deb
+          path: deb/
           retention-days: 3
           if-no-files-found: error
 
@@ -913,19 +925,10 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           IMAGE: ${{ matrix.image }}
         run: |
-          # As tool/ci/apt_install.sh (these containers have no checkout):
-          # when the archive cannot be named, public resolvers are tried,
-          # and nothing is installed after an update that could not name it.
-          install_deb() {
-            apt-get update > /tmp/apt-update.txt 2>&1 || { cat /tmp/apt-update.txt; return 1; }
-            cat /tmp/apt-update.txt
-            ! grep -Eq 'Temporary failure resolving|Could not resolve' /tmp/apt-update.txt &&
-              apt-get install -y --no-install-recommends ./deb/zen.deb
-          }
-          if ! install_deb; then
-            printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
-            install_deb || { sleep 30; install_deb; }
-          fi
+          # The same script as the other jobs (it came with the package):
+          # public resolvers when the archive cannot be named, and nothing
+          # installed after an update that reached no archive.
+          sh deb/apt_install.sh ./deb/zen.deb
           # The bundle's own libraries find each other through /opt/zen/lib.
           # libjvm.so is skipped: package:jni's library (pulled in by a
           # plugin) names it, but it is only loaded on Android.
