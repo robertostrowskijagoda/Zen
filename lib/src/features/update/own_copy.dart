@@ -42,8 +42,10 @@ final class OwnCopyCheck {
   final String? apkSha256;
 }
 
-/// The state for an app signed with [own], compared with the [official]
-/// fingerprints (any format [normalizeCertificateFingerprint] reads).
+/// The state for an app signed now with [own] (its current signers, not
+/// the past certificates of a rotated key: a key rotated away from may
+/// leave the pinned list), compared with the [official] fingerprints (any
+/// format [normalizeCertificateFingerprint] reads).
 OwnCopyState ownCopyState({
   required List<String> own,
   required Iterable<String> official,
@@ -72,7 +74,7 @@ Future<OwnCopyCheck> checkOwnCopy() async {
   if (kIsWeb || !Platform.isAndroid || isStoreBuild) {
     return const OwnCopyCheck(OwnCopyState.notApplicable);
   }
-  final List<String> own = await ownSigningCertificates() ?? const <String>[];
+  final ApkSigners? signers = await ownApkSigners();
   String? sha;
   try {
     final String? path = await ownApkPath();
@@ -83,8 +85,11 @@ Future<OwnCopyCheck> checkOwnCopy() async {
     logZenWarning('Kod kopii: $error');
   }
   return OwnCopyCheck(
-    ownCopyState(own: own, official: kOfficialApkCertificatesSha256),
-    certificates: own,
+    ownCopyState(
+      own: signers?.signers ?? const <String>[],
+      official: kOfficialApkCertificatesSha256,
+    ),
+    certificates: signers?.all ?? const <String>[],
     apkSha256: sha,
   );
 }

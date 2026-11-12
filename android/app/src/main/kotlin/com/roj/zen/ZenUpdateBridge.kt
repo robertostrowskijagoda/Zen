@@ -110,14 +110,15 @@ object ZenUpdateBridge {
                         }
                     }
                     "signingCertificates" -> {
-                        // This app's own signing certificates and,
-                        // when the system verified its signature, those of
-                        // the APK at `path` (SHA-256, lower-case hex).
+                        // Who signs this app and, when the system verified
+                        // its signature, the APK at `path`: `{signers,
+                        // lineage}` each (SHA-256, lower-case hex;
+                        // apkSignerReport).
                         val path = call.argument<String>("path")
                         offMain(call.method, result) {
                             mapOf(
-                                "own" to ownCertificates(app),
-                                "apk" to path?.let { archiveCertificates(app, it) },
+                                "ownSigning" to ownSigning(app),
+                                "apkSigning" to path?.let { archiveSigning(app, it) },
                             )
                         }
                     }
@@ -298,41 +299,51 @@ object ZenUpdateBridge {
             PackageManager.GET_SIGNATURES
         }
 
-    /** The signer's certificates, with the past ones of a rotated key. */
+    /**
+     * The signers and, for a rotated key, its verified history
+     * ([apkSignerReport]); null when the system gave no certificate.
+     */
     @Suppress("DEPRECATION")
-    private fun certificatesOf(info: PackageInfo?): List<String> {
+    private fun signingOf(info: PackageInfo?): Map<String, List<String>>? {
         if (info == null) {
-            return emptyList()
+            return null
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val signing = info.signingInfo ?: return emptyList()
-            return if (signing.hasMultipleSigners()) {
-                fingerprints(signing.apkContentsSigners)
-            } else {
-                fingerprints(signing.signingCertificateHistory)
-            }
+        val report = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signing = info.signingInfo ?: return null
+            val multiple = signing.hasMultipleSigners()
+            apkSignerReport(
+                multiple,
+                if (multiple) null else fingerprints(signing.signingCertificateHistory),
+                if (multiple) fingerprints(signing.apkContentsSigners) else null,
+            )
+        } else {
+            val signatures = fingerprints(info.signatures)
+            apkSignerReport(signatures.size > 1, null, signatures)
         }
-        return fingerprints(info.signatures)
+        return report.takeIf { it["signers"].orEmpty().isNotEmpty() }
     }
 
     @Suppress("DEPRECATION")
-    private fun ownCertificates(context: Context): List<String> =
+    private fun ownSigning(context: Context): Map<String, List<String>>? =
         try {
-            certificatesOf(context.packageManager.getPackageInfo(context.packageName, signingFlags()))
+            signingOf(context.packageManager.getPackageInfo(context.packageName, signingFlags()))
         } catch (error: Exception) {
             Log.w(TAG, "Reading the own signature failed", error)
-            emptyList()
+            null
         }
 
-    /** Null when the system could not read or verify the file's signature. */
+    /**
+     * Null when the system could not read or verify the file's signature
+     * (a broken proof of rotation included: the system then refuses the
+     * whole file).
+     */
     @Suppress("DEPRECATION")
-    private fun archiveCertificates(context: Context, path: String): List<String>? =
+    private fun archiveSigning(context: Context, path: String): Map<String, List<String>>? =
         try {
             if (!File(path).isFile) {
                 null
             } else {
-                certificatesOf(context.packageManager.getPackageArchiveInfo(path, signingFlags()))
-                    .ifEmpty { null }
+                signingOf(context.packageManager.getPackageArchiveInfo(path, signingFlags()))
             }
         } catch (error: Exception) {
             Log.w(TAG, "Reading an APK signature failed", error)
