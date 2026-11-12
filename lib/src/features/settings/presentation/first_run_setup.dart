@@ -232,7 +232,12 @@ class _FirstRunSetupFlowState extends ConsumerState<FirstRunSetupFlow>
 
   Future<void> _finish() async {
     if (!widget.firstStart) {
-      Navigator.of(context).maybePop();
+      // pop, not maybePop: past the first step the PopScope below turns a
+      // maybePop into a step back, and "Gotowe" never closed the setup.
+      final NavigatorState navigator = Navigator.of(context);
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
       return;
     }
     if (_finishing) {
