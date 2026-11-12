@@ -305,6 +305,16 @@ HealthItem _notifications(HealthInputs i) {
 HealthItem _battery(HealthInputs i) {
   final String title = t('Oszczędzanie baterii');
   final bool? ok = i.permissions?[ZenPermission.battery];
+  // Android 12 and later, exact alarms not allowed (Android 14's default):
+  // the locked phone's wakes keep to the friends' ten-minute marks only as
+  // closely as Android's late windows let them.
+  final String? exact = i.permissions?[ZenPermission.exactAlarms] == false
+      ? t(
+          'Z zezwoleniem na „Dokładne alarmy” zablokowany telefon budzi się '
+          'równo z telefonami znajomych, co pomaga baterii.',
+        )
+      : null;
+  String withExact(String detail) => exact == null ? detail : '$detail $exact';
   if (ok == null) {
     return HealthItem(
       id: 'battery',
@@ -318,15 +328,17 @@ HealthItem _battery(HealthInputs i) {
           id: 'battery',
           level: HealthLevel.ok,
           title: title,
-          detail: t('Android nie usypia Zen.'),
+          detail: withExact(t('Android nie usypia Zen.')),
         )
       : HealthItem(
           id: 'battery',
           level: HealthLevel.warn,
           title: title,
-          detail: t(
-            'Android może usypiać Zen przy zgaszonym ekranie, wtedy '
-            'wiadomości i alarmy się spóźniają.',
+          detail: withExact(
+            t(
+              'Android może usypiać Zen przy zgaszonym ekranie, wtedy '
+              'wiadomości i alarmy się spóźniają.',
+            ),
           ),
           fix: HealthFix.permissions,
         );

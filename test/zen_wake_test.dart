@@ -909,14 +909,17 @@ void main() {
       for (final int gap in r.gaps(r.rounds, from, to)) {
         expect(gap, greaterThanOrEqualTo(6 * _min + 39 * _sec), reason: label);
       }
+      // A wake asked for again less than 17.5 s before the boundary
+      // (another app's alarm took Zen's along early) gets no window that
+      // could end there, and may come up to 3/4 of that late.
       expect(
         r.maxGap(r.rounds, from, to),
-        lessThanOrEqualTo(10 * _min + _sec),
+        lessThanOrEqualTo(10 * _min + 14 * _sec),
         reason: '$label: rounds',
       );
       expect(
         r.maxGap(r.looks, from, to),
-        lessThanOrEqualTo(20 * _min + _sec),
+        lessThanOrEqualTo(20 * _min + 14 * _sec),
         reason: '$label: looks',
       );
       expect(
@@ -1091,22 +1094,186 @@ void main() {
       expect(poll.at - clock, 5 * _min);
     });
 
-    test('without exact alarms a wake is asked for so its window ends when '
-        'it is due', () {
-      const int clock = 1000 * _hour;
+    /// Where a wake on the grid lies: half a second before each 10-minute
+    /// boundary of the epoch (a second before the token's change).
+    int gridOffset(int t) {
+      final int grid = kWakeGrid.inMilliseconds;
+      final int off =
+          (t +
+              kWakeGridLead.inMilliseconds -
+              kWakeGridRotationLag.inMilliseconds) %
+          grid;
+      return off > grid ~/ 2 ? off - grid : off;
+    }
+
+    /// On the grid, to Android's rounding of the window (a millisecond or
+    /// two).
+    final Matcher onGrid = closeTo(0, 2);
+
+    /// The presence round alone on the beat from [start], its alarms as
+    /// Android delivers them (each at the end of its window), [rounds]
+    /// times. After round [jumpAfter] the wall clock jumps by [jump]: the
+    /// alarm asked for before still comes after its delay.
+    Future<({_PhoneAlarms phone, List<int> ran, int now})> roundsOn(
+      WakeAlarmTiming timing, {
+      required int start,
+      int rounds = 4,
+      int jumpAfter = -1,
+      int jump = 0,
+    }) async {
+      int clock = start;
+      final _PhoneAlarms phone = _PhoneAlarms(windows: true, now: () => clock);
+      ZenWake.platform = phone;
+      ZenWake.nowMillis = () => clock;
+      ZenWake.alarmTiming = () => timing;
+      final List<int> ran = <int>[];
+      ZenWake.beat(
+        'presence-round',
+        kLockedPresenceRoundEvery,
+        () async => ran.add(clock),
+      );
+      int shift = 0;
+      for (int i = 0; i < rounds; i++) {
+        final _PhoneAlarm next = phone.live.single;
+        clock = next.maxAt + shift;
+        shift = 0;
+        await next.fire();
+        await _settle();
+        if (i == jumpAfter) {
+          clock += jump;
+          shift = jump;
+        }
+      }
+      return (phone: phone, ran: ran, now: clock);
+    }
+
+    test(
+      'without exact alarms a wake on the grid is asked for so that its '
+      "window ends on the boundary, where friends' exact alarms come",
+      () async {
+        // Started off the grid (3:07 past a boundary).
+        const int start = 1000 * _hour + 3 * _min + 7 * _sec;
+        final r = await roundsOn(noExactAlarms, start: start);
+        final _PhoneAlarm alarm = r.phone.live.single;
+        // The window ends on the grid; Android delivers the alarm from the
+        // time asked for on, never before.
+        expect(gridOffset(alarm.maxAt), onGrid);
+        expect(alarm.maxAt - alarm.at, closeTo((alarm.at - r.now) * 0.75, 2));
+        // The rounds came onto the grid within two periods of the start and
+        // stayed there, a period apart.
+        expect(r.ran.skip(2).map(gridOffset), everyElement(onGrid));
+        for (int i = 1; i < r.ran.length; i++) {
+          expect(
+            r.ran[i] - r.ran[i - 1],
+            inInclusiveRange(
+              (kLockedPresenceRoundEvery -
+                      wakeBeatEarly(kLockedPresenceRoundEvery))
+                  .inMilliseconds,
+              kLockedPresenceRoundEvery.inMilliseconds,
+            ),
+          );
+        }
+        // With exact alarms: the same boundaries, on an exact alarm.
+        ZenWake.resetForTest();
+        final r2 = await roundsOn(android12, start: start);
+        final _PhoneAlarm exact = r2.phone.live.single;
+        expect(exact.at, exact.maxAt);
+        expect(gridOffset(exact.at), onGrid);
+        for (int i = 2; i < r.ran.length; i++) {
+          expect(r2.ran[i], closeTo(r.ran[i], 2));
+        }
+      },
+    );
+
+    test('work due every few minutes is asked for when it is due, as '
+        'before', () {
+      const int clock = 1000 * _hour + 2 * _min;
       final _PhoneAlarms phone = _PhoneAlarms(windows: true, now: () => clock);
       ZenWake.platform = phone;
       ZenWake.nowMillis = () => clock;
       ZenWake.alarmTiming = () => noExactAlarms;
-      ZenWake.beat('presence-round', kLockedPresenceRoundEvery, () async {});
-      final _PhoneAlarm alarm = phone.live.single;
-      expect(alarm.maxAt - clock, closeTo(10 * _min, 2));
-      expect(alarm.at - clock, closeTo(10 * _min / 1.75, 2));
+      ZenWake.beat('mailbox-poll', const Duration(minutes: 5), () async {});
+      // Not on the grid: asked for when due, its window as Android gives it.
+      expect(phone.live.single.at - clock, 5 * _min);
       // Plain timers are asked for when the work is due, as before.
       ZenWake.resetForTest();
       ZenWake.alarmTiming = () => null;
       ZenWake.beat('presence-round', kLockedPresenceRoundEvery, () async {});
       expect(phone.live.last.at - clock, 10 * _min);
+    });
+
+    test('a wake on the grid that Android delivers early runs nothing early: '
+        'the round keeps to the boundary, on a wake asked for anew', () async {
+      int clock = 1000 * _hour + 9 * _min + 59 * _sec + 500;
+      final _PhoneAlarms phone = _PhoneAlarms(windows: true, now: () => clock);
+      ZenWake.platform = phone;
+      ZenWake.nowMillis = () => clock;
+      ZenWake.alarmTiming = () => noExactAlarms;
+      final List<int> ran = <int>[];
+      ZenWake.beat(
+        'presence-round',
+        kLockedPresenceRoundEvery,
+        () async => ran.add(clock),
+      );
+      final _PhoneAlarm first = phone.live.single;
+      final int boundary = first.maxAt;
+      expect(gridOffset(boundary), onGrid);
+      // Another app's alarm wakes the phone inside the window, two minutes
+      // before the boundary, and Android takes Zen's alarm along.
+      clock = boundary - 2 * _min;
+      expect(clock, greaterThanOrEqualTo(first.at));
+      await first.fire();
+      await _settle();
+      expect(ran, isEmpty, reason: 'before, the round ran 2 minutes early');
+      final _PhoneAlarm again = phone.live.single;
+      expect(again.maxAt, closeTo(boundary, 2));
+      clock = again.maxAt;
+      await again.fire();
+      await _settle();
+      expect(ran.single, closeTo(boundary, 2));
+    });
+
+    test('the grid is on epoch time: a time zone or daylight saving time does '
+        'not move it, and a clock set back or forward finds it again', () async {
+      // 25 October 2026, 01:00 UTC: Poland goes from summer to winter time.
+      final int dst = DateTime.utc(
+        2026,
+        10,
+        25,
+        0,
+        57,
+        13,
+      ).millisecondsSinceEpoch;
+      for (final WakeAlarmTiming timing in <WakeAlarmTiming>[
+        noExactAlarms,
+        android12,
+      ]) {
+        ZenWake.resetForTest();
+        final r = await roundsOn(timing, start: dst, rounds: 5);
+        expect(gridOffset(r.phone.live.single.maxAt), onGrid);
+        // Onto the grid within two periods of the start (7:13 past a boundary).
+        expect(r.ran.skip(2).map(gridOffset), everyElement(onGrid));
+        // The clock set back 37 minutes or forward an hour and 13 seconds
+        // (by hand, or by the network's time) after the second round.
+        for (final int jump in <int>[-37 * _min, _hour + 13 * _sec]) {
+          ZenWake.resetForTest();
+          final r2 = await roundsOn(
+            timing,
+            start: dst,
+            rounds: 6,
+            jumpAfter: 1,
+            jump: jump,
+          );
+          expect(
+            r2.ran.skip(4).map(gridOffset),
+            everyElement(onGrid),
+            reason:
+                'jump ${jump ~/ _sec} s, exact ${timing.exactAllowed}: '
+                '${r2.ran.map(gridOffset).toList()}',
+          );
+          expect(gridOffset(r2.phone.live.single.maxAt), onGrid);
+        }
+      }
     });
   });
 

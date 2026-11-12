@@ -35,7 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - work that comes back (a look around nearby, asking the mailboxes for
  *    mail, the locked phone's outbox, the watchdog) is an alarm
  *    ([schedule]: `setAndAllowWhileIdle`, or `setExactAndAllowWhileIdle`
- *    where it must be on time and the person allowed exact alarms; a plain
+ *    where it must be on time and the person allowed exact alarms, where
+ *    they did not an inexact one whose window ends then; a plain
  *    `set` that Doze puts off for work Doze would skip anyway) that wakes
  *    the phone and holds it awake for at most the alarm's window under the
  *    alarm's own tag, then tells the engines ("wake" with its id); Dart
@@ -472,6 +473,18 @@ object ZenPower {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (exact && exactAllowed) {
                 alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
+            } else if (exact && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Exact alarms not allowed (Android 14's default): an
+                // inexact one whose window ends when it is due, so it comes
+                // by then (the nearby token's change on the slot's boundary,
+                // with the beat's wake on the grid), not minutes late. One
+                // that comes early finds nothing due and asks again.
+                val asked = InexactAlarmWindow.delayEndingIn(delayMs.coerceAtLeast(0))
+                alarms.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + asked,
+                    pending,
+                )
             } else {
                 alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
             }

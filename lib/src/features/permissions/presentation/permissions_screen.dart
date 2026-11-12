@@ -588,8 +588,9 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         t('Dokładne alarmy'),
         t(
           'Przypomnienia o spotkaniach i wydarzeniach o właściwej '
-          'minucie, bez opóźnień od oszczędzania baterii. Włączysz je na '
-          'stronie systemu.',
+          'minucie, bez opóźnień od oszczędzania baterii. Zablokowany '
+          'telefon budzi się wtedy równo z telefonami znajomych, co pomaga '
+          'baterii. Włączysz je na stronie systemu.',
         ),
       ),
       ZenPermission.fullScreen => (
