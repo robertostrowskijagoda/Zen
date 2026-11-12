@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
@@ -54,6 +56,19 @@ const int kMaxBundleCommentImages = 24;
 /// Key of a comment's pictures inside a bundle's comment.
 const String kBundleImagesKey = 'img';
 
+/// Key of a comment's proof inside a bundle's comment: the signed part of
+/// the comment's own entry in its writer's `acts` space, without its text
+/// (that is `t`). A comment's id is the hash of that part, so whoever reads
+/// the bundle can check that the writer, the post, the words, the pictures
+/// and the mentions are the ones the id was made of: a friend who relays a
+/// comment cannot give its id to other words or to another person, and so
+/// cannot rewrite it or hide it behind a copy that names someone blocked.
+/// The device's signature does not go along (with its certificate it is
+/// about 12 KB, so a page of 30 comments would be several times the size of
+/// an entry): a relay can still make up a comment of its own, under a new id,
+/// shown as passed on by that relay. Older versions ignore the key.
+const String kBundleProofKey = 'u';
+
 /// Most blocked accounts a bundle passes on.
 const int _maxBundleBlocked = 200;
 
@@ -80,7 +95,10 @@ const String _filmKind = 'film';
 const String _filmPassKind = 'film_pass';
 
 /// One liker or comment as a bundle carries it, with the writer's profile
-/// photo from their mini-profile when the bundle had room for it.
+/// photo from their mini-profile when the bundle had room for it. A
+/// comment's [proof] is its [kBundleProofKey] when that holds: then its
+/// writer, words, time, pictures and mentions are the ones its id was made
+/// of (`null` for a copy without one, or with one that does not hold).
 typedef BundleLike = ({String account, String name, MediaRef? avatar});
 typedef BundleComment = ({
   String id,
@@ -91,6 +109,7 @@ typedef BundleComment = ({
   MediaRef? avatar,
   List<MediaRef> images,
   List<Mention> mentions,
+  Map<String, dynamic>? proof,
 });
 
 List<BundleLike> _likesOf(Object? likes) => <BundleLike>[
@@ -104,30 +123,136 @@ List<BundleLike> _likesOf(Object? likes) => <BundleLike>[
         ),
 ];
 
-List<BundleComment> _commentsOf(Object? comments) => <BundleComment>[
-  if (comments is List)
-    for (final Object? c in comments.take(kMaxBundleComments))
-      if (c is Map &&
-          c['id'] is String &&
-          c['a'] is String &&
-          c['n'] is String &&
-          c['t'] is String &&
-          c['at'] is int &&
-          ((c['t'] as String).trim().isNotEmpty ||
-              commentImagesOf(c[kBundleImagesKey]).isNotEmpty))
-        (
-          id: c['id'] as String,
-          account: c['a'] as String,
-          name: c['n'] as String,
-          text: (c['t'] as String).length > kMaxCommentChars
-              ? (c['t'] as String).substring(0, kMaxCommentChars)
-              : c['t'] as String,
-          millis: c['at'] as int,
-          avatar: mediaRefFromJson(c[kBundleAvatarKey]),
-          images: commentImagesOf(c[kBundleImagesKey]),
-          mentions: mentionsFromJson(c[kMentionsKey]),
-        ),
-];
+/// The proof a bundle passes on with the comment [e] of its circle (see
+/// [kBundleProofKey]), or `null` when the words the bundle carries ([text])
+/// would not hash back to its id.
+Map<String, dynamic>? commentProofOf(LogEntry e, String text) {
+  if (e.kind != kCommentKind || e.body['text'] != text) {
+    return null;
+  }
+  return <String, dynamic>{
+    ...e.unsigned,
+    'body': <String, dynamic>{...e.body}..remove('text'),
+  };
+}
+
+/// The signed body of the comment [id] that [proof] and [text] make, when
+/// they hash to [id] and make a comment by [account] under [post] in its
+/// writer's own `acts` space; else `null`.
+Map<String, dynamic>? _provenBody(
+  Object? proof, {
+  required String id,
+  required String account,
+  required String post,
+  required String text,
+}) {
+  if (proof is! Map) {
+    return null;
+  }
+  final Object? body = proof['body'];
+  if (body is! Map ||
+      body.containsKey('text') ||
+      body['post'] != post ||
+      proof['kind'] != kCommentKind ||
+      proof['account'] != account ||
+      proof['space'] != accountSpace('acts', account) ||
+      proof['hlc'] is! int) {
+    return null;
+  }
+  try {
+    final Map<String, dynamic> signedBody = <String, dynamic>{
+      ...Map<String, dynamic>.from(body),
+      'text': text,
+    };
+    final Map<String, dynamic> unsigned = <String, dynamic>{
+      ...Map<String, dynamic>.from(proof),
+      'body': signedBody,
+    };
+    return sha256Hex(canonicalJsonBytes(unsigned)) == id ? signedBody : null;
+  } on Object {
+    return null;
+  }
+}
+
+BundleComment? _commentOf(Object? c, String post) {
+  if (c is! Map ||
+      c['id'] is! String ||
+      c['a'] is! String ||
+      c['n'] is! String ||
+      c['t'] is! String ||
+      c['at'] is! int) {
+    return null;
+  }
+  final String id = c['id'] as String;
+  final String account = c['a'] as String;
+  final String said = c['t'] as String;
+  final List<MediaRef> images = commentImagesOf(c[kBundleImagesKey]);
+  if (said.trim().isEmpty && images.isEmpty) {
+    return null;
+  }
+  final String text = said.length > kMaxCommentChars
+      ? said.substring(0, kMaxCommentChars)
+      : said;
+  final Object? proof = c[kBundleProofKey];
+  final Map<String, dynamic>? signed = _provenBody(
+    proof,
+    id: id,
+    account: account,
+    post: post,
+    text: said,
+  );
+  if (signed == null) {
+    return (
+      id: id,
+      account: account,
+      name: c['n'] as String,
+      text: text,
+      millis: c['at'] as int,
+      avatar: mediaRefFromJson(c[kBundleAvatarKey]),
+      images: images,
+      mentions: mentionsFromJson(c[kMentionsKey]),
+      proof: null,
+    );
+  }
+  // What the writer signed decides; the bundle adds only what a relay may
+  // leave out: the name it knows the writer by, the photo, and which of the
+  // comment's own pictures it had room for.
+  final Map<String, dynamic> carried = Map<String, dynamic>.from(proof! as Map);
+  final MiniProfileTag? mini = MiniProfileTag.fromJson(signed[kMiniProfileKey]);
+  final Set<String> own = <String>{
+    for (final MediaRef m in commentImagesOf(signed['img'])) m.id,
+  };
+  return (
+    id: id,
+    account: account,
+    name: mini != null && mini.name.isNotEmpty ? mini.name : c['n'] as String,
+    text: text,
+    millis: Hlc.fromInt(carried['hlc'] as int).millis,
+    avatar: mini?.avatar ?? mediaRefFromJson(c[kBundleAvatarKey]),
+    images: <MediaRef>[
+      for (final MediaRef m in images)
+        if (own.contains(m.id)) m,
+    ],
+    mentions: mentionsFromJson(signed[kMentionsKey]),
+    proof: carried,
+  );
+}
+
+List<BundleComment> _commentsOf(Object? comments, String post) =>
+    <BundleComment>[
+      if (comments is List)
+        for (final Object? c in comments.take(kMaxBundleComments))
+          ?_commentOf(c, post),
+    ];
+
+/// What [readBundle] made of an entry: the wall reads every friend's
+/// bundles each time it is built, and checking the proofs again each time
+/// would cost a hash per comment.
+final Expando<({List<BundleLike> likes, List<BundleComment> comments})>
+_readBundles =
+    Expando<({List<BundleLike> likes, List<BundleComment> comments})>(
+      'readBundle',
+    );
 
 /// Reactions to [postId] from one bundle entry, or `null` if malformed.
 ({List<BundleLike> likes, List<BundleComment> comments})? readBundle(
@@ -136,13 +261,95 @@ List<BundleComment> _commentsOf(Object? comments) => <BundleComment>[
   if (e.kind != kReactionsKind && e.kind != kReactionsPageKind) {
     return null;
   }
+  final ({List<BundleLike> likes, List<BundleComment> comments})? read =
+      _readBundles[e];
+  if (read != null) {
+    return read;
+  }
+  final Object? post = e.body['post'];
   final Object? likes = e.body['likes'];
   final Object? comments = e.body['comments'];
   if (likes is! List || comments is! List) {
     return null;
   }
-  return (likes: _likesOf(likes), comments: _commentsOf(comments));
+  return _readBundles[e] = (
+    likes: List<BundleLike>.unmodifiable(_likesOf(likes)),
+    comments: List<BundleComment>.unmodifiable(
+      _commentsOf(comments, post is String ? post : ''),
+    ),
+  );
 }
+
+/// The comments bundles relay, gathered from every bundle that lists them
+/// before one copy of each is chosen ([of]).
+///
+/// A bundle is signed only by the friend who wrote it, so two bundles can
+/// give one comment id different writers or words, and the order they are
+/// read in must not decide which is shown. A copy whose proof holds
+/// ([BundleComment.proof]) settles it: its writer, post and words are the
+/// ones the id was made of, whoever carried it; copies of that id without
+/// a proof are dropped. Copies without one (older versions write none)
+/// count only while no copy proves itself: then the copy in the post's
+/// author's own bundle wins, else the first one that is not blocked, so
+/// naming a blocked person under someone else's comment id hides nothing.
+final class RelayedComments {
+  /// Post → comment id → the copy shown, for copies whose proof holds.
+  final Map<String, Map<String, _RelayedCopy>> _proven =
+      <String, Map<String, _RelayedCopy>>{};
+  final Set<String> _provenIds = <String>{};
+
+  /// Post → comment id → every copy without a proof, in the order read.
+  final Map<String, Map<String, List<_RelayedCopy>>> _unproven =
+      <String, Map<String, List<_RelayedCopy>>>{};
+
+  /// Adds the copy of [comment] one bundle carried under [post], as it
+  /// would be [shown]; [fromAuthor] when the bundle is the post's author's.
+  void add(
+    String post,
+    BundleComment comment,
+    FeedComment shown, {
+    bool fromAuthor = false,
+  }) {
+    final _RelayedCopy copy = (shown: shown, fromAuthor: fromAuthor);
+    if (comment.proof != null) {
+      _provenIds.add(comment.id);
+      final Map<String, _RelayedCopy> ids = _proven[post] ??=
+          <String, _RelayedCopy>{};
+      final _RelayedCopy? had = ids[comment.id];
+      if (had == null || (fromAuthor && !had.fromAuthor)) {
+        ids[comment.id] = copy;
+      }
+      return;
+    }
+    ((_unproven[post] ??= <String, List<_RelayedCopy>>{})[comment.id] ??=
+            <_RelayedCopy>[])
+        .add(copy);
+  }
+
+  /// One copy of each comment relayed under [post] (unordered). [blocked]
+  /// says whether the post's thread or this person blocks an account.
+  List<FeedComment> of(String post, {bool Function(String account)? blocked}) =>
+      <FeedComment>[
+        for (final _RelayedCopy c
+            in _proven[post]?.values ?? const <_RelayedCopy>[])
+          c.shown,
+        for (final MapEntry<String, List<_RelayedCopy>> e
+            in _unproven[post]?.entries ??
+                const <MapEntry<String, List<_RelayedCopy>>>[])
+          if (!_provenIds.contains(e.key))
+            if ((e.value.where((_RelayedCopy c) => c.fromAuthor).firstOrNull ??
+                    e.value
+                        .where(
+                          (_RelayedCopy c) =>
+                              blocked == null || !blocked(c.shown.account),
+                        )
+                        .firstOrNull)
+                case final _RelayedCopy chosen)
+              chosen.shown,
+      ];
+}
+
+typedef _RelayedCopy = ({FeedComment shown, bool fromAuthor});
 
 /// Newest bundle (page 0) for each post in [acts].
 Map<String, LogEntry> latestBundles(Iterable<LogEntry> acts) {
@@ -441,6 +648,7 @@ Future<int> relayReactions(
           'n': member.$2,
           't': c.text,
           'at': e.hlc.millis,
+          kBundleProofKey: ?commentProofOf(e, c.text),
           kBundleAvatarKey: ?avatar,
           if (c.mentions.isNotEmpty) kMentionsKey: mentionsToJson(c.mentions),
           if (c.images.isNotEmpty)
@@ -472,6 +680,7 @@ Future<int> relayReactions(
             'n': c.name,
             't': c.text,
             'at': c.millis,
+            kBundleProofKey: ?c.proof,
             if (c.mentions.isNotEmpty) kMentionsKey: mentionsToJson(c.mentions),
             kBundleAvatarKey: ?(c.avatar == null
                 ? null
@@ -570,23 +779,22 @@ Future<int> relayReactions(
     final LogEntry? previous = myBundles[postId];
     final bool nothing =
         likes.isEmpty && comments.isEmpty && hidden.isEmpty && blocked.isEmpty;
-    if (previous == null
-        ? nothing
-        : canonicalJson(previous.body) == canonicalJson(body)) {
+    if (previous == null && nothing) {
       continue;
     }
-    try {
-      await node.publish(
-        kReactionsKind,
-        body,
-        spaceKind: 'acts',
-        blobs: picturesOf(firstComments),
-      );
-      written++;
-    } on ArgumentError {
-      // Too big for one entry even after the limits: skip this round.
+    final _Page first = await _publishPage(
+      node,
+      kReactionsKind,
+      body,
+      had: previous,
+      blobs: picturesOf(firstComments),
+    );
+    if (first != _Page.written) {
+      // The same as before, or too big for one entry even after the
+      // limits: skip this round.
       continue;
     }
+    written++;
     for (int pg = 1; pg < pageCount; pg++) {
       final List<Map<String, dynamic>> pageComments = commentsOn(pg);
       final Map<String, dynamic> page = <String, dynamic>{
@@ -595,24 +803,61 @@ Future<int> relayReactions(
         'likes': likesOn(pg),
         'comments': pageComments,
       };
-      final LogEntry? had = myPages[postId]?[pg];
-      if (had != null && canonicalJson(had.body) == canonicalJson(page)) {
-        continue;
-      }
-      try {
-        await node.publish(
-          kReactionsPageKind,
-          page,
-          spaceKind: 'acts',
-          blobs: picturesOf(pageComments),
-        );
+      // Too big: this page waits for the next round.
+      if (await _publishPage(
+            node,
+            kReactionsPageKind,
+            page,
+            had: myPages[postId]?[pg],
+            blobs: picturesOf(pageComments),
+          ) ==
+          _Page.written) {
         written++;
-      } on ArgumentError {
-        // Too big: this page waits for the next round.
       }
     }
   }
   return written;
+}
+
+enum _Page { same, written, tooBig }
+
+/// Writes the bundle page [body] unless [had] says the same already. The
+/// comments' proofs ([kBundleProofKey]) go along when the page still fits
+/// in one entry with them, and are left out when it does not: a page is
+/// worth more without them than not at all.
+Future<_Page> _publishPage(
+  LedgerNode node,
+  String kind,
+  Map<String, dynamic> body, {
+  required LogEntry? had,
+  required List<String> blobs,
+}) async {
+  final Map<String, dynamic> bare = <String, dynamic>{
+    ...body,
+    'comments': <Map<String, dynamic>>[
+      for (final Object? c in body['comments'] as List<Object?>)
+        if (c is Map<String, dynamic>)
+          Map<String, dynamic>.of(c)..remove(kBundleProofKey),
+    ],
+  };
+  if (had != null) {
+    final String before = canonicalJson(had.body);
+    if (before == canonicalJson(body) || before == canonicalJson(bare)) {
+      return _Page.same;
+    }
+  }
+  for (final Map<String, dynamic> version in <Map<String, dynamic>>[
+    body,
+    bare,
+  ]) {
+    try {
+      await node.publish(kind, version, spaceKind: 'acts', blobs: blobs);
+      return _Page.written;
+    } on ArgumentError {
+      // Too big: the next version, or nothing.
+    }
+  }
+  return _Page.tooBig;
 }
 
 /// Passes on the author's tombstone of every post this account reshared

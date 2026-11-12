@@ -268,11 +268,14 @@ List<FilmPost> buildFilms(
   // Likes and comments from outside the circle, passed on in bundles by a
   // friend (the friend who passed a film on, or its author): a bundle is
   // only that friend's word, so they show as relayed by them, and people
-  // in the circle speak only for themselves.
+  // in the circle speak only for themselves. One copy of each relayed
+  // comment is chosen from every bundle that has it ([RelayedComments]),
+  // so no friend takes over another's comment by reusing its id.
   final Set<String> commentIds = <String>{
     for (final List<FeedComment> list in comments.values)
       for (final FeedComment c in list) c.id,
   };
+  final RelayedComments relayedComments = RelayedComments();
   view.friendAccounts.forEach((String address, String account) {
     if (account == me) {
       return;
@@ -302,10 +305,12 @@ List<FilmPost> buildFilms(
         }
       }
       for (final BundleComment c in r.comments) {
-        if (friendNames.containsKey(c.account) || !commentIds.add(c.id)) {
+        if (friendNames.containsKey(c.account) || commentIds.contains(c.id)) {
           continue;
         }
-        (comments[id] ??= <FeedComment>[]).add(
+        relayedComments.add(
+          id,
+          c,
           FeedComment(
             id: c.id,
             authorLabel: relayed(c.name),
@@ -315,6 +320,7 @@ List<FilmPost> buildFilms(
             avatar: c.avatar,
             images: c.images,
           ),
+          fromAuthor: films[id]?.account == account,
         );
       }
     });
@@ -345,7 +351,10 @@ List<FilmPost> buildFilms(
         if (l.account != me) l,
     ];
     final List<FeedComment> shown = <FeedComment>[];
-    for (final FeedComment c in comments[f.id] ?? const <FeedComment>[]) {
+    for (final FeedComment c in <FeedComment>[
+      ...?comments[f.id],
+      ...relayedComments.of(f.id, blocked: rules.blocks),
+    ]) {
       if (rules.blocks(c.account)) {
         continue;
       }
