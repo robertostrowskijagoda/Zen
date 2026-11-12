@@ -32,18 +32,18 @@ const int kMaxPasswordNoteChars = 2000;
 const int kMaxPasswordEntries = 2000;
 
 /// Earlier versions kept per entry (to undo an edit or a wrong merge).
-/// Versions that came from another device at the same time are kept on top
-/// of these until the person picks one ([kMaxPasswordConcurrent]).
+/// Versions written on another device that the current one was not made
+/// from are kept on top of these, all of them, until the person picks one.
 const int kMaxPasswordHistory = 5;
 
-/// Versions of one entry from other devices kept on top of the history.
-const int kMaxPasswordConcurrent = 4;
-
-/// Deletion markers kept; past it the oldest go first.
-const int kMaxPasswordDeletions = 2000;
+/// The most version keys one marker names ([PasswordVersion.seen]): an
+/// entry edited more often than this forgets its oldest versions for good.
+const int kMaxPasswordSeen = 10000;
 
 /// Most bytes of the stored vault (JSON). It goes whole into the copy with
-/// friends (at most 10 MB in all) and a copy of the account.
+/// friends (at most 10 MB in all) and a copy of the account. Deletion
+/// markers stay as long as it has room for them: past it the oldest go
+/// first, after the oldest history.
 const int kMaxPasswordVaultBytes = 4 * 1024 * 1024;
 
 /// Largest stored vault this build reads at all.
@@ -51,9 +51,14 @@ const int _maxReadBytes = 16 * 1024 * 1024;
 
 /// The most versions read from a stored vault (anything past it is left
 /// out: only a damaged or hostile store has that many).
-const int _maxReadVersions =
-    kMaxPasswordEntries * (kMaxPasswordHistory + kMaxPasswordConcurrent + 1) +
-    kMaxPasswordDeletions;
+const int _maxReadVersions = 200000;
+
+/// The most parents a version names.
+const int _maxParents = 64;
+
+/// The most versions of one entry whose ancestry is worked out; older ones
+/// count as its history (only a damaged or hostile store has that many).
+const int _maxGraph = 200;
 
 /// Ids of entries and versions: lower-case letters and digits.
 final RegExp _idPattern = RegExp(r'^[0-9a-z]{8,40}$');
@@ -145,8 +150,12 @@ enum PasswordFieldsProblem {
 
 /// One stored version of an entry: every edit adds one, never changes an
 /// earlier one, so the account's sync (which merges a stored map key by
-/// key) never mixes two edits and never drops one. A deletion is a version
-/// too ([deleted]), naming the versions it removed ([seen]).
+/// key) never mixes two edits and never drops one. Each names the versions
+/// it was made from ([parents]): a version that is not an ancestor of the
+/// entry's current one was written elsewhere and is shown as such until
+/// the person settles it, whatever the clocks of the devices said. A
+/// deletion is a version too ([deleted]), naming the versions it removed
+/// ([seen]); so is the marker of forgotten versions ([forgotten]).
 @immutable
 final class PasswordVersion {
   const PasswordVersion({
@@ -155,8 +164,10 @@ final class PasswordVersion {
     required this.atMillis,
     this.createdAtMillis = 0,
     this.baseMillis = 0,
+    this.parents,
     this.fields = const PasswordFields(),
     this.deleted = false,
+    this.forgotten = false,
     this.seen = const <String>[],
   });
 
@@ -171,25 +182,50 @@ final class PasswordVersion {
   final int createdAtMillis;
 
   /// The time of the newest version of the entry its device knew when it
-  /// was written: a version newer than this that it did not build on was
-  /// written elsewhere at the same time.
+  /// was written. Builds before 1.17.0 told by it alone which versions an
+  /// edit built on (those no newer than it); this build still writes it for
+  /// them, and reads it so for a version without [parents].
   final int baseMillis;
+
+  /// The versions this one was made from: the entry's current version, and
+  /// those it settles (versions written elsewhere meanwhile, a deletion it
+  /// keeps the entry over). Null for a version written before 1.17.0 (see
+  /// [baseMillis]); empty for a new entry's first version and for a marker.
+  final List<String>? parents;
   final PasswordFields fields;
 
   /// A deletion marker: the entry is gone, unless a version it did not see
   /// (made on another device meanwhile) is still there.
   final bool deleted;
 
-  /// For a deletion: the versions it removed.
+  /// A marker of versions forgotten on purpose (history past its length, a
+  /// cleared history, a deletion the person kept the entry over): never the
+  /// entry's deletion. Builds before 1.17.0 read it as a deletion that saw
+  /// only those versions, which leaves the entry as it is.
+  final bool forgotten;
+
+  /// For a marker: the versions it removed.
   final List<String> seen;
 
+  /// Whether the marker was written by a build that names [parents] (it
+  /// stands for the entry's deletion until a version names it).
+  bool get _knowsParents => parents != null;
+
   Map<String, Object?> toJson() => deleted
-      ? <String, Object?>{'i': entryId, 'a': atMillis, 'd': 1, 's': seen}
+      ? <String, Object?>{
+          'i': entryId,
+          'a': atMillis,
+          'd': 1,
+          if (forgotten) 'h': 1,
+          's': seen,
+          if (parents != null) 'b': parents,
+        }
       : <String, Object?>{
           'i': entryId,
           'a': atMillis,
           'c': createdAtMillis,
           'pa': baseMillis,
+          if (parents != null) 'b': parents,
           if (fields.name.isNotEmpty) 'n': fields.name,
           if (fields.login.isNotEmpty) 'l': fields.login,
           if (fields.password.isNotEmpty) 'p': fields.password,
@@ -197,17 +233,27 @@ final class PasswordVersion {
           if (fields.note.isNotEmpty) 'o': fields.note,
         };
 
-  /// The version [key] as stored, or null when it is not one: typed fields
-  /// only, each cut to its limit; unknown fields are ignored here and kept
-  /// in the store as they are.
+  /// The version [key] as stored, or null when it is not one this build
+  /// reads: typed fields only, each cut to its limit; unknown fields are
+  /// ignored here and kept in the store as they are. A kind of version this
+  /// build does not know (`d` other than 1) is not read either; the store
+  /// keeps it as it is ([PasswordVaultDoc.foreign]).
   static PasswordVersion? fromJson(String key, Object? json) {
     if (!isPasswordId(key) ||
         json is! Map ||
         !isPasswordId(json['i']) ||
-        json['a'] is! int) {
+        json['a'] is! int ||
+        (json.containsKey('d') && json['d'] != 1)) {
       return null;
     }
     final int at = json['a'] as int;
+    final Object? b = json['b'];
+    final List<String>? parents = b is List
+        ? <String>[
+            for (final Object? p in b.take(_maxParents))
+              if (isPasswordId(p)) p! as String,
+          ]
+        : null;
     if (json['d'] == 1) {
       final Object? seen = json['s'];
       return PasswordVersion(
@@ -215,9 +261,11 @@ final class PasswordVersion {
         entryId: json['i'] as String,
         atMillis: at,
         deleted: true,
+        forgotten: json['h'] == 1,
+        parents: parents,
         seen: <String>[
           if (seen is List)
-            for (final Object? s in seen.take(256))
+            for (final Object? s in seen.take(kMaxPasswordSeen))
               if (isPasswordId(s)) s! as String,
         ],
       );
@@ -230,6 +278,7 @@ final class PasswordVersion {
       atMillis: at,
       createdAtMillis: created is int ? created : at,
       baseMillis: base is int ? base : 0,
+      parents: parents,
       fields: PasswordFields(
         name: _clip(json['n'], kMaxPasswordNameChars),
         login: _clip(json['l'], kMaxPasswordLoginChars),
@@ -265,9 +314,10 @@ final class PasswordHistoryItem {
   final PasswordFields fields;
   final int changedAtMillis;
 
-  /// Written on another device at about the same time as the current one
-  /// and not seen there: the newer one won, this one waits here until the
-  /// person takes it back or edits the entry.
+  /// Written on another device, and the current version was not made from
+  /// it (however much earlier or later it was written): the newer one is
+  /// shown, this one waits here, never forgotten, until the person takes it
+  /// back or edits the entry.
   final bool concurrent;
 
   String get password => fields.password;
@@ -301,15 +351,17 @@ final class PasswordEntry {
   final int changedAtMillis;
 
   /// Earlier versions, newest first (at most [kMaxPasswordHistory], plus
-  /// the [conflict]ing ones).
+  /// every [conflict]ing one).
   final List<PasswordHistoryItem> history;
 
-  /// Another device changed the entry at the same time: its version is in
-  /// [history] marked [PasswordHistoryItem.concurrent].
+  /// Another device changed the entry and the current version was not made
+  /// from that change: its version is in [history] marked
+  /// [PasswordHistoryItem.concurrent].
   final bool conflict;
 
-  /// Another device deleted the entry while this version was being written
-  /// (it had not seen it): the entry stays, the person decides.
+  /// Another device deleted the entry, and the current version was not
+  /// made knowing it (it had not seen the deletion): the entry stays, the
+  /// person decides. An edit, or saving it unchanged, settles it.
   final bool keptOverDeletion;
 
   String get name => fields.name;
@@ -325,83 +377,244 @@ final class PasswordEntry {
   String toString() => 'PasswordEntry($id)';
 }
 
-/// The entries [versions] make: per entry the newest version that no
-/// deletion saw; entries whose every version a deletion saw are gone.
-/// Sorted by name (then login), as the list shows them.
-List<PasswordEntry> passwordEntriesOf(Iterable<PasswordVersion> versions) {
+int _newestFirst(PasswordVersion a, PasswordVersion b) =>
+    a.isNewerThan(b) ? -1 : (b.isNewerThan(a) ? 1 : 0);
+
+/// How the stored versions of one entry stand. Only the vault reads this;
+/// the screens see the [PasswordEntry] made of it.
+@immutable
+final class PasswordEntryShape {
+  const PasswordEntryShape({
+    required this.entryId,
+    required this.current,
+    this.earlier = const <PasswordVersion>[],
+    this.concurrent = const <PasswordVersion>[],
+    this.pendingDeletions = const <PasswordVersion>[],
+    this.settledMarkers = const <PasswordVersion>[],
+  });
+
+  final String entryId;
+
+  /// The version shown, or null when the entry is deleted.
+  final PasswordVersion? current;
+
+  /// The ancestors of [current] still stored, nearest first: the
+  /// [kMaxPasswordHistory] first are its history, the rest is forgotten
+  /// at the next save.
+  final List<PasswordVersion> earlier;
+
+  /// Versions [current] was not made from (written on another device):
+  /// never forgotten until the person settles them, newest first.
+  final List<PasswordVersion> concurrent;
+
+  /// Deletions [current] was not made knowing ([PasswordEntry.keptOverDeletion]).
+  final List<PasswordVersion> pendingDeletions;
+
+  /// Every other marker of the entry (for a deleted entry, all of them):
+  /// forgotten versions, deletions already settled.
+  final List<PasswordVersion> settledMarkers;
+
+  /// What an edit of the entry is made from: its current version and every
+  /// version or deletion it settles.
+  List<String> get parentsOfNext => <String>[
+    if (current != null) current!.key,
+    for (final PasswordVersion v in concurrent) v.key,
+    for (final PasswordVersion d in pendingDeletions) d.key,
+  ];
+
+  @override
+  String toString() => 'PasswordEntryShape($entryId)';
+}
+
+/// The ancestors of [from] among [nodes], each with how many steps away it
+/// is. A version that names its [PasswordVersion.parents] was made from
+/// those; one written before 1.17.0 from every version (and marker) no
+/// newer than its [PasswordVersion.baseMillis], as those builds read it.
+Map<String, int> _ancestorsOf(
+  PasswordVersion from,
+  Map<String, PasswordVersion> nodes,
+) {
+  final Map<String, int> depth = <String, int>{};
+  final List<PasswordVersion> queue = <PasswordVersion>[from];
+  for (int i = 0; i < queue.length; i++) {
+    final PasswordVersion v = queue[i];
+    if (v.deleted) {
+      continue;
+    }
+    final int next = (depth[v.key] ?? 0) + 1;
+    final Iterable<String> parents =
+        v.parents ??
+        <String>[
+          for (final PasswordVersion p in nodes.values)
+            if (p.key != v.key && p.atMillis <= v.baseMillis) p.key,
+        ];
+    for (final String key in parents) {
+      final PasswordVersion? p = nodes[key];
+      if (p == null || key == from.key || depth.containsKey(key)) {
+        continue;
+      }
+      depth[key] = next;
+      queue.add(p);
+    }
+  }
+  return depth;
+}
+
+/// The shape of every entry [versions] hold, by entry id.
+///
+/// Per entry: the versions no marker saw are alive; of them, those that no
+/// other alive version was made from are its heads, and the newest head is
+/// current (every device picks the same). The other alive versions are its
+/// history when current was made from them, and versions written elsewhere
+/// ([PasswordEntryShape.concurrent]) when it was not, however the clocks of
+/// the devices compare. An entry with no alive version is deleted.
+Map<String, PasswordEntryShape> passwordEntryShapes(
+  Iterable<PasswordVersion> versions,
+) {
   final Map<String, List<PasswordVersion>> lives =
       <String, List<PasswordVersion>>{};
-  final Map<String, List<PasswordVersion>> deletions =
+  final Map<String, List<PasswordVersion>> markers =
       <String, List<PasswordVersion>>{};
   for (final PasswordVersion v in versions) {
-    (v.deleted ? deletions : lives)
+    (v.deleted ? markers : lives)
         .putIfAbsent(v.entryId, () => <PasswordVersion>[])
         .add(v);
   }
-  final List<PasswordEntry> out = <PasswordEntry>[];
+  final Map<String, PasswordEntryShape> out = <String, PasswordEntryShape>{};
+  for (final MapEntry<String, List<PasswordVersion>> m in markers.entries) {
+    if (!lives.containsKey(m.key)) {
+      out[m.key] = PasswordEntryShape(
+        entryId: m.key,
+        current: null,
+        settledMarkers: m.value,
+      );
+    }
+  }
   for (final MapEntry<String, List<PasswordVersion>> e in lives.entries) {
     final List<PasswordVersion> gone =
-        deletions[e.key] ?? const <PasswordVersion>[];
+        markers[e.key] ?? const <PasswordVersion>[];
     final Set<String> seen = <String>{
       for (final PasswordVersion d in gone) ...d.seen,
     };
-    final List<PasswordVersion> alive =
-        <PasswordVersion>[
-          for (final PasswordVersion v in e.value)
-            if (!seen.contains(v.key)) v,
-        ]..sort(
-          (PasswordVersion a, PasswordVersion b) => a.isNewerThan(b) ? -1 : 1,
-        );
+    final List<PasswordVersion> alive = <PasswordVersion>[
+      for (final PasswordVersion v in e.value)
+        if (!seen.contains(v.key)) v,
+    ]..sort(_newestFirst);
     if (alive.isEmpty) {
+      out[e.key] = PasswordEntryShape(
+        entryId: e.key,
+        current: null,
+        settledMarkers: gone,
+      );
       continue;
     }
-    final PasswordVersion current = alive.first;
-    final List<PasswordHistoryItem> concurrent = <PasswordHistoryItem>[];
-    final List<PasswordHistoryItem> earlier = <PasswordHistoryItem>[];
-    for (final PasswordVersion v in alive.skip(1)) {
-      final PasswordHistoryItem item = PasswordHistoryItem(
+    // Only a damaged or hostile store has more: the oldest past it are
+    // taken for history.
+    final List<PasswordVersion> graph = alive.take(_maxGraph).toList();
+    final Map<String, PasswordVersion> nodes = <String, PasswordVersion>{
+      for (final PasswordVersion v in graph) v.key: v,
+      for (final PasswordVersion d in gone) d.key: d,
+    };
+    final Map<String, Map<String, int>> ancestors = <String, Map<String, int>>{
+      for (final PasswordVersion v in graph) v.key: _ancestorsOf(v, nodes),
+    };
+    final Set<String> madeFrom = <String>{
+      for (final Map<String, int> a in ancestors.values) ...a.keys,
+    };
+    final PasswordVersion current = graph.firstWhere(
+      (PasswordVersion v) => !madeFrom.contains(v.key),
+      // Each made from another (only a damaged store): the newest.
+      orElse: () => graph.first,
+    );
+    final Map<String, int> known = ancestors[current.key]!;
+    final List<PasswordVersion> earlier =
+        <PasswordVersion>[
+          for (final PasswordVersion v in graph)
+            if (known.containsKey(v.key)) v,
+        ]..sort((PasswordVersion a, PasswordVersion b) {
+          final int byDepth = known[a.key]!.compareTo(known[b.key]!);
+          return byDepth != 0 ? byDepth : _newestFirst(a, b);
+        });
+    earlier.addAll(alive.skip(_maxGraph));
+    final List<PasswordVersion> concurrent = <PasswordVersion>[
+      for (final PasswordVersion v in graph)
+        if (v.key != current.key && !known.containsKey(v.key)) v,
+    ];
+    final List<PasswordVersion> pending = <PasswordVersion>[];
+    final List<PasswordVersion> settled = <PasswordVersion>[];
+    for (final PasswordVersion d in gone) {
+      final bool isSettled =
+          d.forgotten ||
+          known.containsKey(d.key) ||
+          // A deletion written before 1.17.0 counts as those builds read
+          // it: settled when current is no older than it.
+          (!d._knowsParents && d.atMillis <= current.baseMillis);
+      (isSettled ? settled : pending).add(d);
+    }
+    out[e.key] = PasswordEntryShape(
+      entryId: e.key,
+      current: current,
+      earlier: earlier,
+      concurrent: concurrent,
+      pendingDeletions: pending,
+      settledMarkers: settled,
+    );
+  }
+  return out;
+}
+
+/// The entry [shape] shows, or null when it is deleted.
+PasswordEntry? passwordEntryOf(PasswordEntryShape shape) {
+  final PasswordVersion? current = shape.current;
+  if (current == null) {
+    return null;
+  }
+  PasswordHistoryItem item(PasswordVersion v, {required bool concurrent}) =>
+      PasswordHistoryItem(
         versionKey: v.key,
         fields: v.fields,
         changedAtMillis: v.atMillis,
-        concurrent: v.atMillis > current.baseMillis,
+        concurrent: concurrent,
       );
-      if (item.concurrent) {
-        if (concurrent.length < kMaxPasswordConcurrent) {
-          concurrent.add(item);
-        }
-      } else if (earlier.length < kMaxPasswordHistory) {
-        earlier.add(item);
-      }
+  final List<PasswordHistoryItem> history =
+      <PasswordHistoryItem>[
+        for (final PasswordVersion v in shape.concurrent)
+          item(v, concurrent: true),
+        for (final PasswordVersion v in shape.earlier.take(kMaxPasswordHistory))
+          item(v, concurrent: false),
+      ]..sort(
+        (PasswordHistoryItem a, PasswordHistoryItem b) =>
+            b.changedAtMillis.compareTo(a.changedAtMillis),
+      );
+  int created = current.createdAtMillis;
+  for (final PasswordVersion v in <PasswordVersion>[
+    ...shape.earlier,
+    ...shape.concurrent,
+  ]) {
+    if (v.createdAtMillis > 0 && v.createdAtMillis < created) {
+      created = v.createdAtMillis;
     }
-    final List<PasswordHistoryItem> history =
-        <PasswordHistoryItem>[...concurrent, ...earlier]..sort(
-          (PasswordHistoryItem a, PasswordHistoryItem b) =>
-              b.changedAtMillis.compareTo(a.changedAtMillis),
-        );
-    int created = current.createdAtMillis;
-    for (final PasswordVersion v in alive) {
-      if (v.createdAtMillis > 0 && v.createdAtMillis < created) {
-        created = v.createdAtMillis;
-      }
-    }
-    out.add(
-      PasswordEntry(
-        id: e.key,
-        versionKey: current.key,
-        fields: current.fields,
-        createdAtMillis: created,
-        changedAtMillis: current.atMillis,
-        history: history,
-        conflict: concurrent.isNotEmpty,
-        keptOverDeletion: gone.any(
-          (PasswordVersion d) => d.atMillis > current.baseMillis,
-        ),
-      ),
-    );
   }
-  out.sort(comparePasswordEntries);
-  return out;
+  return PasswordEntry(
+    id: shape.entryId,
+    versionKey: current.key,
+    fields: current.fields,
+    createdAtMillis: created,
+    changedAtMillis: current.atMillis,
+    history: history,
+    conflict: shape.concurrent.isNotEmpty,
+    keptOverDeletion: shape.pendingDeletions.isNotEmpty,
+  );
 }
+
+/// The entries [versions] make ([passwordEntryShapes]); entries whose
+/// every version a deletion saw are gone. Sorted by name (then login), as
+/// the list shows them.
+List<PasswordEntry> passwordEntriesOf(Iterable<PasswordVersion> versions) =>
+    <PasswordEntry>[
+      for (final PasswordEntryShape s in passwordEntryShapes(versions).values)
+        if (passwordEntryOf(s) case final PasswordEntry e) e,
+    ]..sort(comparePasswordEntries);
 
 /// The list's order: by title ignoring case, then login, then id.
 int comparePasswordEntries(PasswordEntry a, PasswordEntry b) {
@@ -414,12 +627,14 @@ int comparePasswordEntries(PasswordEntry a, PasswordEntry b) {
 }
 
 /// A stored vault read back: its versions (by key, as stored, so fields a
-/// newer build added are written back untouched) and its other fields.
+/// newer build added are written back untouched), those of a kind this
+/// build does not read, and its other fields.
 @immutable
 final class PasswordVaultDoc {
   const PasswordVaultDoc({
     this.raw = const <String, Map<String, Object?>>{},
     this.versions = const <String, PasswordVersion>{},
+    this.foreign = const <String, Map<String, Object?>>{},
     this.carried = const <String, Object?>{},
     this.newer = false,
   });
@@ -430,6 +645,11 @@ final class PasswordVaultDoc {
   /// Version key → the version as this build reads it.
   final Map<String, PasswordVersion> versions;
 
+  /// Version key → a stored version this build does not read (a kind a
+  /// newer build added): written back as it is, never dropped, so a newer
+  /// device's data comes through a round trip here whole.
+  final Map<String, Map<String, Object?>> foreign;
+
   /// Top-level fields a newer build added.
   final Map<String, Object?> carried;
 
@@ -437,12 +657,13 @@ final class PasswordVaultDoc {
   /// never written over.
   final bool newer;
 
-  bool get isEmpty => raw.isEmpty;
+  bool get isEmpty => raw.isEmpty && foreign.isEmpty;
 
   /// The stored form: `{v, e: {version key: version}}`.
   Map<String, Object?> toJson() => withCarriedFields(<String, Object?>{
     kFormatVersionKey: kPasswordVaultFormat,
-    if (raw.isNotEmpty) 'e': raw,
+    if (raw.isNotEmpty || foreign.isNotEmpty)
+      'e': <String, Object?>{...foreign, ...raw},
   }, carried);
 
   /// [json] as a vault; null when it is not one (damaged). Versions that do
@@ -469,27 +690,32 @@ final class PasswordVaultDoc {
     final Map<String, Map<String, Object?>> raw =
         <String, Map<String, Object?>>{};
     final Map<String, PasswordVersion> versions = <String, PasswordVersion>{};
+    final Map<String, Map<String, Object?>> foreign =
+        <String, Map<String, Object?>>{};
     final Object? e = json['e'];
     if (e is Map) {
       for (final MapEntry<dynamic, dynamic> v in e.entries) {
-        if (versions.length >= _maxReadVersions) {
+        if (versions.length + foreign.length >= _maxReadVersions) {
           break;
         }
         final Object? key = v.key;
-        if (key is! String) {
+        final Object? value = v.value;
+        if (key is! String || !isPasswordId(key) || value is! Map) {
           continue;
         }
-        final PasswordVersion? version = PasswordVersion.fromJson(key, v.value);
+        final PasswordVersion? version = PasswordVersion.fromJson(key, value);
         if (version == null) {
+          foreign[key] = Map<String, Object?>.from(value);
           continue;
         }
         versions[key] = version;
-        raw[key] = Map<String, Object?>.from(v.value as Map);
+        raw[key] = Map<String, Object?>.from(value);
       }
     }
     return PasswordVaultDoc(
       raw: raw,
       versions: versions,
+      foreign: foreign,
       // `z` is the padding of the copy with friends, never kept.
       carried: unknownFields(json, const <String, Object?>{
         'e': null,

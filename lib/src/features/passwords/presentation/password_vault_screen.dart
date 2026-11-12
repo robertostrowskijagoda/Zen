@@ -136,6 +136,74 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
   Future<void> _openEntry(String id) =>
       pushPasswordPage<void>(context, PasswordEntryScreen(entryId: id));
 
+  /// "Usuń powtórzone": the entries that are exact copies of another one
+  /// (an export imported twice), removed at once after a question.
+  Future<void> _removeDuplicates() async {
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
+    final int n = _vault.duplicateCount;
+    if (n == 0) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text(t('Nie ma powtórzonych haseł.'))),
+      );
+      return;
+    }
+    final bool? sure = await showDialog<bool>(
+      context: context,
+      routeSettings: const RouteSettings(name: kPasswordVaultRouteName),
+      builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
+        key: const Key('passwords-duplicates-dialog'),
+        title: Text(
+          tn(
+            n,
+            one: 'Usunąć {n} powtórzone hasło?',
+            few: 'Usunąć {n} powtórzone hasła?',
+            many: 'Usunąć {n} powtórzonych haseł?',
+          ),
+        ),
+        content: Text(
+          t(
+            'Z każdej grupy haseł identycznych we wszystkich polach zostaje '
+            'jedno. Kopie znikną ze wszystkich Twoich urządzeń.',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('passwords-duplicates-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Usuń')),
+          ),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) {
+      return;
+    }
+    int removed = 0;
+    if (await runPasswordAction(context, () async {
+      removed = await _vault.removeDuplicates();
+    })) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            tn(
+              removed,
+              one: 'Usunięto {n} powtórzone hasło.',
+              few: 'Usunięto {n} powtórzone hasła.',
+              many: 'Usunięto {n} powtórzonych haseł.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
   void _howItWorks() {
     unawaited(
       showDialog<void>(
@@ -444,6 +512,8 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
                   onSelected: (String choice) {
                     if (choice == 'import') {
                       unawaited(importPasswordFile(context, ref));
+                    } else if (choice == 'duplicates') {
+                      unawaited(_removeDuplicates());
                     } else if (choice == 'autofill') {
                       unawaited(showPasswordAutofillInfo(context));
                     } else {
@@ -457,6 +527,12 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
                           value: 'import',
                           enabled: writable,
                           child: Text(t('Importuj z pliku CSV')),
+                        ),
+                        PopupMenuItem<String>(
+                          key: const Key('passwords-menu-duplicates'),
+                          value: 'duplicates',
+                          enabled: writable && _vault.entries.length > 1,
+                          child: Text(t('Usuń powtórzone hasła')),
                         ),
                         // Android only: Zen as the system's autofill.
                         if (ref.read(passwordAutofillBridgeProvider).supported)

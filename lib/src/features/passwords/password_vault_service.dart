@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -12,6 +13,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/passwords/password_csv_import.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/passwords/password_match.dart';
+import 'package:zen/src/features/search/search_text.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
 /// How long a copied password or login stays on the clipboard.
@@ -62,6 +64,7 @@ final class PasswordImportReport {
     this.read = 0,
     this.imported = 0,
     this.skipped = const <PasswordImportSkip, int>{},
+    this.damaged = const <PasswordCsvDamage>[],
   });
 
   /// Whose export the file was (null when it was not taken at all).
@@ -78,6 +81,9 @@ final class PasswordImportReport {
 
   /// Rows left out, by reason.
   final Map<PasswordImportSkip, int> skipped;
+
+  /// Where the file's damaged rows are ([PasswordCsvParse.damaged]).
+  final List<PasswordCsvDamage> damaged;
 
   int get skippedCount => skipped.values.fold(0, (int a, int b) => a + b);
 
@@ -163,22 +169,26 @@ final class PasswordVaultService extends ChangeNotifier {
     return null;
   }
 
-  /// The entries whose name, login or address holds [query] (ignoring
-  /// case); all of them for an empty query. Passwords and notes are never
-  /// searched.
+  /// The entries whose name, login or address holds [query], compared as
+  /// the chats' search compares ([foldForSearch]: ignoring case and
+  /// accents, so "zolw" finds "Żółw"); all of them for an empty query.
+  /// Passwords and notes are never searched.
   List<PasswordEntry> search(String query) {
-    final String q = query.trim().toLowerCase();
+    final String q = foldForSearch(query.trim());
     if (q.isEmpty) {
       return entries;
     }
     return <PasswordEntry>[
       for (final PasswordEntry e in entries)
-        if (e.name.toLowerCase().contains(q) ||
-            e.login.toLowerCase().contains(q) ||
-            e.address.toLowerCase().contains(q))
+        if (foldForSearch(e.name).contains(q) ||
+            foldForSearch(e.login).contains(q) ||
+            foldForSearch(e.address).contains(q))
           e,
     ];
   }
+
+  /// How many entries [removeDuplicates] would remove.
+  int get duplicateCount => _removableDuplicates(entries).length;
 
   /// The entries the autofill may offer in the app [packageName] or on the
   /// page [webDomain] ([matchPasswordEntries]).
@@ -226,6 +236,7 @@ final class PasswordVaultService extends ChangeNotifier {
         entryId: id,
         atMillis: at,
         createdAtMillis: at,
+        parents: const <String>[],
         fields: clean,
       ),
     );
@@ -234,13 +245,18 @@ final class PasswordVaultService extends ChangeNotifier {
   });
 
   /// Saves [fields] as the entry [id]'s new version; its earlier one goes
-  /// into its history. Unchanged fields change nothing.
+  /// into its history. Unchanged fields change nothing, unless the entry
+  /// waits for the person ([PasswordEntry.conflict],
+  /// [PasswordEntry.keptOverDeletion]): saved as they are, they settle it
+  /// ("Zostaw obecną", "Zostaw"), on every device.
   Future<PasswordEntry> edit(String id, PasswordFields fields) =>
       _serial(() async {
         await _ready();
         final PasswordEntry current = _existing(id);
         final PasswordFields clean = _checked(fields);
-        if (clean.sameAs(current.fields) && !current.conflict) {
+        if (clean.sameAs(current.fields) &&
+            !current.conflict &&
+            !current.keptOverDeletion) {
           return current;
         }
         await _save(_newVersionOf(current, clean), growing: true);
@@ -261,41 +277,33 @@ final class PasswordVaultService extends ChangeNotifier {
         return entry(id)!;
       });
 
-  /// Forgets the entry [id]'s earlier versions (its old passwords), on
-  /// every device. A marker names them (a deletion marker that saw only
-  /// them, so the entry stays): a copy or a device that was away and still
-  /// holds them never brings them back ([_pruned] drops what a marker
-  /// saw). Earlier markers of the entry are folded into it.
+  /// Forgets the entry [id]'s earlier versions (its old passwords, and
+  /// those written elsewhere it waits on), on every device. A marker names
+  /// them ([PasswordVersion.forgotten]): a copy or a device that was away
+  /// and still holds them never brings them back ([_pruned] drops what a
+  /// marker saw). Earlier markers of the entry are folded into it.
   Future<PasswordEntry> clearHistory(String id) => _serial(() async {
     await _ready();
-    final PasswordEntry current = _existing(id);
-    final PasswordVersion now = _doc.versions[current.versionKey]!;
-    final Set<String> seen = <String>{};
+    _existing(id);
+    final PasswordEntryShape shape = _shapeOf(id);
+    final PasswordVersion current = shape.current!;
+    final List<PasswordVersion> dropped = <PasswordVersion>[
+      ...shape.earlier,
+      ...shape.concurrent,
+    ];
+    final List<PasswordVersion> markers = <PasswordVersion>[
+      ...shape.settledMarkers,
+      ...shape.pendingDeletions,
+    ];
+    if (dropped.isEmpty && markers.isEmpty) {
+      return entry(id)!;
+    }
     final Map<String, Map<String, Object?>> raw =
-        <String, Map<String, Object?>>{};
-    for (final MapEntry<String, Map<String, Object?>> e in _doc.raw.entries) {
-      final PasswordVersion? v = _doc.versions[e.key];
-      if (v == null || v.entryId != id || e.key == current.versionKey) {
-        raw[e.key] = e.value;
-      } else if (v.deleted) {
-        // Folded into the new marker (it keeps what they saw).
-        seen.addAll(v.seen);
-      } else {
-        seen.add(v.key);
-      }
+        <String, Map<String, Object?>>{..._doc.raw};
+    for (final PasswordVersion v in <PasswordVersion>[...dropped, ...markers]) {
+      raw.remove(v.key);
     }
-    if (seen.isEmpty) {
-      return current;
-    }
-    final PasswordVersion marker = PasswordVersion(
-      key: _newId(),
-      entryId: id,
-      // Not after the current version's base: the entry is not shown as
-      // kept over a deletion ([PasswordEntry.keptOverDeletion]).
-      atMillis: now.baseMillis,
-      deleted: true,
-      seen: seen.take(256).toList(),
-    );
+    final PasswordVersion marker = _forgottenMarker(current, dropped, markers);
     raw[marker.key] = marker.toJson();
     await _save(raw);
     return entry(id)!;
@@ -303,35 +311,37 @@ final class PasswordVaultService extends ChangeNotifier {
 
   /// Deletes the entry [id] on every device, with its history. False when
   /// there is no such entry.
-  Future<bool> delete(String id) => _serial(() async {
+  Future<bool> delete(String id) async => await deleteMany(<String>[id]) == 1;
+
+  /// Deletes the entries [ids] on every device, with their history, in one
+  /// save. Returns how many there were to delete.
+  Future<int> deleteMany(Iterable<String> ids) => _serial(() async {
     await _ready();
-    if (entry(id) == null) {
-      return false;
+    final Set<String> gone = <String>{
+      for (final String id in ids)
+        if (entry(id) != null) id,
+    };
+    if (gone.isEmpty) {
+      return 0;
     }
-    final Set<String> seen = <String>{};
-    int at = _now();
-    final Map<String, Map<String, Object?>> raw =
-        <String, Map<String, Object?>>{};
-    for (final MapEntry<String, Map<String, Object?>> e in _doc.raw.entries) {
-      final PasswordVersion v = _doc.versions[e.key]!;
-      if (v.entryId != id) {
-        raw[e.key] = e.value;
-        continue;
-      }
-      // Earlier markers of the entry are folded into the new one.
-      seen.addAll(v.deleted ? v.seen : <String>[v.key]);
-      at = max(at, v.atMillis + 1);
+    await _save(_withDeletions(_doc.raw, gone));
+    return gone.length;
+  });
+
+  /// Removes the entries that are exact copies of another one (every field
+  /// the same: an export imported twice, on two devices before they
+  /// synced), on every device. Of each group the entry with the longest
+  /// history stays (then the oldest); a copy is removed only when it has
+  /// no history and nothing that waits on the person, so no password goes
+  /// with it. Returns how many were removed.
+  Future<int> removeDuplicates() => _serial(() async {
+    await _ready();
+    final Set<String> gone = _removableDuplicates(_entries);
+    if (gone.isEmpty) {
+      return 0;
     }
-    final PasswordVersion marker = PasswordVersion(
-      key: _newId(),
-      entryId: id,
-      atMillis: at,
-      deleted: true,
-      seen: seen.take(256).toList(),
-    );
-    raw[marker.key] = marker.toJson();
-    await _save(raw);
-    return true;
+    await _save(_withDeletions(_doc.raw, gone));
+    return gone.length;
   });
 
   /// Puts the entry [id]'s password on the clipboard, cleared after
@@ -420,6 +430,7 @@ final class PasswordVaultService extends ChangeNotifier {
             entryId: _newId(),
             atMillis: at,
             createdAtMillis: at,
+            parents: const <String>[],
             fields: row.fields,
           );
           raw[v.key] = v.toJson();
@@ -429,7 +440,7 @@ final class PasswordVaultService extends ChangeNotifier {
         if (over > 0) {
           // The oldest history goes first; rows that still do not fit stay
           // out, the last ones first.
-          raw = _trimmed(raw, over);
+          raw = _trimmed(raw, over, dropMarkers: false);
           over = _overBytes(raw);
           int gone = 0;
           while (gone < over && added.isNotEmpty) {
@@ -449,6 +460,7 @@ final class PasswordVaultService extends ChangeNotifier {
           read: parse.read,
           imported: imported,
           skipped: skipped,
+          damaged: parse.damaged,
         );
       });
 
@@ -476,32 +488,38 @@ final class PasswordVaultService extends ChangeNotifier {
   /// Writes [state] (the account's sync merged another device's change
   /// in) and reads it back. Throws while locked: the sync tries again.
   /// What no longer counts (versions a deletion or a cleared history saw,
-  /// history past its length) is dropped on the way, as a save here drops
-  /// it: an old password that comes back from a device that was away is
-  /// not written into the store again. Versions this build does not read
-  /// stay as they are.
+  /// history past its length) is settled on the way, as a save here
+  /// settles it: an old password that comes back from a device that was
+  /// away is not written into the store again. An entry that is an exact
+  /// copy of another one, both never edited (the same export imported on
+  /// two devices before they synced), is folded into the one every device
+  /// keeps ([_withoutCopies]). Versions this build does not read stay as
+  /// they are. What this adds itself goes to the other devices as a change
+  /// of this one; every device adds the same.
   Future<void> takeSyncState(Map<String, Object?> state) => _serial(() async {
     _ensureOpen();
     Map<String, Object?> next = state;
+    bool added = false;
     final PasswordVaultDoc? doc = PasswordVaultDoc.fromJson(state);
-    final Object? e = state['e'];
-    if (doc != null && !doc.newer && e is Map) {
-      final Set<String> keep = _pruned(doc.raw).keys.toSet();
-      final Map<Object?, Object?> kept = <Object?, Object?>{
-        for (final MapEntry<Object?, Object?> v in e.entries)
-          if (!doc.raw.containsKey(v.key) || keep.contains(v.key))
-            v.key: v.value,
-      };
-      next = <String, Object?>{...state, 'e': kept};
-      if (kept.isEmpty) {
-        next.remove('e');
-      }
+    if (doc != null && !doc.newer && state['e'] is Map) {
+      final Map<String, Map<String, Object?>> settled = _pruned(
+        _withoutCopies(doc.raw),
+      );
+      added = settled.keys.any((String k) => !doc.raw.containsKey(k));
+      next = PasswordVaultDoc(
+        raw: settled,
+        foreign: doc.foreign,
+        carried: doc.carried,
+      ).toJson();
     }
     await disk.write(
       kPasswordVaultKey,
       Uint8List.fromList(utf8.encode(jsonEncode(next))),
     );
     await _read();
+    if (added) {
+      _edits.changed();
+    }
   });
 
   /// The stored vault for a copy of the account or the copy with friends
@@ -527,15 +545,22 @@ final class PasswordVaultService extends ChangeNotifier {
       return 0;
     }
     final Map<String, Map<String, Object?>> raw = _pruned(
-      <String, Map<String, Object?>>{...copy.raw, ..._doc.raw},
+      _withoutCopies(<String, Map<String, Object?>>{...copy.raw, ..._doc.raw}),
     );
+    final Map<String, Map<String, Object?>> foreign =
+        <String, Map<String, Object?>>{...copy.foreign, ..._doc.foreign};
     // What a deletion here saw, or what is older than the history kept,
-    // does not come back.
-    final int added = raw.keys
-        .where((String k) => !_doc.raw.containsKey(k))
-        .length;
+    // does not come back; markers made here on the way are not counted.
+    final int added =
+        raw.keys
+            .where(
+              (String k) => copy.raw.containsKey(k) && !_doc.raw.containsKey(k),
+            )
+            .length +
+        foreign.length -
+        _doc.foreign.length;
     if (added > 0) {
-      await _save(raw);
+      await _save(raw, foreign: foreign);
     }
     return added;
   });
@@ -626,8 +651,17 @@ final class PasswordVaultService extends ChangeNotifier {
     return e;
   }
 
-  /// The versions with a new one of [current] holding [fields]: it builds
-  /// on every version of the entry here (a conflict is settled by it).
+  /// How the entry [id]'s versions stand in the store now.
+  PasswordEntryShape _shapeOf(String id) =>
+      passwordEntryShapes(<PasswordVersion>[
+        for (final PasswordVersion v in _doc.versions.values)
+          if (v.entryId == id) v,
+      ])[id]!;
+
+  /// The versions with a new one of [current] holding [fields]: it is made
+  /// from the entry's current version and everything that waits on the
+  /// person (versions written elsewhere, a deletion it was kept over), so
+  /// an edit settles a conflict ([PasswordEntryShape.parentsOfNext]).
   Map<String, Map<String, Object?>> _newVersionOf(
     PasswordEntry current,
     PasswordFields fields,
@@ -646,7 +680,9 @@ final class PasswordVaultService extends ChangeNotifier {
         // Always after what it replaces, even within one millisecond.
         atMillis: max(_now(), newest + 1),
         createdAtMillis: current.createdAtMillis,
+        // For builds before 1.17.0, which tell what an edit built on by it.
         baseMillis: newest,
+        parents: _shapeOf(current.id).parentsOfNext,
         fields: fields,
       ),
     );
@@ -674,37 +710,184 @@ final class PasswordVaultService extends ChangeNotifier {
         e.key: v,
   };
 
-  /// [raw] without what no longer counts: versions a deletion saw; per
-  /// entry, beyond its current version, versions written elsewhere at the
-  /// same time ([kMaxPasswordConcurrent]) and its last
-  /// [kMaxPasswordHistory] others; the oldest deletion markers past
-  /// [kMaxPasswordDeletions].
-  Map<String, Map<String, Object?>> _pruned(
+  /// [raw] with deletion markers of the entries [ids]: each names every
+  /// version of its entry here (earlier markers of the entry are folded
+  /// into it), and is later than all of them.
+  Map<String, Map<String, Object?>> _withDeletions(
     Map<String, Map<String, Object?>> raw,
+    Set<String> ids,
   ) {
+    final Map<String, Set<String>> seen = <String, Set<String>>{};
+    final Map<String, int> at = <String, int>{};
+    final int now = _now();
+    final Map<String, Map<String, Object?>> out =
+        <String, Map<String, Object?>>{};
+    for (final MapEntry<String, Map<String, Object?>> e in raw.entries) {
+      final PasswordVersion? v = PasswordVersion.fromJson(e.key, e.value);
+      if (v == null || !ids.contains(v.entryId)) {
+        out[e.key] = e.value;
+        continue;
+      }
+      (seen[v.entryId] ??= <String>{}).addAll(
+        v.deleted ? v.seen : <String>[v.key],
+      );
+      at[v.entryId] = max(at[v.entryId] ?? now, v.atMillis + 1);
+    }
+    for (final MapEntry<String, Set<String>> e in seen.entries) {
+      final PasswordVersion marker = PasswordVersion(
+        key: _newId(),
+        entryId: e.key,
+        atMillis: at[e.key]!,
+        deleted: true,
+        parents: const <String>[],
+        seen: e.value.take(kMaxPasswordSeen).toList(),
+      );
+      out[marker.key] = marker.toJson();
+    }
+    return out;
+  }
+
+  /// The marker of the entry of [current] that names [dropped] and every
+  /// version [markers] named, as forgotten ([PasswordVersion.forgotten]).
+  /// Its key and what it names follow from those alone, so every device
+  /// that settles the same versions writes the same marker.
+  PasswordVersion _forgottenMarker(
+    PasswordVersion current,
+    List<PasswordVersion> dropped,
+    List<PasswordVersion> markers,
+  ) {
+    final List<String> seen = <String>{
+      for (final PasswordVersion m in markers) ...m.seen,
+      for (final PasswordVersion v in dropped) v.key,
+    }.toList()..sort();
+    // Not after the current version's base, nor after anything it names:
+    // a build before 1.17.0 then takes it for a deletion it has seen.
+    int at = current.baseMillis;
+    for (final PasswordVersion v in <PasswordVersion>[...dropped, ...markers]) {
+      at = min(at, v.atMillis);
+    }
+    final List<String> named = seen.take(kMaxPasswordSeen).toList();
+    return PasswordVersion(
+      key: _derivedKey('forgotten', current.entryId, named),
+      entryId: current.entryId,
+      atMillis: max(0, at),
+      deleted: true,
+      forgotten: true,
+      parents: const <String>[],
+      seen: named,
+    );
+  }
+
+  /// [raw] with what no longer counts settled. Per entry: versions a marker
+  /// saw are dropped; its history past [kMaxPasswordHistory] (and the
+  /// versions in [forget]) and the markers it settled are folded into one
+  /// marker of forgotten versions ([_forgottenMarker]), so none of them
+  /// comes back from an older copy or a device that was away. A version
+  /// the current one was not made from, and a deletion it was not made
+  /// knowing, are never dropped here. A deleted entry keeps its markers.
+  Map<String, Map<String, Object?>> _pruned(
+    Map<String, Map<String, Object?>> raw, {
+    Set<String> forget = const <String>{},
+  }) {
     final Map<String, PasswordVersion> versions = _versionsOf(raw);
     final Set<String> keep = <String>{};
-    for (final PasswordEntry e in passwordEntriesOf(versions.values)) {
+    final List<PasswordVersion> made = <PasswordVersion>[];
+    for (final PasswordEntryShape s in passwordEntryShapes(
+      versions.values,
+    ).values) {
+      final PasswordVersion? current = s.current;
+      if (current == null) {
+        keep.addAll(s.settledMarkers.map((PasswordVersion m) => m.key));
+        continue;
+      }
+      final List<PasswordVersion> dropped = <PasswordVersion>[];
+      int kept = 0;
+      for (final PasswordVersion v in s.earlier) {
+        if (kept < kMaxPasswordHistory && !forget.contains(v.key)) {
+          keep.add(v.key);
+          kept++;
+        } else {
+          dropped.add(v);
+        }
+      }
       keep
-        ..add(e.versionKey)
-        ..addAll(e.history.map((PasswordHistoryItem h) => h.versionKey));
+        ..add(current.key)
+        ..addAll(s.concurrent.map((PasswordVersion v) => v.key))
+        ..addAll(s.pendingDeletions.map((PasswordVersion d) => d.key));
+      final List<PasswordVersion> settled = s.settledMarkers;
+      if (dropped.isEmpty &&
+          (settled.isEmpty ||
+              (settled.length == 1 && settled.single.forgotten))) {
+        keep.addAll(settled.map((PasswordVersion m) => m.key));
+        continue;
+      }
+      made.add(_forgottenMarker(current, dropped, settled));
     }
-    final List<PasswordVersion> markers =
-        versions.values.where((PasswordVersion v) => v.deleted).toList()..sort(
-          (PasswordVersion a, PasswordVersion b) => a.isNewerThan(b) ? -1 : 1,
-        );
-    keep.addAll(
-      markers.take(kMaxPasswordDeletions).map((PasswordVersion v) => v.key),
-    );
     return <String, Map<String, Object?>>{
       for (final MapEntry<String, Map<String, Object?>> e in raw.entries)
         if (keep.contains(e.key)) e.key: e.value,
+      for (final PasswordVersion m in made) m.key: m.toJson(),
     };
+  }
+
+  /// [raw] with every entry that is an exact copy of another one, both
+  /// never edited and with no marker (the same export imported on two
+  /// devices before they synced), deleted: of each group the entry with
+  /// the lowest id stays. The deletion's key and contents follow from the
+  /// copy alone, so every device that sees the same copies writes the
+  /// same deletion.
+  Map<String, Map<String, Object?>> _withoutCopies(
+    Map<String, Map<String, Object?>> raw,
+  ) {
+    final Map<String, List<PasswordVersion>> groups =
+        <String, List<PasswordVersion>>{};
+    for (final PasswordEntryShape s in passwordEntryShapes(
+      _versionsOf(raw).values,
+    ).values) {
+      final PasswordVersion? v = s.current;
+      if (v == null ||
+          s.earlier.isNotEmpty ||
+          s.concurrent.isNotEmpty ||
+          s.pendingDeletions.isNotEmpty ||
+          s.settledMarkers.isNotEmpty) {
+        continue;
+      }
+      groups.putIfAbsent(_sameKey(v.fields), () => <PasswordVersion>[]).add(v);
+    }
+    final Map<String, Map<String, Object?>> out =
+        <String, Map<String, Object?>>{...raw};
+    for (final List<PasswordVersion> group in groups.values) {
+      if (group.length < 2) {
+        continue;
+      }
+      group.sort(
+        (PasswordVersion a, PasswordVersion b) =>
+            a.entryId.compareTo(b.entryId),
+      );
+      for (final PasswordVersion copy in group.skip(1)) {
+        final PasswordVersion marker = PasswordVersion(
+          key: _derivedKey('copy', copy.entryId, <String>[copy.key]),
+          entryId: copy.entryId,
+          atMillis: copy.atMillis + 1,
+          deleted: true,
+          parents: const <String>[],
+          seen: <String>[copy.key],
+        );
+        out[marker.key] = marker.toJson();
+      }
+    }
+    return out;
   }
 
   int _bytesOf(Map<String, Map<String, Object?>> raw) => utf8
       .encode(
-        jsonEncode(PasswordVaultDoc(raw: raw, carried: _doc.carried).toJson()),
+        jsonEncode(
+          PasswordVaultDoc(
+            raw: raw,
+            foreign: _doc.foreign,
+            carried: _doc.carried,
+          ).toJson(),
+        ),
       )
       .length;
 
@@ -712,49 +895,76 @@ final class PasswordVaultService extends ChangeNotifier {
       _bytesOf(raw) - kMaxPasswordVaultBytes;
 
   /// [raw] with the oldest earlier versions (never an entry's current one,
-  /// nor one written elsewhere at the same time) dropped until about
-  /// [over] bytes are gone.
+  /// nor one written elsewhere it was not made from) forgotten until about
+  /// [over] bytes are gone; with [dropMarkers], then the oldest markers of
+  /// deleted entries too, while it is still too large.
   Map<String, Map<String, Object?>> _trimmed(
     Map<String, Map<String, Object?>> raw,
-    int over,
-  ) {
-    final Map<String, PasswordVersion> versions = _versionsOf(raw);
-    final List<PasswordHistoryItem> old =
-        <PasswordHistoryItem>[
-          for (final PasswordEntry e in passwordEntriesOf(versions.values))
-            for (final PasswordHistoryItem h in e.history)
-              if (!h.concurrent) h,
+    int over, {
+    bool dropMarkers = true,
+  }) {
+    final Map<String, PasswordEntryShape> shapes = passwordEntryShapes(
+      _versionsOf(raw).values,
+    );
+    final List<PasswordVersion> old =
+        <PasswordVersion>[
+          for (final PasswordEntryShape s in shapes.values)
+            if (s.current != null) ...s.earlier.take(kMaxPasswordHistory),
         ]..sort(
-          (PasswordHistoryItem a, PasswordHistoryItem b) =>
-              a.changedAtMillis.compareTo(b.changedAtMillis),
+          (PasswordVersion a, PasswordVersion b) =>
+              a.atMillis.compareTo(b.atMillis),
         );
-    final Map<String, Map<String, Object?>> out =
-        <String, Map<String, Object?>>{...raw};
+    final Set<String> forget = <String>{};
     int gone = 0;
-    for (final PasswordHistoryItem h in old) {
+    for (final PasswordVersion v in old) {
       if (gone >= over) {
         break;
       }
-      final Map<String, Object?>? v = out.remove(h.versionKey);
-      if (v != null) {
-        gone += utf8
-            .encode(jsonEncode(<String, Object?>{h.versionKey: v}))
+      forget.add(v.key);
+      gone += utf8
+          .encode(jsonEncode(<String, Object?>{v.key: raw[v.key]}))
+          .length;
+    }
+    final Map<String, Map<String, Object?>> out = _pruned(raw, forget: forget);
+    if (!dropMarkers) {
+      return out;
+    }
+    final List<PasswordVersion> markers =
+        <PasswordVersion>[
+          for (final PasswordEntryShape s in shapes.values)
+            if (s.current == null) ...s.settledMarkers,
+        ]..sort(
+          (PasswordVersion a, PasswordVersion b) =>
+              a.atMillis.compareTo(b.atMillis),
+        );
+    int still = _overBytes(out);
+    for (final PasswordVersion m in markers) {
+      if (still <= 0) {
+        break;
+      }
+      final Map<String, Object?>? removed = out.remove(m.key);
+      if (removed != null) {
+        still -= utf8
+            .encode(jsonEncode(<String, Object?>{m.key: removed}))
             .length;
       }
     }
     return out;
   }
 
-  /// Prunes [raw], checks its size ([growing]: refused when it does not
-  /// fit even with the oldest history gone) and writes it.
+  /// Settles [raw] ([_pruned]), checks its size ([growing]: refused when
+  /// it does not fit even with the oldest history gone) and writes it, with
+  /// the versions of a kind this build does not read ([foreign], those
+  /// stored here unless given).
   Future<void> _save(
     Map<String, Map<String, Object?>> raw, {
     bool growing = false,
+    Map<String, Map<String, Object?>>? foreign,
   }) async {
     Map<String, Map<String, Object?>> next = _pruned(raw);
     final int over = _overBytes(next);
     if (over > 0) {
-      next = _trimmed(next, over);
+      next = _trimmed(next, over, dropMarkers: !growing);
       if (growing && _overBytes(next) > 0) {
         throw const PasswordVaultException(PasswordVaultError.full);
       }
@@ -762,6 +972,7 @@ final class PasswordVaultService extends ChangeNotifier {
     final PasswordVaultDoc doc = PasswordVaultDoc(
       raw: next,
       versions: _versionsOf(next),
+      foreign: foreign ?? _doc.foreign,
       carried: _doc.carried,
     );
     _ensureOpen();
@@ -774,6 +985,47 @@ final class PasswordVaultService extends ChangeNotifier {
     notifyListeners();
     _edits.changed();
   }
+}
+
+/// What two entries with every field the same have in common.
+String _sameKey(PasswordFields f) =>
+    jsonEncode(<String>[f.name, f.login, f.password, f.address, f.note]);
+
+/// A version key that follows from [kind], [entryId] and [parts] alone
+/// (24 hex digits; random keys have 20 letters and digits).
+String _derivedKey(String kind, String entryId, List<String> parts) => sha256
+    .convert(utf8.encode('$kind\n$entryId\n${parts.join(',')}'))
+    .toString()
+    .substring(0, 24);
+
+/// The ids of the entries of [entries] that [PasswordVaultService.
+/// removeDuplicates] removes.
+Set<String> _removableDuplicates(List<PasswordEntry> entries) {
+  final Map<String, List<PasswordEntry>> groups =
+      <String, List<PasswordEntry>>{};
+  for (final PasswordEntry e in entries) {
+    groups.putIfAbsent(_sameKey(e.fields), () => <PasswordEntry>[]).add(e);
+  }
+  final Set<String> out = <String>{};
+  for (final List<PasswordEntry> group in groups.values) {
+    if (group.length < 2) {
+      continue;
+    }
+    group.sort((PasswordEntry a, PasswordEntry b) {
+      final int byHistory = b.history.length.compareTo(a.history.length);
+      if (byHistory != 0) {
+        return byHistory;
+      }
+      final int byAge = a.createdAtMillis.compareTo(b.createdAtMillis);
+      return byAge != 0 ? byAge : a.id.compareTo(b.id);
+    });
+    for (final PasswordEntry e in group.skip(1)) {
+      if (e.history.isEmpty && !e.conflict && !e.keptOverDeletion) {
+        out.add(e.id);
+      }
+    }
+  }
+  return out;
 }
 
 final class _Edits extends ChangeNotifier {

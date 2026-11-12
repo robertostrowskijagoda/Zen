@@ -530,6 +530,70 @@ void main() {
     expect(find.byKey(const Key('password-conflict-info')), findsNothing);
   });
 
+  testWidgets('kept over a deletion on another device: said, settled by '
+      '"Zostaw" without changing a field', (WidgetTester tester) async {
+    final MemoryLedgerDisk phone = MemoryLedgerDisk();
+    final PasswordVaultService a = _vault(phone);
+    final PasswordEntry bank = await a.add(_bank);
+    final MemoryLedgerDisk laptop = MemoryLedgerDisk()
+      ..files[kPasswordVaultKey] = phone.files[kPasswordVaultKey]!;
+    final PasswordVaultService b = _vault(laptop, seed: 2);
+    await b.load();
+    await a.delete(bank.id);
+    await b.edit(
+      bank.id,
+      const PasswordFields(name: 'Bank', password: 'z-laptopa'),
+    );
+    await phone.write(
+      kPasswordVaultKey,
+      Uint8List.fromList(
+        utf8.encode(
+          jsonEncode(<String, Object?>{
+            'v': 1,
+            'e': <String, Object?>{..._versions(phone), ..._versions(laptop)},
+          }),
+        ),
+      ),
+    );
+    final PasswordVaultService vault = _vault(phone, seed: 3);
+    await vault.load();
+    expect(vault.entry(bank.id)!.keptOverDeletion, isTrue);
+
+    await _pump(tester, vault: vault);
+    await _open(tester);
+    await _tap(tester, 'password-row-${bank.id}');
+    expect(find.byKey(const Key('password-kept-info')), findsOneWidget);
+    await _tap(tester, 'password-keep-over-deletion');
+    expect(vault.entry(bank.id)!.keptOverDeletion, isFalse);
+    expect(vault.entry(bank.id)!.password, 'z-laptopa');
+    expect(find.byKey(const Key('password-kept-info')), findsNothing);
+  });
+
+  testWidgets('exact copies are removed at once after a question; one of '
+      'each stays', (WidgetTester tester) async {
+    final PasswordVaultService vault = _vault(MemoryLedgerDisk());
+    await vault.add(_bank);
+    await vault.add(_bank);
+    await vault.add(_bank);
+    await vault.add(_mail);
+    expect(vault.duplicateCount, 2);
+
+    await _pump(tester, vault: vault);
+    await _open(tester);
+    await _tap(tester, 'passwords-menu');
+    await _tap(tester, 'passwords-menu-duplicates');
+    expect(
+      find.byKey(const Key('passwords-duplicates-dialog')),
+      findsOneWidget,
+    );
+    await _tap(tester, 'passwords-duplicates-confirm');
+    expect(vault.entries.map((PasswordEntry e) => e.name), <String>[
+      'Bank',
+      'poczta',
+    ]);
+    expect(vault.duplicateCount, 0);
+  });
+
   testWidgets('import: a warning first, then the report in words; the '
       "file's bytes are overwritten", (WidgetTester tester) async {
     final PasswordVaultService vault = _vault(MemoryLedgerDisk());
