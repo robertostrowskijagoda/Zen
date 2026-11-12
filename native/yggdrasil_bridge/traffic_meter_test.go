@@ -42,6 +42,12 @@ func TestTransitIsWhatGoesInAndOutBeyondTheNodesOwnPackets(t *testing.T) {
 	if estimate.crossed {
 		t.Fatal("from one public peer to another is no crossing")
 	}
+	if estimate.near {
+		t.Fatal("from one public peer to another is nothing nearby")
+	}
+	if estimate.carried["tls://a:443"] != 6_000_000+2*ownWire || estimate.carried["tls://b:443"] != 6_000_000 {
+		t.Fatalf("what each peering carried: %v", estimate.carried)
+	}
 	state := meter.snapshot()
 	if state["publicRxBytes"].(uint64) != 6_000_000+ownWire || state["localRxBytes"].(uint64) != 0 {
 		t.Fatalf("peering bytes are not added up: %v", state)
@@ -200,5 +206,26 @@ func TestHostTrafficSplitsPublicAndDoorLinks(t *testing.T) {
 	if state["publicRxBytes"].(uint64) != 100 || state["doorTxBytes"].(uint64) != 20 ||
 		state["rxRate"].(uint64) != 4 || state["txRate"].(uint64) != 6 {
 		t.Fatalf("door host traffic: %v", state)
+	}
+}
+
+// Transit between two devices nearby (loopback, the LAN) is neither a
+// crossing nor between public peers.
+func TestTransitBetweenDevicesNearbyIsNear(t *testing.T) {
+	var own ownTraffic
+	var meter peerTrafficMeter
+	start := time.Unix(1000, 0)
+	peers := []core.PeerInfo{
+		{URI: "tcp://127.0.0.1:1", Uptime: time.Minute},
+		{URI: "tcp://127.0.0.1:2", Uptime: time.Minute},
+	}
+	meter.sample(peers, nil, &own, nil, start)
+	peers = []core.PeerInfo{
+		{URI: "tcp://127.0.0.1:1", Uptime: 2 * time.Minute, RXBytes: 6_000_000},
+		{URI: "tcp://127.0.0.1:2", Uptime: 2 * time.Minute, TXBytes: 6_000_000},
+	}
+	estimate, ended := meter.sample(peers, nil, &own, nil, start.Add(time.Minute))
+	if !ended || estimate.bytes == 0 || !estimate.near || estimate.crossed {
+		t.Fatalf("estimate %+v", estimate)
 	}
 }

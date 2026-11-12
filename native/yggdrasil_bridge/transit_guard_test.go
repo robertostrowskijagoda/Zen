@@ -222,12 +222,12 @@ func TestAHoldKeepsAPublicPeerThatIsUpOrElseADeviceNearby(t *testing.T) {
 		{map[string]bool{}, "tls://a:1?key=x", ""},
 	}
 	for i, c := range cases {
-		gotPublic, gotLink := chooseTransitKeep(public, links, c.up)
+		gotPublic, gotLink := chooseTransitKeep(public, links, c.up, nil)
 		if gotPublic != c.wantPublic || gotLink != c.wantLink {
 			t.Fatalf("case %d: kept %q %q, want %q %q", i, gotPublic, gotLink, c.wantPublic, c.wantLink)
 		}
 	}
-	if gotPublic, gotLink := chooseTransitKeep(nil, links, nil); gotPublic != "" || gotLink != "200::1" {
+	if gotPublic, gotLink := chooseTransitKeep(nil, links, nil, nil); gotPublic != "" || gotLink != "200::1" {
 		t.Fatalf("no public peers: kept %q %q", gotPublic, gotLink)
 	}
 }
@@ -557,5 +557,97 @@ func TestAPhoneThatOnlyReceivesIsNobodysShortcut(t *testing.T) {
 		if info.Up && bytes.Equal(info.Key, coreB.PublicKey()) {
 			t.Fatal("the phone linked to the second peer as well")
 		}
+	}
+}
+
+// A hostile public peer sends the phone packets for a node behind another
+// of its peers: transit from one public peer to another. The hold that
+// starts leaves the links nearby alone; transit through them while it runs
+// still counts, and closes them as any hold does.
+func TestTransitBetweenPublicPeersLeavesTheLinksNearbyUntilItCrossesThem(t *testing.T) {
+	var guard transitGuard
+	hold, _, now := untilHold(t, &guard, time.Unix(1000, 0), windowAt(1<<20, false))
+	if hold != transitHoldBase || !guard.holdKeepsLinks() {
+		t.Fatalf("hold %s, keeps the links %v", hold, guard.holdKeepsLinks())
+	}
+	// More of the same while it holds: one public peer is left, nothing to
+	// do.
+	for range 5 {
+		now = now.Add(trafficWindow)
+		if hold := guard.observe(now, windowAt(1<<20, false)); hold != 0 {
+			t.Fatalf("transit between public peers during the hold: %s", hold)
+		}
+	}
+	// Then a home computer nearby routes through the phone.
+	for i := 1; i <= transitConfirmWindows; i++ {
+		now = now.Add(trafficWindow)
+		hold := guard.observe(now, windowAt(1<<20, true))
+		if (hold > 0) != (i == transitConfirmWindows) {
+			t.Fatalf("crossing window %d: hold %s", i, hold)
+		}
+	}
+	if guard.holdKeepsLinks() {
+		t.Fatal("transit through the links nearby closes them")
+	}
+	if hold := guard.observe(now.Add(trafficWindow), windowAt(1<<20, true)); hold != 0 {
+		t.Fatalf("nothing more while that hold runs, got %s", hold)
+	}
+
+	// Transit between two devices nearby is no business of a public peer:
+	// that hold closes the links.
+	var near transitGuard
+	untilHold(t, &near, time.Unix(1000, 0), transitEstimate{bytes: 1 << 25, rate: 1 << 20, near: true})
+	if near.holdKeepsLinks() {
+		t.Fatal("transit between devices nearby: the links stay")
+	}
+}
+
+// The public peer a hold keeps is the one that carried the least in the
+// window: a peer that pushed transit through the phone is not left as its
+// only one because it comes first.
+func TestAHoldKeepsThePublicPeerThatCarriedTheLeast(t *testing.T) {
+	public := []string{"tls://a:1?key=x", "tls://b:1", "tls://c:1"}
+	up := map[string]bool{"tls://a:1": true, "tls://b:1": true, "tls://c:1": true}
+	carried := map[string]uint64{"tls://a:1": 6 << 20, "tls://b:1": 6 << 20, "tls://c:1": 40_000}
+	if keep, _ := chooseTransitKeep(public, nil, up, carried); keep != "tls://c:1" {
+		t.Fatalf("kept %q", keep)
+	}
+	delete(up, "tls://c:1")
+	carried["tls://b:1"] = 5 << 20
+	if keep, _ := chooseTransitKeep(public, nil, up, carried); keep != "tls://b:1" {
+		t.Fatalf("kept %q", keep)
+	}
+}
+
+// On a phone: a hold for transit between public peers keeps the link to a
+// friend nearby (even one it does not talk with now); one for transit
+// through the links closes it.
+func TestAHoldKeepsTheLinksNearbyUnlessTransitWentThroughThem(t *testing.T) {
+	node, friend, _ := linkedPhone(t)
+	manager := node.existingLocalLinks()
+	manager.mu.Lock()
+	for _, link := range manager.links {
+		link.talked.Store(0)
+	}
+	manager.mu.Unlock()
+	friendAddress := meshAddressForKey(friend.PublicKey())
+
+	node.startTransitHold(transitHoldBase, transitEstimate{rate: 1 << 20}, true)
+	time.Sleep(300 * time.Millisecond)
+	if !manager.hasLink(friendAddress) || !manager.mayLink(friendAddress) {
+		t.Fatal("transit between public peers closed the link nearby")
+	}
+	if state := node.transitGuardState(time.Now()); state["holding"] != true || state["linksKept"] != true {
+		t.Fatalf("holding: %v", state)
+	}
+
+	node.startTransitHold(transitHoldBase, transitEstimate{rate: 1 << 20, crossed: true}, false)
+	waitForPeer(t, node.core, friend.PublicKey(), false)
+	if manager.mayLink(friendAddress) {
+		t.Fatal("the link comes back while the hold runs")
+	}
+	node.endTransitHold()
+	if !manager.mayLink(friendAddress) {
+		t.Fatal("after the hold links are made again")
 	}
 }

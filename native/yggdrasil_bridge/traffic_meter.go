@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -142,6 +143,12 @@ type transitEstimate struct {
 	// round: what a home computer routing through the phone looks like, and
 	// what a stranger far away cannot make up.
 	crossed bool
+	// Most of it could have come in on a peering nearby and gone out on
+	// another one nearby.
+	near bool
+	// What each of the node's own peerings (not the ones others opened)
+	// carried in the window, both ways, by peerURIBase.
+	carried map[string]uint64
 }
 
 // peerTrafficMeter adds up what the node's peerings carried, also of
@@ -253,10 +260,19 @@ func (meter *peerTrafficMeter) sample(peers []core.PeerInfo, sessions []core.Ses
 	transit := estimateTransit(meter.windowBase, totals, len(peers), elapsed)
 	transit = min(transit, crossLinkBound(meter.windowLinks))
 	crossing := min(meter.windowNear.rx, meter.windowFar.tx) + min(meter.windowFar.rx, meter.windowNear.tx)
+	nearOnly := min(meter.windowNear.rx, meter.windowNear.tx)
+	carried := make(map[string]uint64, len(meter.windowLinks))
+	for key, link := range meter.windowLinks {
+		if !strings.HasPrefix(key, "in|") {
+			carried[peerURIBase(key)] += link.rx + link.tx
+		}
+	}
 	estimate := transitEstimate{
 		bytes:   transit,
 		rate:    uint64(float64(transit) / elapsed.Seconds()),
 		crossed: transit > 0 && 2*min(crossing, transit) >= transit,
+		near:    transit > 0 && 2*min(nearOnly, transit) >= transit,
+		carried: carried,
 	}
 	meter.transitBytes += transit
 	meter.transitRate = estimate.rate
