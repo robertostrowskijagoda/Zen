@@ -22,6 +22,8 @@ import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/contacts_backup.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/met_attestation.dart';
+import 'package:zen/src/features/neighbors/flat_door_mail.dart'
+    show yggAddressForKey;
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -236,12 +238,12 @@ final class LedgerNode {
     this.syncInterval = const Duration(minutes: 10),
     bool startSuspended = false,
     this.createIdentity = true,
-    BridgeProbe? reachProbe,
+    NodeKeyProbe? reachProbe,
     this.localAddress,
     this.localSessionKey,
     this.greetAlso,
   }) : _clock = clock ?? HlcClock(wallClock: friendsAgreedTime),
-       _reachProbe = reachProbe ?? yggBridgeProbe,
+       _reachProbe = reachProbe ?? _noNodeKey,
        bridges = bridges ?? BridgeBook(),
        autoDownloadMedia = autoDownloadMedia ?? _always,
        _suspended = startSuspended {
@@ -460,8 +462,12 @@ final class LedgerNode {
   /// Whether [address] is a friend's device (or one of this account's).
   bool isFriendAddress(String address) => _isFriend(address);
 
-  /// How a friend's address is checked when they ask.
-  final BridgeProbe _reachProbe;
+  /// How a friend's address is checked when they ask: the key of the node
+  /// that answers there (the app passes the bridge's probe; without one no
+  /// check succeeds).
+  final NodeKeyProbe _reachProbe;
+
+  static Future<String?> _noNodeKey(String _) async => null;
   final Map<String, _ReachWait> _reachWaits = <String, _ReachWait>{};
   final List<int> _reachAnsweredAt = <int>[];
   List<String> _chosenBridges = const <String>[];
@@ -3641,12 +3647,22 @@ final class LedgerNode {
       return; // nobody gets to use us as a port scanner
     }
     _reachAnsweredAt.add(now);
-    // The probe itself refuses anything but a public address.
-    final int? latency = await _reachProbe(uri);
+    bool ok = false;
+    if (reachCheckAllowed(uri)) {
+      // Only the asking device's own node counts: a node that merely
+      // speaks the mesh protocol at that address may be anyone's (a
+      // device on the asker's Wi-Fi that played its router, say).
+      final String? key = (await _reachProbe(uri))?.toLowerCase();
+      final Uint8List? raw = key == null ? null : nodeKeyBytes(key);
+      ok =
+          raw != null &&
+          yggAddressForKey(raw) == PeerShareCodec.normalizeAddress(from) &&
+          pinnedNodeKeys(uri).every((String pinned) => pinned == key);
+    }
     _send(from, <String, dynamic>{
       'type': kLedgerReachOkType,
       'id': id,
-      'ok': latency != null,
+      'ok': ok,
     });
   }
 
@@ -3679,8 +3695,9 @@ final class LedgerNode {
     ).join();
   }
 
-  /// A separate key just for the bridge, so an announcement never reveals
-  /// whose computer it is.
+  /// A separate key just for the bridge, so the signature ties the
+  /// announcement to no account. Its address pins the node key (BridgeHost),
+  /// which anyone who connects there sees in the TLS handshake anyway.
   Future<LedgerKeyPair> _bridgeKey() async {
     final Uint8List? raw = await readOrSetAsideOn(disk, _bridgeKeyKey);
     if (raw != null && raw.length == 32) {

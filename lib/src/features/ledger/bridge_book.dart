@@ -192,6 +192,68 @@ String bridgeSubnet(String host) {
 /// in milliseconds, or `null` when it does not answer as a mesh node.
 typedef BridgeProbe = Future<int?> Function(String uri);
 
+/// Connects to the mesh node at a `tls://` [uri] and returns the node key
+/// its TLS certificate proves (64 hex digits, lower case), or `null` when
+/// nothing there finishes a mesh TLS handshake. A Yggdrasil node's
+/// certificate is made from its node key, and the handshake proves the
+/// private key, so the key says WHOSE node answered, which "meta" does not.
+typedef NodeKeyProbe = Future<String?> Function(String uri);
+
+/// The node keys [uri] pins (`?key=`), lower case.
+List<String> pinnedNodeKeys(String uri) => <String>[
+  for (final String key
+      in Uri.tryParse(uri)?.queryParametersAll['key'] ?? const <String>[])
+    key.toLowerCase(),
+];
+
+/// [uri] with the node [key] pinned: Yggdrasil then takes only that node at
+/// that address, and a friend's check refuses any other.
+String pinNodeKey(String uri, String key) =>
+    '$uri${uri.contains('?') ? '&' : '?'}key=${key.toLowerCase()}';
+
+/// Whether a friend may be asked to check [uri] from outside: a `tls://`
+/// node at a literal public IP and a port, with nothing but a pinned key.
+/// Nothing else is ever dialled for someone else (no names, which could
+/// point into the home network, no loopback or LAN addresses).
+bool reachCheckAllowed(String uri) {
+  final Uri? parsed = Uri.tryParse(uri);
+  if (parsed == null ||
+      parsed.scheme != 'tls' ||
+      !parsed.hasPort ||
+      parsed.port < 1 ||
+      parsed.port > 65535 ||
+      parsed.userInfo.isNotEmpty ||
+      parsed.path.isNotEmpty ||
+      parsed.hasFragment) {
+    return false;
+  }
+  final InternetAddress? ip = ipOfHost(parsed.host);
+  if (ip == null || !isPublicAddress(ip)) {
+    return false;
+  }
+  final Map<String, List<String>> query = parsed.queryParametersAll;
+  return query.keys.every((String k) => k == 'key') &&
+      (query['key'] ?? const <String>[]).every(
+        (String k) => nodeKeyBytes(k) != null,
+      );
+}
+
+/// The 32 bytes of a node key in hex, or `null`.
+Uint8List? nodeKeyBytes(String hex) {
+  if (hex.length != 64) {
+    return null;
+  }
+  final Uint8List out = Uint8List(32);
+  for (int i = 0; i < 32; i++) {
+    final int? byte = int.tryParse(hex.substring(2 * i, 2 * i + 2), radix: 16);
+    if (byte == null) {
+      return null;
+    }
+    out[i] = byte;
+  }
+  return out;
+}
+
 /// The 4 bytes every Yggdrasil node sends first on a new link.
 const List<int> _meshPreamble = <int>[0x6D, 0x65, 0x74, 0x61]; // "meta"
 

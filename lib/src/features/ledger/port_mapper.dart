@@ -113,8 +113,17 @@ const List<String> _wanServices = <String>[
   'urn:schemas-upnp-org:service:WANPPPConnection:1',
 ];
 
-/// SSDP search on 239.255.255.250:1900.
-Future<List<Uri>> ssdpDiscover(Duration wait) async {
+/// SSDP search on 239.255.255.250:1900. Only the default gateway's answers
+/// count: anyone on a café's Wi-Fi can answer a multicast search, and the
+/// router that forwards a port to this computer is the gateway.
+Future<List<Uri>> ssdpDiscover(
+  Duration wait, {
+  GatewayLookup gateways = systemGateways,
+}) async {
+  final List<InternetAddress> routers = await gateways();
+  if (routers.isEmpty) {
+    return <Uri>[];
+  }
   final RawDatagramSocket socket = await RawDatagramSocket.bind(
     InternetAddress.anyIPv4,
     0,
@@ -131,7 +140,11 @@ Future<List<Uri>> ssdpDiscover(Duration wait) async {
     if (d == null) {
       return;
     }
-    final Uri? location = parseSsdpLocation(latin1.decode(d.data));
+    final Uri? location = ssdpGatewayLocation(
+      latin1.decode(d.data),
+      from: d.address,
+      gateways: routers,
+    );
     if (location != null) {
       found.add(location);
     }
@@ -165,8 +178,34 @@ Future<List<Uri>> ssdpDiscover(Duration wait) async {
   return found.toList();
 }
 
+/// The `LOCATION` of an SSDP answer that came [from] one of the
+/// [gateways] and names that same address: a router describes itself, it
+/// never sends us to another machine.
+Uri? ssdpGatewayLocation(
+  String response, {
+  required InternetAddress from,
+  required List<InternetAddress> gateways,
+}) {
+  if (!isGatewayAddress(from, gateways)) {
+    return null;
+  }
+  final Uri? location = parseSsdpLocation(response);
+  if (location == null ||
+      InternetAddress.tryParse(location.host)?.address != from.address) {
+    return null;
+  }
+  return location;
+}
+
+/// Whether [ip] is one of the [gateways] (and not this computer: a default
+/// route never leads to loopback).
+bool isGatewayAddress(InternetAddress ip, List<InternetAddress> gateways) =>
+    !ip.isLoopback &&
+    gateways.any((InternetAddress g) => g.address == ip.address);
+
 /// The `LOCATION` of an SSDP answer, only if it points into the local
-/// network over plain http (a router never lives elsewhere).
+/// network over plain http (a router never lives elsewhere, and never on
+/// this computer).
 Uri? parseSsdpLocation(String response) {
   for (final String line in const LineSplitter().convert(response)) {
     final int colon = line.indexOf(':');
@@ -189,11 +228,10 @@ Uri? parseSsdpLocation(String response) {
 
 bool _isLocal(InternetAddress ip) {
   if (ip.type != InternetAddressType.IPv4) {
-    return ip.isLinkLocal || ip.isLoopback;
+    return ip.isLinkLocal;
   }
   final Uint8List b = ip.rawAddress;
   return b[0] == 10 ||
-      b[0] == 127 ||
       (b[0] == 172 && (b[1] & 0xF0) == 16) ||
       (b[0] == 192 && b[1] == 168) ||
       (b[0] == 169 && b[1] == 254) ||
@@ -272,12 +310,23 @@ final class UpnpError implements Exception {
 final class UpnpPortMapper {
   UpnpPortMapper({
     UpnpDiscovery? discover,
+    GatewayLookup? gateways,
     this.wait = const Duration(seconds: 3),
     this.description = 'Zen',
     this.preferredExternalPorts = kDisguisedExternalPorts,
-  }) : _discover = discover ?? ssdpDiscover;
+    @visibleForTesting this.routerOnLoopback = false,
+  }) : _gateways = gateways ?? systemGateways,
+       _discover =
+           discover ??
+           ((Duration wait) =>
+               ssdpDiscover(wait, gateways: gateways ?? systemGateways));
 
   final UpnpDiscovery _discover;
+  final GatewayLookup _gateways;
+
+  /// Tests only: the fake router listens on loopback. In the app the router
+  /// is the default gateway, never this computer.
+  final bool routerOnLoopback;
   final Duration wait;
   final String description;
 
@@ -303,7 +352,18 @@ final class UpnpPortMapper {
     int port, {
     Duration lease = const Duration(hours: 2),
   }) async {
-    for (final Uri location in await _discover(wait)) {
+    final List<Uri> locations = await _discover(wait);
+    if (locations.isEmpty) {
+      return null;
+    }
+    final List<InternetAddress> gateways = await _gateways();
+    for (final Uri location in locations) {
+      // Whatever found it: a description is fetched only from the gateway
+      // (the service URLs then stay on the same host, parseUpnpServices).
+      if (!_isRouter(location, gateways)) {
+        logZenWarning('UPnP: ${location.host} is not the gateway, skipped');
+        continue;
+      }
       final List<UpnpService> services;
       try {
         services = parseUpnpServices(await _get(location), location);
@@ -319,6 +379,18 @@ final class UpnpPortMapper {
       }
     }
     return null;
+  }
+
+  bool _isRouter(Uri location, List<InternetAddress> gateways) {
+    final InternetAddress? ip = InternetAddress.tryParse(location.host);
+    if (ip == null || location.scheme != 'http') {
+      return false;
+    }
+    if (ip.isLoopback) {
+      return routerOnLoopback &&
+          gateways.any((InternetAddress g) => g.address == ip.address);
+    }
+    return isGatewayAddress(ip, gateways);
   }
 
   Future<PortMapping?> _mapWith(
@@ -418,7 +490,9 @@ final class UpnpPortMapper {
       ..connectionTimeout = const Duration(seconds: 3)
       ..findProxy = (_) => 'DIRECT';
     try {
-      final HttpClientRequest req = await client.getUrl(url);
+      // A redirect could send the request anywhere, loopback included.
+      final HttpClientRequest req = await client.getUrl(url)
+        ..followRedirects = false;
       final HttpClientResponse res = await req.close().timeout(
         const Duration(seconds: 5),
       );
@@ -448,7 +522,8 @@ final class UpnpPortMapper {
       ..connectionTimeout = const Duration(seconds: 3)
       ..findProxy = (_) => 'DIRECT';
     try {
-      final HttpClientRequest req = await client.postUrl(service.control);
+      final HttpClientRequest req = await client.postUrl(service.control)
+        ..followRedirects = false;
       req.headers
         ..set(HttpHeaders.contentTypeHeader, 'text/xml; charset="utf-8"')
         ..set('SOAPAction', '"${service.type}#$action"');
@@ -639,7 +714,12 @@ final class NatPmpPortMapper {
         return;
       }
       final Datagram? d = socket.receive();
-      if (d != null && d.address == gateway && !got.isCompleted) {
+      // Only the gateway's NAT-PMP port answers (RFC 6886 3.1): anyone
+      // else on the network could send an answer to this port.
+      if (d != null &&
+          d.address.address == gateway.address &&
+          d.port == serverPort &&
+          !got.isCompleted) {
         got.complete(d.data);
       }
     });

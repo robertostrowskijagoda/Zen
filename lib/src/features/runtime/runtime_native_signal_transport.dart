@@ -308,6 +308,7 @@ final class RuntimeNodeSession {
     this.sendFromDoor,
     this.localLinks,
     this.sessionKey = '',
+    this.nodeKey = '',
     this.pinSessionKeys,
     this.hintSessionKeys,
     this.dropSessionKeyHints,
@@ -349,6 +350,11 @@ final class RuntimeNodeSession {
   /// Fingerprint (hex) of this node's post-quantum device key, which seals
   /// and authenticates its signals (pq_session.go); '' without a bridge.
   final String sessionKey;
+
+  /// This node's mesh key (hex), which its TLS certificate shows to whoever
+  /// connects: a bridge's address pins it (bridge_host.dart). '' without a
+  /// bridge.
+  final String nodeKey;
 
   /// Pins device keys (address → fingerprint) in the bridge; with `keep`, a
   /// different pin already there stays. Returns the conflicts (address →
@@ -843,6 +849,9 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// Fingerprint of this node's post-quantum device key ('' while no node
   /// runs): the ledger's hello signs it together with the address.
   String get sessionKey => _session?.sessionKey ?? '';
+
+  /// This node's mesh key (hex; '' while no node runs).
+  String get nodeKey => _session?.nodeKey ?? '';
 
   /// Addresses where two sources disagree about the device key: the key
   /// the node pinned is not the one a signed record names. Each address
@@ -2083,6 +2092,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
         ),
     localLinks: BridgeLocalLinkApi(bridge, handle),
     sessionKey: startResult['pqKey'] as String? ?? '',
+    nodeKey: startResult['publicKey'] as String? ?? '',
     pinSessionKeys: (Map<String, String> pins, bool keep) =>
         sessionKeyConflictsFrom(
           bridge.setPqPins(

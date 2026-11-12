@@ -79,11 +79,12 @@ final class BridgeHostStatus {
     BridgeHostState.checking => t(
       'Otwieram port w routerze i proszę znajomych o sprawdzenie z zewnątrz.',
     ),
+    // The address without the pinned node key (64 hex digits).
     BridgeHostState.active => t(
-      'Inni łączą się z siecią przez ten komputer ({uri}). '
-      'Ogłoszenie nie mówi, czyj to komputer, ale jego adres IP jest '
-      'widoczny w sieci.',
-      {'uri': uri},
+      'Inni łączą się z siecią przez ten komputer ({uri}). Kto się z nim '
+      'połączy, widzi jego adres IP i klucz węzła, a z klucza adres Zen '
+      'tego komputera.',
+      {'uri': uri?.split('?').first},
     ),
     BridgeHostState.noRouter => t(
       'Router nie obsługuje UPnP ani NAT-PMP (albo są wyłączone). Włącz '
@@ -140,6 +141,7 @@ Future<List<InternetAddress>> systemAddresses() async {
 final class BridgeHost {
   BridgeHost({
     required this.node,
+    required this.nodeKey,
     this.port = kMeshListenPort,
     PortMapper? mapper,
     LocalAddresses? localAddresses,
@@ -154,6 +156,13 @@ final class BridgeHost {
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final LedgerNode node;
+
+  /// This computer's mesh node key (hex; '' while no node runs). Every
+  /// address friends check, and the one announced, pins it: a router says
+  /// what its internet address is, and only a friend who reaches THIS node
+  /// there proves it (a device on the same Wi-Fi can play the router and
+  /// name its own server).
+  final String Function() nodeKey;
   final int port;
   final Duration refresh;
   final Duration retrySoon;
@@ -205,7 +214,10 @@ final class BridgeHost {
       if (!_stopped) {
         status.value = result;
         _schedule(
-          result.state == BridgeHostState.noFriendsOnline ? retrySoon : refresh,
+          result.state == BridgeHostState.noFriendsOnline ||
+                  result.state == BridgeHostState.waiting
+              ? retrySoon
+              : refresh,
         );
       }
       return result;
@@ -231,12 +243,19 @@ final class BridgeHost {
     }
     _mapping = mapping ?? _mapping;
 
+    final String key = nodeKey();
+    if (nodeKeyBytes(key) == null) {
+      // No node yet: nothing to pin, nothing to check.
+      return BridgeHostStatus(BridgeHostState.waiting, at: _now());
+    }
+    String pinned(InternetAddress address, int port) =>
+        pinNodeKey(meshTlsUri(address, port), key);
     final List<({String uri, String method})> candidates =
         <({String uri, String method})>[];
     final InternetAddress? external = mapping?.externalAddress;
     if (mapping != null && external != null && isPublicAddress(external)) {
       candidates.add((
-        uri: meshTlsUri(external, mapping.externalPort),
+        uri: pinned(external, mapping.externalPort),
         method: mapping.method,
       ));
     }
@@ -244,7 +263,7 @@ final class BridgeHost {
     // may have been forwarded by hand.
     final InternetAddress? known = _mapper.knownExternalAddress;
     if (mapping == null && known != null && isPublicAddress(known)) {
-      candidates.add((uri: meshTlsUri(known, port), method: 'manual'));
+      candidates.add((uri: pinned(known, port), method: 'manual'));
     }
     final List<InternetAddress> own =
         (await _localAddresses()).where(isPublicAddress).toList()
@@ -256,7 +275,7 @@ final class BridgeHost {
                 ),
           );
     for (final InternetAddress a in own.take(2)) {
-      final String uri = meshTlsUri(a, port);
+      final String uri = pinned(a, port);
       if (!candidates.any((c) => c.uri == uri)) {
         candidates.add((uri: uri, method: 'direct'));
       }

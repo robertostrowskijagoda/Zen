@@ -34,6 +34,8 @@ import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/runtime/public_peers.dart'
+    show probeNodeKeyThroughBridge;
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -246,6 +248,9 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     // node, which then goes online, once the service has let go.
     startSuspended: !inService && !kIsWeb && Platform.isAndroid,
     createIdentity: !inService,
+    // A friend's computer asks to be checked from outside: the node there
+    // must show that computer's key (bridge_host.dart).
+    reachProbe: probeNodeKeyThroughBridge,
   );
   // Device keys proven by hybrid-signed hellos are pinned in the bridge
   // (pq_session.go); those friends' device records name are only hints. A
@@ -698,7 +703,11 @@ final Provider<BridgeHost?> bridgeHostProvider = Provider<BridgeHost?>((
   if (node == null) {
     return null;
   }
-  final BridgeHost host = BridgeHost(node: node)..start();
+  final BridgeHost host = BridgeHost(
+    node: node,
+    nodeKey: () =>
+        ref.mounted ? ref.read(runtimeNodeRuntimeProvider).nodeKey : '',
+  )..start();
   ref.onDispose(
     () => unawaitedLogged(host.stop(), context: 'Zatrzymanie mostu sieci'),
   );
