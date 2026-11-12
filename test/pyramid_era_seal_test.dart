@@ -591,6 +591,57 @@ void main() {
       expect(st.sealCheaters[w.id('S')], <String>{first, second});
     });
 
+    test('a payment a seal left out does not vanish from its payee\'s '
+        'history: it shows as left out; one most treasurers signed against '
+        'the rules shows as such', () async {
+      final PyrLedger treasurer = PyrLedger();
+      final PyramidRecord e = await fund(treasurer, 'S', 1000);
+      // Final in the eighth era, on B1's phone; the treasurers who seal
+      // it leave it out.
+      final PyramidRecord paid = await signed(
+        await order(start, 'S', 'B1', 300, 1),
+        five,
+      );
+      final PyrLedger b1 = PyrLedger()..merge(paid);
+      final PyramidState before = w.fold(<PyramidRecord>[e, admitZ], now: zAt);
+      expect(b1.uncounted(b1.compute(before)), isEmpty);
+      final List<PyramidRecord> seals = await sealEras(
+        <PyramidRecord>[e, admitZ],
+        treasurer,
+        more: <LedgerKeyPair>[z],
+        now: zAt + day,
+      );
+      final PyramidState st = w.fold(<PyramidRecord>[
+        e,
+        admitZ,
+        ...seals,
+      ], now: zAt + day);
+      expect(st.seals.last.ops, isNot(contains(paid.id)));
+      final PyrLedgerView v = b1.compute(st);
+      expect(v.counted, isNot(contains(paid.id)));
+      expect(v.entries, isEmpty);
+      final PyrUncounted lost = b1.uncounted(v, key: w.id('B1')).single;
+      expect(lost.leftOutOfSeal, isTrue);
+      expect(lost.entry.id, paid.id);
+      expect(lost.entry.from, w.id('S'));
+      expect(lost.entry.to, w.id('B1'));
+      expect(lost.entry.amount, 300);
+      expect(b1.uncounted(v, key: w.id('A2')), isEmpty);
+
+      // Most treasurers sign an order with a gap in its numbers: on a
+      // whole ledger it shows as signed against the rules.
+      final PyramidRecord gap = await signed(
+        await order(zAt + h, 'S', 'A2', 100, 7),
+        <String>[...five, 'X'],
+      );
+      treasurer.merge(gap);
+      final List<PyrUncounted> all = treasurer.uncounted(
+        treasurer.compute(st, whole: true),
+      );
+      expect(all.single.entry.id, gap.id);
+      expect(all.single.leftOutOfSeal, isFalse);
+    });
+
     test('a member who joins after several sealed eras reads the sealed '
         'past and sees what is paid to them count', () async {
       final PyrLedger treasurer = PyrLedger();

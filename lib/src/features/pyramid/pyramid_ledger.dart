@@ -204,6 +204,23 @@ final class PyrLedgerEntry {
   final String memo;
 }
 
+/// Why an operation most treasurers of its era signed counts nowhere: the
+/// era's seal does not list it ([PyrLedgerView.broken]).
+const String kPyrLeftOutOfSeal = 'poza pieczęcią swojej ery';
+
+/// An operation most treasurers of its time signed that counts nowhere
+/// ([PyrLedger.uncounted]), as a line of a history: left out of its era's
+/// seal ([leftOutOfSeal]), or signed against the rules ([why]).
+@immutable
+final class PyrUncounted {
+  const PyrUncounted({required this.entry, required this.why});
+
+  final PyrLedgerEntry entry;
+  final String why;
+
+  bool get leftOutOfSeal => why == kPyrLeftOutOfSeal;
+}
+
 /// What the operations a phone knows give: balances, numbers, the
 /// conditional payments and the history.
 final class PyrLedgerView {
@@ -632,6 +649,54 @@ final class PyrLedger {
       if (op.at >= from && op.at < to && v.counted.contains(op.id)) op.id,
   ]..sort();
 
+  /// The operations here that most treasurers of their time signed and
+  /// that [v] counts nowhere ([PyrLedgerView.broken]: left out of their
+  /// era's seal, or against the rules), of [key] only when given, as
+  /// history lines, the oldest first. What counted once and a seal left
+  /// out never just vanishes from a history: it shows why.
+  List<PyrUncounted> uncounted(PyrLedgerView v, {String? key}) {
+    final List<PyrUncounted> out = <PyrUncounted>[];
+    for (final MapEntry<String, String> b in v.broken.entries) {
+      final PyramidRecord? op = ops[b.key];
+      if (op == null || (key != null && !partiesOf(op).contains(key))) {
+        continue;
+      }
+      final PyrLedgerEntry entry;
+      if (op.type == PyrT.transfer) {
+        entry = PyrLedgerEntry(
+          id: op.id,
+          kind: op.body['cond'] == null
+              ? PyrEntryKind.payment
+              : PyrEntryKind.hold,
+          from: op.str('from'),
+          to: op.str('to'),
+          amount: op.integer('amount'),
+          at: op.at,
+          memo: op.str('memo'),
+        );
+      } else if (v.escrows[op.str('x')] case final PyrEscrow e) {
+        final bool ok = op.body['ok'] == true;
+        entry = PyrLedgerEntry(
+          id: op.id,
+          kind: ok ? PyrEntryKind.kept : PyrEntryKind.returned,
+          from: ok ? e.from : e.to,
+          to: ok ? e.to : e.from,
+          amount: e.amount,
+          at: op.at,
+          memo: e.memo,
+        );
+      } else {
+        // A settlement of a payment that does not count either: that
+        // payment's own line says it.
+        continue;
+      }
+      out.add(PyrUncounted(entry: entry, why: b.value));
+    }
+    return out..sort(
+      (PyrUncounted a, PyrUncounted b) => a.entry.at.compareTo(b.entry.at),
+    );
+  }
+
   /// Takes emission note [n] when it opens its commitment.
   bool mergeNote(PyrEmitNote n) {
     if (!n.holds || notes.containsKey(n.rc)) {
@@ -885,7 +950,7 @@ final class PyrLedger {
           !seal.ops.contains(op.id) &&
           op.tsigs.keys.where(seal.set.contains).length >=
               seal.set.length ~/ 2 + 1) {
-        v.broken[op.id] = 'poza pieczęcią swojej ery';
+        v.broken[op.id] = kPyrLeftOutOfSeal;
       }
     }
     v.entries.sort(

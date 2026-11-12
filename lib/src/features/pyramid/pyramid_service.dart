@@ -195,6 +195,10 @@ const int kPyrCatchUpEveryMs = 10 * 60 * 1000;
 /// Verdicts read from outside the pyramid, kept (the newest).
 const int kPyrOutsideVerdictsKept = 200;
 
+/// Of [kPyrOutsideVerdictsKept], how many one friend's word may stand for:
+/// a friend who makes verdicts up fills a third of the room at most.
+const int kPyrVerdictsPerFriend = 64;
+
 /// Verdicts one `pyr_nat` frame carries.
 const int kPyrVerdictBatch = 30;
 
@@ -1130,7 +1134,10 @@ final class PyramidService extends ChangeNotifier {
         if (verdicts is List) {
           // Checked when they came; the limit applies again.
           for (final Object? item in verdicts.take(kPyrOutsideVerdictsKept)) {
-            final PyrOutsideVerdict? v = PyrOutsideVerdict.fromJson(item);
+            final PyrOutsideVerdict? v = PyrOutsideVerdict.fromJson(
+              item,
+              stored: true,
+            );
             if (v != null) {
               _outsideVerdicts[v.id] = v;
             }
@@ -1971,9 +1978,9 @@ final class PyramidService extends ChangeNotifier {
     // A reader from outside: the newest it has of each kind.
     final Map<String, int> since = _nationalSince(top: false);
     final Map<String, int> topSince = _nationalSince(top: true);
-    final Map<String, int> verdictsSince = _verdictsSince();
     final List<String> countries = feedCountries;
     for (final String f in to ?? host.friends()) {
+      final Map<String, int> verdictsSince = _verdictsSince(f);
       await _send(f, <String, dynamic>{
         'type': PyramidTypes.hello,
         'py': <Map<String, dynamic>>[
@@ -4289,6 +4296,28 @@ final class PyramidService extends ChangeNotifier {
         : _treasury.view(s).cheaters;
   }
 
+  /// Operations of this person that most treasurers of their time signed
+  /// and that count nowhere — left out of their era's seal, or signed
+  /// against the rules — for the history, the oldest first.
+  List<PyrUncounted> get myUncounted {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s == null || me == null) {
+      return const <PyrUncounted>[];
+    }
+    return _treasury.ledger.uncounted(_treasury.view(s), key: me);
+  }
+
+  /// Every such operation this phone keeps: a treasurer's whole ledger
+  /// shows what a majority signed and a seal left out, or what it signed
+  /// against the rules.
+  List<PyrUncounted> get uncountedOps {
+    final PyramidState? s = state;
+    return s == null
+        ? const <PyrUncounted>[]
+        : _treasury.ledger.uncounted(_treasury.view(s));
+  }
+
   /// Whether this person keeps the whole private ledger (a treasurer).
   bool get isTreasurer => _treasury.isTreasurer;
 
@@ -6594,8 +6623,11 @@ final class PyramidService extends ChangeNotifier {
 
   /// The verdicts in force about whoever uses [address] (null: this
   /// person), for their profile: from the records when this phone keeps
-  /// the pyramid, otherwise from what member friends passed on. The person
-  /// the profile shows cannot hide them: they come from others.
+  /// the pyramid, otherwise from what member friends passed on — each as
+  /// the word of the friends who still stand by it ([PyrVerdictView.by]):
+  /// outside the pyramid nothing more can be checked. The person the
+  /// profile shows cannot hide one: an overturning they pass on takes back
+  /// only their own word.
   List<PyrVerdictView> verdictsAt(String? address) {
     final int now = _now();
     final PyramidState? s = state;
@@ -6618,20 +6650,35 @@ final class PyramidService extends ChangeNotifier {
       ]..sort((PyrVerdictView a, PyrVerdictView b) => b.at.compareTo(a.at));
     }
     final String a = _n(address ?? host.ownAddress());
-    return <PyrVerdictView>[
-      for (final PyrOutsideVerdict v in _outsideVerdicts.values)
-        if (v.pyramid == current &&
-            v.activeAt(now) &&
-            v.addresses.any((String x) => _n(x) == a))
-          PyrVerdictView(
-            id: v.id,
-            kind: v.kind,
-            text: v.text,
-            at: v.at,
-            until: v.until,
-            name: v.name,
-          ),
-    ]..sort((PyrVerdictView a, PyrVerdictView b) => b.at.compareTo(a.at));
+    final List<PyrVerdictView> out = <PyrVerdictView>[];
+    for (final PyrOutsideVerdict v in _outsideVerdicts.values) {
+      if (v.pyramid != current ||
+          !v.activeAt(now) ||
+          !v.addresses.any((String x) => _n(x) == a)) {
+        continue;
+      }
+      // Only friends now: a former friend's word no longer counts here.
+      final List<String> by = <String>[
+        for (final String k in v.standing)
+          if (host.isFriend(k)) host.nameOf(k),
+      ]..sort();
+      if (by.isEmpty) {
+        continue;
+      }
+      out.add(
+        PyrVerdictView(
+          id: v.id,
+          kind: v.kind,
+          text: v.text,
+          at: v.at,
+          until: v.until,
+          name: v.name,
+          by: by,
+        ),
+      );
+    }
+    return out
+      ..sort((PyrVerdictView a, PyrVerdictView b) => b.at.compareTo(a.at));
   }
 
   /// The verdicts as a friend outside the pyramid gets them: each with
@@ -6741,31 +6788,38 @@ final class PyramidService extends ChangeNotifier {
     }
   }
 
-  /// The newest change of the verdicts read from outside, per pyramid.
-  Map<String, int> _verdictsSince() {
+  /// The newest change of the verdicts the friend at [friend] passed on
+  /// here, per pyramid: it sends what is newer. Each friend's word counts
+  /// apart, so each is asked from what it sent itself.
+  Map<String, int> _verdictsSince(String friend) {
+    final String f = _n(friend);
     final Map<String, int> out = <String, int>{};
     for (final PyrOutsideVerdict v in _outsideVerdicts.values) {
-      if ((out[v.pyramid] ?? -1) < v.changedAt) {
-        out[v.pyramid] = v.changedAt;
+      final int? at = v.by[f];
+      if (at != null && (out[v.pyramid] ?? -1) < at) {
+        out[v.pyramid] = at;
       }
     }
     return out;
   }
 
   /// Verdicts a friend who is a member passed on (this person is not one):
-  /// kept when the court's signatures hold; an address only from a record
-  /// the accused signed; overturned only with the accused's appeal and an
-  /// answer accepting it signed by somebody else — once overturned it
-  /// stays so, and a verdict once here is never taken back by a friend's
-  /// word.
+  /// kept when the signatures hold, as that friend's word ([PyrOutsideVerdict.
+  /// by]) — this phone holds no record of the pyramid, so it cannot tell
+  /// the court's cards from any key; an address only from a record the
+  /// accused signed. That friend's word that it was overturned (the
+  /// accused's appeal and an answer accepting it signed by somebody else)
+  /// takes back that friend's word alone and for good: another friend who
+  /// passed it on still stands by it, whoever sends an overturning.
   Future<void> _onOutsideVerdicts(String from, List<Object?> list) async {
     if (isMember) {
       return;
     }
+    final String src = _n(from);
     final int t = _now();
     bool changed = false;
     for (final Object? item in list.take(kPyrVerdictBatch)) {
-      final PyrOutsideVerdict? v = PyrOutsideVerdict.fromJson(item, from: from);
+      final PyrOutsideVerdict? v = PyrOutsideVerdict.fromJson(item);
       if (v == null ||
           v.pyramid != current ||
           current == null ||
@@ -6789,18 +6843,36 @@ final class PyramidService extends ChangeNotifier {
         }
       }
       addrs.sort((PyramidRecord a, PyramidRecord b) => b.at.compareTo(a.at));
+      final Map<String, int> by = <String, int>{...?had?.by};
+      if (!by.containsKey(src) &&
+          (by.length >= kPyrVerdictSources ||
+              _outsideVerdicts.values
+                      .where((PyrOutsideVerdict x) => x.by.containsKey(src))
+                      .length >=
+                  kPyrVerdictsPerFriend)) {
+        // Enough friends' words kept for it already, or this friend's word
+        // already stands for its share.
+        continue;
+      }
+      by[src] = max(by[src] ?? 0, v.changedAt);
       List<PyramidRecord> overturn = had?.overturn ?? const <PyramidRecord>[];
-      if (overturn.isEmpty &&
+      final Set<String> down = <String>{...?had?.overturnedBy};
+      if (!down.contains(src) &&
           v.overturn.length == 2 &&
           await _overturnHolds(v, v.overturn[0], v.overturn[1])) {
-        overturn = v.overturn;
+        down.add(src);
+        if (overturn.isEmpty) {
+          overturn = v.overturn;
+        }
       }
       final PyrOutsideVerdict next = PyrOutsideVerdict(
         record: had?.record ?? v.record,
-        name: v.name.isEmpty ? had?.name ?? '' : v.name,
+        // The pseudonym is a friend's word too: the first one stays.
+        name: (had?.name ?? '').isEmpty ? v.name : had!.name,
         addrRecords: addrs.take(kPyrVerdictAddrRecords).toList(),
         overturn: overturn,
-        from: from,
+        by: by,
+        overturnedBy: down,
       );
       if (had == null ||
           jsonEncode(had.toJson()) != jsonEncode(next.toJson())) {

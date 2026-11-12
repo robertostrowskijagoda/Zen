@@ -721,13 +721,20 @@ class PyramidWallet extends StatelessWidget {
     ),
   );
 
+  /// Why an operation most treasurers signed counts nowhere, in plain
+  /// words ([PyrUncounted]).
+  static String _uncountedText(PyrUncounted u) => u.leftOutOfSeal
+      ? t('nie liczy się: skarbnicy pominęli ją w pieczęci jej ery')
+      : t('nie liczy się: większość skarbników podpisała ją wbrew zasadom');
+
   /// One line of the history: what came in (+), what went out (−), and
-  /// what only waits or went back (no sign).
-  Widget _entry(ZenColors zen, PyrLedgerEntry e) {
+  /// what only waits or went back (no sign); with [uncounted], an
+  /// operation that counts nowhere, and why.
+  Widget _entry(ZenColors zen, PyrLedgerEntry e, {String? uncounted}) {
     final bool incoming = e.to == me;
     // Not money until the treasurers' agreed statement lists it.
-    final bool waits = pyr.awaitingConfirmation(e.id);
-    final int sign = waits
+    final bool waits = uncounted == null && pyr.awaitingConfirmation(e.id);
+    final int sign = waits || uncounted != null
         ? 0
         : switch (e.kind) {
             PyrEntryKind.payment => incoming ? 1 : -1,
@@ -743,20 +750,25 @@ class PyramidWallet extends StatelessWidget {
       }),
       _ => t('dla {name}', <String, Object?>{'name': pyrAccountName(s, e.to)}),
     };
-    final String what = waits
-        ? t('czeka na potwierdzenie skarbników')
-        : switch (e.kind) {
-            PyrEntryKind.hold => t('(warunkowo)'),
-            PyrEntryKind.kept => t('przyjęta'),
-            PyrEntryKind.returned => t('zwrot'),
-            _ => '',
-          };
-    final Color color = sign > 0
+    final String what =
+        uncounted ??
+        (waits
+            ? t('czeka na potwierdzenie skarbników')
+            : switch (e.kind) {
+                PyrEntryKind.hold => t('(warunkowo)'),
+                PyrEntryKind.kept => t('przyjęta'),
+                PyrEntryKind.returned => t('zwrot'),
+                _ => '',
+              });
+    final Color color = uncounted != null
+        ? zen.danger
+        : sign > 0
         ? zen.success
         : sign < 0
         ? zen.danger
         : zen.textMuted;
     return Padding(
+      key: uncounted == null ? null : Key('pyr-uncounted-${e.id}'),
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       child: Row(
         children: <Widget>[
@@ -768,7 +780,9 @@ class PyramidWallet extends StatelessWidget {
               color: color.withValues(alpha: 0.14),
             ),
             child: Icon(
-              sign > 0
+              uncounted != null
+                  ? Icons.block_rounded
+                  : sign > 0
                   ? Icons.south_west_rounded
                   : sign < 0
                   ? Icons.north_east_rounded
@@ -816,9 +830,14 @@ class PyramidWallet extends StatelessWidget {
                 ? '−'
                 : ''}${formatMoney(e.amount)}',
             style: TextStyle(
-              color: sign > 0 ? zen.success : zen.textPrimary,
+              color: sign > 0
+                  ? zen.success
+                  : uncounted != null
+                  ? zen.textMuted
+                  : zen.textPrimary,
               fontSize: 15,
               fontWeight: FontWeight.w700,
+              decoration: uncounted != null ? TextDecoration.lineThrough : null,
             ),
           ),
         ],
@@ -842,8 +861,25 @@ class PyramidWallet extends StatelessWidget {
           (PyrEscrow e) => e.settled == null && e.from == me && now >= e.until,
         )
         .toList();
-    final List<PyrLedgerEntry> mine = pyr.myEntries.reversed.toList();
     final bool treasurer = s.treasurers.contains(me);
+    // The history, newest first, with what most treasurers signed and
+    // counts nowhere (left out of a seal, against the rules): said so.
+    final List<(PyrLedgerEntry, String?)> mine =
+        <(PyrLedgerEntry, String?)>[
+          for (final PyrLedgerEntry e in pyr.myEntries) (e, null),
+          for (final PyrUncounted u in pyr.myUncounted)
+            (u.entry, _uncountedText(u)),
+        ]..sort(
+          ((PyrLedgerEntry, String?) a, (PyrLedgerEntry, String?) b) =>
+              b.$1.at.compareTo(a.$1.at),
+        );
+    // On a treasurer's whole ledger: how many of everybody's.
+    final List<PyrUncounted> uncounted = treasurer
+        ? pyr.uncountedOps
+        : const <PyrUncounted>[];
+    final int leftOut = uncounted
+        .where((PyrUncounted u) => u.leftOutOfSeal)
+        .length;
     final PyrStatement? agreed = pyr.agreedStatement;
     final int agreeing = agreed == null
         ? 0
@@ -1342,7 +1378,8 @@ class PyramidWallet extends StatelessWidget {
           else
             ZenGroup(
               children: <Widget>[
-                for (final PyrLedgerEntry e in mine.take(100)) _entry(zen, e),
+                for (final (PyrLedgerEntry e, String? why) in mine.take(100))
+                  _entry(zen, e, uncounted: why),
               ],
             ),
           ZenSection(
@@ -1538,6 +1575,52 @@ class PyramidWallet extends StatelessWidget {
               text: cheaters.keys
                   .map((String k) => '• ${pyrWho(s, k)}')
                   .join('\n'),
+            ),
+          ],
+          // Public, like the seals: every member sees it.
+          if (s.sealCheaters.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            ZenInfo(
+              key: const Key('pyr-seal-cheaters'),
+              icon: Icons.warning_amber_rounded,
+              tone: zen.danger,
+              title: t(
+                'Dowody: skarbnik podpisał dwie różne pieczęcie jednej ery',
+              ),
+              text: (s.sealCheaters.keys.toList()..sort())
+                  .map((String k) => '• ${pyrWho(s, k)}')
+                  .join('\n'),
+            ),
+          ],
+          if (uncounted.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            ZenInfo(
+              key: const Key('pyr-uncounted'),
+              icon: Icons.block_rounded,
+              tone: zen.danger,
+              title: t('Operacje, które się nie liczą'),
+              text: <String>[
+                if (leftOut > 0)
+                  tn(
+                    leftOut,
+                    one:
+                        'Pieczęć ery pominęła {n} operację, którą podpisała większość skarbników: nie liczy się.',
+                    few:
+                        'Pieczęcie er pominęły {n} operacje, które podpisała większość skarbników: nie liczą się.',
+                    many:
+                        'Pieczęcie er pominęły {n} operacji, które podpisała większość skarbników: nie liczą się.',
+                  ),
+                if (uncounted.length > leftOut)
+                  tn(
+                    uncounted.length - leftOut,
+                    one:
+                        'Większość skarbników podpisała {n} operację wbrew zasadom: nie liczy się.',
+                    few:
+                        'Większość skarbników podpisała {n} operacje wbrew zasadom: nie liczą się.',
+                    many:
+                        'Większość skarbników podpisała {n} operacji wbrew zasadom: nie liczą się.',
+                  ),
+              ].join('\n'),
             ),
           ],
           const SizedBox(height: 8),
