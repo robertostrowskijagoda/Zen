@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -8,6 +9,8 @@ import 'package:zen/src/features/meet/presentation/circle_screen.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+
+import '../tool/i18n/scanner.dart';
 
 String addr(String n) => PeerShareCodec.normalizeAddress('200::$n');
 
@@ -361,7 +364,7 @@ void main() {
     },
   );
 
-  test('kitty amounts are read in złoty and shown with a comma', () {
+  test('kitty amounts are plain numbers, read with two decimals', () {
     expect(parseKittyCents('12'), 1200);
     expect(parseKittyCents(' 12,50 '), 1250);
     expect(parseKittyCents('12.5'), 1250);
@@ -374,5 +377,16 @@ void main() {
     expect(formatKitty(2550), '25,50');
     expect(formatKitty(5), '0,05');
     expect(formatKitty(-1200), '-12,00');
+  });
+
+  test('no text of the app names a currency: amounts carry none', () {
+    // Dinner-circle and food amounts are stored as plain numbers, so a text
+    // that writes "zł" next to one would be wrong in every other country.
+    final I18nScan scan = scanI18nDirectory(
+      Directory('lib'),
+      root: Directory.current,
+    );
+    final RegExp currency = RegExp(r'(^|[\s(])zł($|[\s.,?!)])');
+    expect(scan.entries.keys.where(currency.hasMatch).toList(), isEmpty);
   });
 }
