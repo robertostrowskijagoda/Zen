@@ -416,7 +416,7 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            _title(zen, t('Lista osób z kręgu')),
+            _title(zen, t('Lista bliskich znajomych z kawałkami klucza')),
             const SizedBox(height: 4),
             Text(
               t(

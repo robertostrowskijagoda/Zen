@@ -233,7 +233,7 @@ class AccountCopyActions extends StatelessWidget {
     super.key,
   });
 
-  /// "Odzyskaj z pomocą kręgu" (hidden when null).
+  /// "Odzyskaj z pomocą bliskich znajomych" (hidden when null).
   final VoidCallback? circle;
 
   /// Instead of opening a way back here (the first start: it opens once
@@ -315,7 +315,7 @@ class AccountCopyActions extends StatelessWidget {
             button(
               'account-restore-circle-open',
               Icons.groups_2_outlined,
-              t('Odzyskaj z pomocą kręgu'),
+              t('Odzyskaj z pomocą bliskich znajomych'),
               circle!,
             ),
           const SizedBox(height: 4),

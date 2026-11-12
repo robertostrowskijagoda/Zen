@@ -213,9 +213,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     }
     await service.beginRecovery();
     return t(
-      'Odzyskiwanie rozpoczęte. Wpisz kody osób z kręgu, które Ci pomogą: '
-      'ich urządzenia dostaną prośbę o pomoc. Możesz też pokazać im kod '
-      'tego urządzenia.',
+      'Odzyskiwanie rozpoczęte. Wpisz kody bliskich znajomych, którzy Ci '
+      'pomogą: ich urządzenia dostaną prośbę o pomoc. Możesz też pokazać im '
+      'kod tego urządzenia.',
     );
   }
 
@@ -653,8 +653,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           Icons.check_circle_outline_rounded,
           zen.success,
           t(
-            'Wraca: znajomi i grupy, z kopii u osób z kręgu, które oddały '
-            'klucze',
+            'Wraca: znajomi i grupy, z kopii u bliskich znajomych, którzy '
+            'oddali części klucza',
           ),
         ),
         _scopeLine(
@@ -719,7 +719,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       text: t(
         'Uwaga: przyszły klucze do różnych kont. Ktoś mógł podesłać klucze '
         'do cudzego konta, żeby przejąć to urządzenie. Przejmij tylko '
-        'konto, którego odcisk potwierdzi osoba z kręgu.',
+        'konto, którego odcisk potwierdzi bliski znajomy.',
       ),
     ),
   );
@@ -745,7 +745,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
         _paragraph(
           zen,
           t(
-            'Osoba z kręgu widzi odcisk Twojego konta u siebie (Konto '
+            'Bliski znajomy widzi odcisk Twojego konta u siebie (Konto '
             'i odzyskiwanie → Przechowujesz klucze dla). Porównajcie go, '
             'najlepiej na żywo albo przez telefon. Przejmij konto tylko, '
             'jeśli się zgadza.',
@@ -938,9 +938,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
               key: const Key('recovery-pieces-legacy'),
               icon: Icons.history_rounded,
               text: t(
-                'Dotychczasowy krąg działa, dopóki nowe kawałki nie potwierdzi '
-                '{t} przyjaciół. Potem jego osoby dostaną prośbę o usunięcie '
-                'starych kawałków.',
+                'Dotychczasowe kawałki klucza działają, dopóki nowych nie '
+                'potwierdzi {t} przyjaciół. Potem ich posiadacze dostaną '
+                'prośbę o usunięcie starych kawałków.',
                 <String, Object?>{
                   't': pieces ? g.threshold : kRecoveryCircleMinimum,
                 },
@@ -1135,7 +1135,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             const SizedBox(height: 8),
             Text(
               t(
-                'Osoby z kręgu wpisują ten kod albo skanują QR w „Pomóż '
+                'Bliscy znajomi wpisują ten kod albo skanują QR w „Pomóż '
                 'odzyskać”. Kod nie jest tajny.',
               ),
               style: TextStyle(color: zen.textSecondary, fontSize: 13),
@@ -1442,8 +1442,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           icon: Icons.warning_amber_rounded,
                           text: t(
                             'Zapamiętaj hasło konta: bez niego konta nie da '
-                            'się odzyskać, nawet ze wszystkimi znajomymi z '
-                            'kręgu. Zen go nie zna i nie przypomni.',
+                            'się odzyskać, nawet ze wszystkimi bliskimi '
+                            'znajomymi. Zen go nie zna i nie przypomni.',
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -1483,8 +1483,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                               tone: zen.warning,
                               title: t('Ktoś prosi o pomoc w odzyskaniu konta'),
                               text: t(
-                                'Nowe urządzenie podało Cię jako osobę z kręgu '
-                                '({time}). Pomóż tylko, jeśli wiesz na pewno, '
+                                'Nowe urządzenie wskazało Cię jako bliskiego '
+                                'znajomego, który ma pomóc ({time}). Pomóż '
+                                'tylko, jeśli wiesz na pewno, '
                                 'kto to jest — najlepiej porozmawiaj na żywo '
                                 'albo przez telefon i porównajcie odcisk konta.',
                                 <String, Object?>{'time': _when(r.at)},
@@ -1613,7 +1614,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             zen,
                             t(
                               'Najpierw zacznij odzyskiwanie: dopiero wtedy to '
-                              'urządzenie przyjmuje klucze od osób z kręgu.',
+                              'urządzenie przyjmuje części klucza od bliskich '
+                              'znajomych.',
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -1676,7 +1678,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                                   autocorrect: false,
                                   enableSuggestions: false,
                                   decoration: InputDecoration(
-                                    labelText: t('Kod osoby z kręgu'),
+                                    labelText: t('Kod bliskiego znajomego'),
                                     hintText: t('Kod, link albo QR tej osoby'),
                                     prefixIcon: const Icon(
                                       Icons.person_add_alt_1_rounded,
@@ -1787,8 +1789,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           zen,
                           t(
                             'Kopia klucza (kartka z kodem albo plik z hasłem) '
-                            'przywraca konto na nowym telefonie, nawet gdy nikt '
-                            'z kręgu nie pomoże. Znajomi, grupy i teksty rozmów '
+                            'przywraca konto na nowym telefonie, nawet gdy '
+                            'żaden bliski znajomy nie pomoże. Znajomi, grupy i '
+                            'teksty rozmów '
                             'wracają potem z kopii u znajomych, jeśli ją masz. '
                             'To nie jest kopia całego konta: zdjęć i plików z '
                             'rozmów nie przywróci. Kto ma kartkę albo plik '

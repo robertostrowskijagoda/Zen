@@ -611,9 +611,15 @@ Future<List<RecoveryPiece>> createRecoveryPieces({
     throw ArgumentError(
       tn(
         kRecoveryCircleMinimum,
-        one: 'Do odzyskiwania potrzeba co najmniej {n} osoby w kręgu.',
-        few: 'Do odzyskiwania potrzeba co najmniej {n} osób w kręgu.',
-        many: 'Do odzyskiwania potrzeba co najmniej {n} osób w kręgu.',
+        one:
+            'Do odzyskiwania potrzeba co najmniej {n} osoby wśród bliskich '
+            'znajomych.',
+        few:
+            'Do odzyskiwania potrzeba co najmniej {n} osób wśród bliskich '
+            'znajomych.',
+        many:
+            'Do odzyskiwania potrzeba co najmniej {n} osób wśród bliskich '
+            'znajomych.',
       ),
     );
   }

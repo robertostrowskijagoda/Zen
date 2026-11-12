@@ -114,9 +114,10 @@ Map<int, String> accountRestoreNotes() => <int, String>{
     'powiadomienia, pamięć) zostają na nim.',
   ),
   7: t(
-    'Hasła i notatki wracają z kopii u znajomych, także bez kręgu; hasła '
-    'tylko wtedy, gdy ich tam nie wyłączysz („Hasła w kopii u znajomych”). '
-    'Kto nie ma żadnego znajomego w Zen, po samym kluczu ich nie odzyska.',
+    'Hasła i notatki wracają z kopii u znajomych, także bez pomocy bliskich '
+    'znajomych; hasła tylko wtedy, gdy ich tam nie wyłączysz („Hasła w kopii '
+    'u znajomych”). Kto nie ma żadnego znajomego w Zen, po samym kluczu ich '
+    'nie odzyska.',
   ),
 };
 
@@ -178,8 +179,9 @@ class AccountRestoreInfoScreen extends StatelessWidget {
               Text(
                 t(
                   'Konto wraca na kilka sposobów. Najwięcej daje drugie '
-                  'urządzenie albo plik kopii całego konta; krąg odzyskiwania i '
-                  'klucz pomogą, gdy nie masz żadnego z nich.',
+                  'urządzenie albo plik kopii całego konta; bliscy znajomi '
+                  'z kawałkami klucza i kopia klucza pomogą, gdy nie masz '
+                  'żadnego z nich.',
                 ),
                 style: TextStyle(color: zen.textSecondary, height: 1.4),
               ),

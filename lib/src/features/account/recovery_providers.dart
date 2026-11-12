@@ -134,8 +134,9 @@ final Provider<RecoveryService?> recoveryServiceProvider =
               'recovery-help-${request.from}',
               t('Ktoś prosi o pomoc w odzyskaniu konta'),
               t(
-                'Nowe urządzenie podało Cię jako osobę z kręgu. Zanim '
-                'pomożesz, upewnij się (najlepiej na żywo), kto to jest: '
+                'Nowe urządzenie wskazało Cię jako bliskiego znajomego, '
+                'który ma pomóc. Zanim pomożesz, upewnij się (najlepiej na '
+                'żywo), kto to jest: '
                 'Ustawienia → Konto i odzyskiwanie.',
               ),
             ),

@@ -71,7 +71,7 @@ String recoveryCircleListText({
   int threshold = kNormalThreshold,
 }) {
   final StringBuffer out = StringBuffer()
-    ..writeln(t('Zen — krąg odzyskiwania'))
+    ..writeln(t('Zen — odzyskiwanie z pomocą bliskich znajomych'))
     ..writeln(
       t('Odcisk konta: {fingerprint}', <String, Object?>{
         'fingerprint': fingerprint,

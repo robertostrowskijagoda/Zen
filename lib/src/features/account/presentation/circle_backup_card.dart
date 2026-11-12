@@ -109,16 +109,14 @@ class CircleBackupCard extends ConsumerWidget {
                 text: passwords
                     ? t(
                         'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, '
-                        'którzy są Twoimi skrzynkami, i bliscy znajomi) oraz '
-                        'osoby z kręgu odzyskiwania, jeśli go masz: profil, '
+                        'którzy są Twoimi skrzynkami, i bliscy znajomi): profil, '
                         'znajomych, grupy, ustawienia, piramidę, hasła, '
                         'notatki, a także teksty rozmów. Nie mogą jej '
                         'odczytać. Po odzyskaniu konta Zen sam ją pobierze.',
                       )
                     : t(
                         'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, '
-                        'którzy są Twoimi skrzynkami, i bliscy znajomi) oraz '
-                        'osoby z kręgu odzyskiwania, jeśli go masz: profil, '
+                        'którzy są Twoimi skrzynkami, i bliscy znajomi): profil, '
                         'znajomych, grupy, ustawienia, piramidę, notatki, a '
                         'także teksty rozmów — bez haseł. Nie mogą jej '
                         'odczytać. Po odzyskaniu konta Zen sam ją pobierze.',
