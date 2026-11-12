@@ -1682,6 +1682,7 @@ Map<String, dynamic> _buildOutgoingTextPayload({
   required String text,
   required int sentAtMillis,
   int ttl = 0,
+  int ttlAt = 0,
 }) {
   return <String, dynamic>{
     'type': 'message',
@@ -1690,8 +1691,10 @@ Map<String, dynamic> _buildOutgoingTextPayload({
     'createdAt': DateTime.fromMillisecondsSinceEpoch(
       sentAtMillis,
     ).toUtc().toIso8601String(),
-    // Disappearing messages: the sender's timer.
+    // Disappearing messages: the sender's timer, and when it was set (so
+    // an older setting arriving late does not undo a newer one).
     if (ttl > 0) 'ttl': ttl,
+    if (ttlAt > 0) kDisappearSetAtKey: ttlAt,
   };
 }
 

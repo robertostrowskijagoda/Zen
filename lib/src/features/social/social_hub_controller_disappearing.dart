@@ -32,10 +32,16 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     final String canonical = _disappearKey(key);
     final int now = DateTime.now().millisecondsSinceEpoch;
     bool changed = false;
+    int setAt = now;
     await _enqueueStateWork(() async {
+      if (state.disappearSecondsFor(canonical) == value) {
+        return;
+      }
+      setAt = laterDisappearStamp(state.disappearSetAtFor(canonical), now);
       changed = await _storeDisappearTimer(
         canonical,
         value,
+        setAt: setAt,
         note: value == 0
             ? t('Wyłączono znikające wiadomości.')
             : t('Włączono znikające wiadomości: {duration}.', {
@@ -50,7 +56,9 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     final Map<String, dynamic> payload = <String, dynamic>{
       'type': 'disappear_timer',
       'seconds': value,
-      'at': now,
+      // When it was set: the friend (and every member) keeps whichever
+      // setting is the later one.
+      'at': setAt,
     };
     if (canonical.startsWith('group:')) {
       final String groupId = canonical.substring(6);
@@ -82,29 +90,47 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     await _sendFriendLifecycleSignal(peerAddress: canonical, payload: payload);
   }
 
-  /// Stores the timer; `true` when it changed. Runs inside the state queue.
+  /// Stores the timer set at [setAt] (null: not known, from Zen 1.16.5);
+  /// `true` when it changed. The same timer set later only takes the later
+  /// time, quietly. Runs inside the state queue.
   Future<bool> _storeDisappearTimer(
     String key,
     int seconds, {
+    required int? setAt,
     required String note,
     required int timestamp,
   }) async {
-    if (state.disappearSecondsFor(key) == seconds) {
+    final bool same = state.disappearSecondsFor(key) == seconds;
+    if (same && (setAt == null || setAt <= state.disappearSetAtFor(key))) {
       return false;
     }
-    final Map<String, int> timers =
-        Map<String, int>.of(state.disappearingTimers)..removeWhere(
-          (String k, int _) =>
-              k == key ||
-              (!key.startsWith('group:') &&
-                  !k.startsWith('group:') &&
-                  PeerShareCodec.addressesEqual(k, key)),
-        );
+    bool sameConversation(String k, int _) =>
+        k == key ||
+        (!key.startsWith('group:') &&
+            !k.startsWith('group:') &&
+            PeerShareCodec.addressesEqual(k, key));
+    final Map<String, int> timers = Map<String, int>.of(
+      state.disappearingTimers,
+    )..removeWhere(sameConversation);
+    final Map<String, int> setAts = Map<String, int>.of(
+      state.disappearTimersSetAt,
+    );
+    if (setAt != null) {
+      setAts
+        ..removeWhere(sameConversation)
+        ..[key] = setAt;
+    }
     // Kept at 0 when switched off: messages stamped earlier still expire,
     // and the sweep knows to look here.
     timers[key] = seconds;
-    state = state.copyWith(disappearingTimers: timers);
+    state = state.copyWith(
+      disappearingTimers: timers,
+      disappearTimersSetAt: setAts,
+    );
     await _persistState();
+    if (same) {
+      return false;
+    }
     await _appendSystemMessage(
       peerAddress: key,
       text: note,
@@ -133,19 +159,45 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     return friend.address;
   }
 
+  /// A friend's (or a member's) `disappear_timer`: stamped with when they
+  /// set it (`at`, also from Zen 1.16.5).
   @override
-  Future<void> _handleDisappearTimer(ZenSignal signal, int timestamp) async {
+  Future<void> _handleDisappearTimer(ZenSignal signal, int timestamp) =>
+      _takeDisappearTimer(
+        signal,
+        timestamp,
+        setAt: sanitizeDisappearSetAt(signal.sentAtMillis),
+      );
+
+  /// The timer [signal] brings from its sender, set at [setAt] (null: not
+  /// told): taken only when it is a later setting than the one here
+  /// ([replacesDisappearTimer]). A message written before a change and
+  /// arriving after it brings an older setting and changes nothing.
+  Future<void> _takeDisappearTimer(
+    ZenSignal signal,
+    int timestamp, {
+    required int? setAt,
+  }) async {
     final String? key = _disappearKeyForSignal(signal);
     if (key == null) {
       return;
     }
     final int seconds = sanitizeDisappearSeconds(signal.disappearSeconds);
+    if (!replacesDisappearTimer(
+      seconds: seconds,
+      setAt: setAt,
+      knownSeconds: state.disappearSecondsFor(key),
+      knownAt: state.disappearSetAtFor(key),
+    )) {
+      return;
+    }
     final String who = key.startsWith('group:')
         ? (_groupMemberLabel(key.substring(6), signal.sender))
         : _labelFor(signal, friends: state.friends);
     await _storeDisappearTimer(
       key,
       seconds,
+      setAt: setAt,
       note: seconds == 0
           ? t('{name} wyłączył(a) znikające wiadomości.', {'name': who})
           : t('{name} włączył(a) znikające wiadomości: {duration}.', {
@@ -156,20 +208,19 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     );
   }
 
-  /// A message arrived with the sender's timer: a change missed earlier
-  /// catches up here (only switching on or changing — "off" travels with
-  /// the timer signal, so an old message cannot switch it off).
+  /// A message arrived with the sender's timer and when it was set: a
+  /// change missed earlier catches up here, switching off included, and an
+  /// older setting than the one here changes nothing. A message from Zen
+  /// 1.16.5 tells no time: it only switches on or changes a timer nobody
+  /// set since (as it did), never one set later, and never switches off.
   @override
   Future<void> _adoptDisappearTimerOf(ZenSignal signal, int timestamp) async {
-    final int seconds = sanitizeDisappearSeconds(signal.disappearSeconds);
-    if (seconds <= 0) {
+    final int? setAt = sanitizeDisappearSetAt(signal.disappearSetAt);
+    if (setAt == null &&
+        sanitizeDisappearSeconds(signal.disappearSeconds) <= 0) {
       return;
     }
-    final String? key = _disappearKeyForSignal(signal);
-    if (key == null || state.disappearSecondsFor(key) == seconds) {
-      return;
-    }
-    await _handleDisappearTimer(signal, timestamp);
+    await _takeDisappearTimer(signal, timestamp, setAt: setAt);
   }
 
   String _groupMemberLabel(String groupId, String address) {
@@ -188,8 +239,10 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
     return friend != null ? state.nameFor(friend) : t('Ktoś z grupy');
   }
 
-  /// Another device of this account changed a timer: same here, quietly
-  /// (it told the friend already).
+  /// Another device of this account changed a timer (or sent a message
+  /// with it): same here, quietly (it told the friend already), unless a
+  /// later setting is here already. [payload] is the `disappear_timer`
+  /// signal (`seconds`, `at`) or what a message carried.
   @override
   Future<void> _applyMirroredDisappearTimer(
     String peerAddress,
@@ -210,10 +263,20 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
       key = friend.address;
     }
     final int seconds = sanitizeDisappearSeconds(payload['seconds']);
+    final int? setAt = sanitizeDisappearSetAt(payload['at']);
     await _enqueueStateWork(() async {
+      if (!replacesDisappearTimer(
+        seconds: seconds,
+        setAt: setAt,
+        knownSeconds: state.disappearSecondsFor(key),
+        knownAt: state.disappearSetAtFor(key),
+      )) {
+        return;
+      }
       await _storeDisappearTimer(
         key,
         seconds,
+        setAt: setAt,
         note: seconds == 0
             ? t('Wyłączono znikające wiadomości (na innym urządzeniu).')
             : t(

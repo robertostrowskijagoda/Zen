@@ -189,6 +189,8 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         durationMs: _readInt(payload['durationMs']),
         sentAtMillis: _readTimestamp(payload['createdAt']),
         disappearSeconds: _readInt(payload['ttl']),
+        // When that timer was set (absent before 1.17.0).
+        disappearSetAt: _readInt(payload['ttlAt']),
         miniProfile: _readMiniProfile(payload['mp']),
         chatExtras: _readChatExtras(payload),
       );
@@ -394,6 +396,7 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         displayName: _readName(payload['senderName']),
         sentAtMillis: _readTimestamp(payload['timestamp']),
         disappearSeconds: _readInt(payload['ttl']),
+        disappearSetAt: _readInt(payload['ttlAt']),
         // A file in a group: inline, or as blocks to fetch (`media`).
         messageType: groupType == ChatMessageType.text ? null : groupType,
         attachmentData: _readString(payload['attachmentData']),

@@ -47,6 +47,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'profileSentVersion',
     'callAcceptToken',
     'disappear',
+    'disappearAt',
     'notifyPrivacy',
     'mutedUntil',
     'groupNotifyAll',
@@ -245,6 +246,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         <String, PeerPublicProfile>{};
     int profileSentVersion = 0;
     final Map<String, int> disappearingTimers = <String, int>{};
+    final Map<String, int> disappearTimersSetAt = <String, int>{};
     final Map<String, int> disappearedMessages = <String, int>{};
     final Map<String, NotificationPrivacy> notificationPrivacy =
         <String, NotificationPrivacy>{};
@@ -367,6 +369,15 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         for (final MapEntry<dynamic, dynamic> e in timers.entries) {
           if (e.key is String && e.value is int && (e.value as int) >= 0) {
             disappearingTimers[e.key as String] = e.value as int;
+          }
+        }
+      }
+      // When each timer was set (absent before 1.17.0).
+      final Object? timersSetAt = decoded['disappearAt'];
+      if (timersSetAt is Map) {
+        for (final MapEntry<dynamic, dynamic> e in timersSetAt.entries) {
+          if (e.key is String && e.value is int && (e.value as int) > 0) {
+            disappearTimersSetAt[e.key as String] = e.value as int;
           }
         }
       }
@@ -502,6 +513,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: peerProfiles,
       profileSentVersion: profileSentVersion,
       disappearingTimers: disappearingTimers,
+      disappearTimersSetAt: disappearTimersSetAt,
       disappearedMessages: disappearedMessages,
       notificationPrivacy: notificationPrivacy,
       mutedUntil: mutedUntil,
@@ -696,6 +708,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         // hands it (see `CallSession.acceptToken`).
         'callAcceptToken': ?activeCall?.acceptToken,
         'disappear': state.disappearingTimers,
+        if (state.disappearTimersSetAt.isNotEmpty)
+          'disappearAt': state.disappearTimersSetAt,
         'disappeared': state.disappearedMessages,
         'notifyPrivacy': <String, String>{
           for (final MapEntry<String, NotificationPrivacy> e
@@ -830,6 +844,7 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: Map<String, PeerPublicProfile>.from(state.peerProfiles),
       profileSentVersion: state.profileSentVersion,
       disappearingTimers: Map<String, int>.from(state.disappearingTimers),
+      disappearTimersSetAt: Map<String, int>.from(state.disappearTimersSetAt),
       disappearedMessages: Map<String, int>.from(state.disappearedMessages),
       notificationPrivacy: Map<String, NotificationPrivacy>.from(
         state.notificationPrivacy,

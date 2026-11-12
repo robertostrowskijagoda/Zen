@@ -34,6 +34,51 @@ int sanitizeDisappearSeconds(Object? raw) {
   return raw.clamp(60, kMaxDisappearSeconds);
 }
 
+/// The key under which a message carries when its sender's timer was set
+/// (`ttl` carries the timer itself); the `disappear_timer` signal carries
+/// it as `at`. Zen 1.16.5 and earlier sends no such stamp with a message.
+const String kDisappearSetAtKey = 'ttlAt';
+
+/// When a timer was set, as received (milliseconds since the epoch, on the
+/// clock of whoever set it, see [laterDisappearStamp]); null when there is
+/// none or it is no time at all.
+int? sanitizeDisappearSetAt(Object? raw) {
+  if (raw is! int || raw <= 0 || raw >= (1 << 53)) {
+    return null;
+  }
+  return raw;
+}
+
+/// The stamp of a timer set here at [nowMillis] over one set at [known]:
+/// later than [known] whatever the clocks say, so a change made after
+/// seeing another one always wins over it (a friend whose clock runs ahead
+/// cannot make this person's later change look older).
+int laterDisappearStamp(int known, int nowMillis) =>
+    nowMillis > known ? nowMillis : known + 1;
+
+/// Whether a timer of [seconds] set at [setAt] replaces the one known for a
+/// conversation, [knownSeconds] set at [knownAt] (0: set by Zen 1.16.5 or
+/// earlier, or never). The later setting wins, the same on every phone of
+/// the conversation; two set at the very same millisecond leave the
+/// shorter one (off before any timer), so both sides keep the same. A
+/// setting without a stamp (a message from Zen 1.16.5) is taken only while
+/// none is known: it may still switch the timer on as it did, but it never
+/// undoes a change that was stamped.
+bool replacesDisappearTimer({
+  required int seconds,
+  required int? setAt,
+  required int knownSeconds,
+  required int knownAt,
+}) {
+  if (setAt == null) {
+    return knownAt == 0 && seconds != knownSeconds;
+  }
+  if (setAt != knownAt) {
+    return setAt > knownAt;
+  }
+  return seconds < knownSeconds;
+}
+
 /// How long a disappeared message is remembered after it expired: the
 /// longest a mailbox keeps a copy (two weeks, see `RelayEngine.messageTtl`)
 /// and a day for clocks that differ. A copy can only be on its way that long.

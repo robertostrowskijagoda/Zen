@@ -102,6 +102,7 @@ final class ZenSignal {
     this.inviteId,
     this.cameraOn,
     this.disappearSeconds,
+    this.disappearSetAt,
     this.miniProfile,
     this.chatExtras,
   });
@@ -153,6 +154,12 @@ final class ZenSignal {
   /// conversation, in seconds (0 = off). Carried by messages and by the
   /// `disappear_timer` signal.
   final int? disappearSeconds;
+
+  /// When the sender's timer for the conversation was set, as a chat
+  /// message carries it (`ttlAt`); null from Zen 1.16.5 and earlier, and
+  /// for a conversation whose timer nobody set since. The `disappear_timer`
+  /// signal carries it in [sentAtMillis].
+  final int? disappearSetAt;
 
   /// A message to someone who is not a friend: the sender's mini-profile
   /// (`{n: name, av: photo}`), so the person written to sees who it is.
@@ -207,6 +214,7 @@ final class ZenSignal {
       inviteId: inviteId,
       cameraOn: cameraOn,
       disappearSeconds: disappearSeconds,
+      disappearSetAt: disappearSetAt,
       miniProfile: miniProfile,
       chatExtras: identical(chatExtras, _unset)
           ? this.chatExtras

@@ -42,6 +42,12 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     );
   }
 
+  /// Whether a message another own device sent tells its timer: with when
+  /// it was set (switched off too), or, from Zen 1.16.5, only a timer on.
+  static bool _carriesDisappearTimer(Map<String, dynamic> payload) =>
+      sanitizeDisappearSetAt(payload[kDisappearSetAtKey]) != null ||
+      sanitizeDisappearSeconds(payload['ttl']) > 0;
+
   /// Another device of this account sent [payload] to [peerAddress]: show
   /// it in the conversation here too.
   Future<void> recordMirroredSend(
@@ -86,9 +92,10 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       return;
     }
     final String peer = friend.address;
-    if (sanitizeDisappearSeconds(payload['ttl']) > 0) {
+    if (_carriesDisappearTimer(payload)) {
       await _applyMirroredDisappearTimer(peer, <String, dynamic>{
         'seconds': payload['ttl'],
+        'at': payload[kDisappearSetAtKey],
       });
     }
     final int sentAt =
@@ -130,10 +137,11 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       return;
     }
     final String key = 'group:$groupId';
-    if (sanitizeDisappearSeconds(payload['ttl']) > 0) {
+    if (_carriesDisappearTimer(payload)) {
       await _applyMirroredDisappearTimer(key, <String, dynamic>{
         'groupId': groupId,
         'seconds': payload['ttl'],
+        'at': payload[kDisappearSetAtKey],
       });
     }
     final Object? at = payload['timestamp'];

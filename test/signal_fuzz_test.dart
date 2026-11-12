@@ -135,6 +135,7 @@ const List<String> _keys = <String>[
   'attachmentEncoding',
   'createdAt',
   'ttl',
+  'ttlAt',
   'mp',
   'transferId',
   'fileSize',

@@ -191,6 +191,7 @@ final class SocialHubState {
     this.peerProfiles = const <String, PeerPublicProfile>{},
     this.profileSentVersion = 0,
     this.disappearingTimers = const <String, int>{},
+    this.disappearTimersSetAt = const <String, int>{},
     this.disappearedMessages = const <String, int>{},
     this.notificationPrivacy = const <String, NotificationPrivacy>{},
     this.mutedUntil = const <String, int>{},
@@ -337,6 +338,12 @@ final class SocialHubState {
   /// address or `group:<id>`) → seconds a message lives. Absent = off.
   final Map<String, int> disappearingTimers;
 
+  /// When each timer of [disappearingTimers] was set, on the clock of whoever
+  /// set it (see `laterDisappearStamp`): only a later setting replaces it,
+  /// so a message written before a change and arriving after it does not
+  /// undo the change. Absent (0): set by Zen 1.16.5 or earlier.
+  final Map<String, int> disappearTimersSetAt;
+
   /// Disappearing messages that are gone here (see
   /// `disappearedMessageKey`) → when they expired. A copy that comes late (from a mailbox, or
   /// sent again) is dropped instead of coming back with a new clock; each
@@ -402,13 +409,20 @@ final class SocialHubState {
   int? removedFriendAt(String address) => book.removedAt(address);
 
   /// Seconds messages in conversation [key] live (0 = they stay).
-  int disappearSecondsFor(String key) {
-    final int? direct = disappearingTimers[key];
+  int disappearSecondsFor(String key) =>
+      _conversationValue(disappearingTimers, key);
+
+  /// When the timer of conversation [key] was set (0: not known).
+  int disappearSetAtFor(String key) =>
+      _conversationValue(disappearTimersSetAt, key);
+
+  static int _conversationValue(Map<String, int> values, String key) {
+    final int? direct = values[key];
     if (direct != null || key.startsWith('group:')) {
       return direct ?? 0;
     }
     final String canonical = PeerShareCodec.normalizeAddress(key);
-    for (final MapEntry<String, int> e in disappearingTimers.entries) {
+    for (final MapEntry<String, int> e in values.entries) {
       if (!e.key.startsWith('group:') &&
           PeerShareCodec.addressesEqual(e.key, canonical)) {
         return e.value;
@@ -526,6 +540,7 @@ final class SocialHubState {
     Map<String, PeerPublicProfile>? peerProfiles,
     int? profileSentVersion,
     Map<String, int>? disappearingTimers,
+    Map<String, int>? disappearTimersSetAt,
     Map<String, int>? disappearedMessages,
     Map<String, NotificationPrivacy>? notificationPrivacy,
     Map<String, int>? mutedUntil,
@@ -557,6 +572,7 @@ final class SocialHubState {
       peerProfiles: peerProfiles ?? this.peerProfiles,
       profileSentVersion: profileSentVersion ?? this.profileSentVersion,
       disappearingTimers: disappearingTimers ?? this.disappearingTimers,
+      disappearTimersSetAt: disappearTimersSetAt ?? this.disappearTimersSetAt,
       disappearedMessages: disappearedMessages ?? this.disappearedMessages,
       notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       mutedUntil: mutedUntil ?? this.mutedUntil,

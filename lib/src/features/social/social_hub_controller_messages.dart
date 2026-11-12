@@ -472,6 +472,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
     final int seconds = state.disappearSecondsFor(key);
     final int? ttl = seconds > 0 ? seconds : null;
+    final int setAt = state.disappearSetAtFor(key);
     final List<Future<void>> sends = <Future<void>>[];
     for (final String member in normalizedGroupMembers(group.memberAddresses)) {
       if (localAddr.isNotEmpty &&
@@ -497,6 +498,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             'senderName': senderDisplayName,
             'timestamp': timestamp,
             'ttl': ?ttl,
+            if (setAt > 0) kDisappearSetAtKey: setAt,
             // A reply, forwarding, a file.
             ...extra,
           },
@@ -666,10 +668,21 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           );
           return;
         }
+        final String messageId = _incomingMessageIdOf(signal);
+        // A copy of a message already here (a retry, a mailbox's copy, the
+        // relay layer handing it over again) only has its delivery ack sent
+        // again: its file is not written into the vault once more (a second
+        // file nothing refers to, never deleted), and the timer it carries
+        // is as old as the message.
+        final bool exists = await _timelineHasMessage(
+          peerAddress: signal.sender,
+          messageId: messageId,
+        );
         Uint8List? attachmentBytes;
         StoredAttachment? stored;
         int? attachmentByteCount;
-        if (signal.attachmentData != null &&
+        if (!exists &&
+            signal.attachmentData != null &&
             signal.attachmentData!.isNotEmpty) {
           try {
             attachmentBytes = await _attachmentTransport.decode(
@@ -700,13 +713,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             return;
           }
         }
-        final String messageId = _incomingMessageIdOf(signal);
-        await _adoptDisappearTimerOf(signal, timestamp);
-        final bool exists = await _timelineHasMessage(
-          peerAddress: signal.sender,
-          messageId: messageId,
-        );
         if (!exists) {
+          // Before it is stored: it is stamped with the timer it brings.
+          await _adoptDisappearTimerOf(signal, timestamp);
           await _messageTimelineStore.append(
             signal.sender,
             _withSignalExtras(
@@ -1269,6 +1278,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
               text: text,
               sentAtMillis: sentAtMillis,
               ttl: state.disappearSecondsFor(peerAddress),
+              ttlAt: state.disappearSetAtFor(peerAddress),
             ),
             'mp': ?miniProfile,
             if (reply != null) 're': reply.toJson(),
@@ -1293,6 +1303,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         text: message.text,
         sentAtMillis: message.sentAtMillis,
         ttl: state.disappearSecondsFor(peerAddress),
+        ttlAt: state.disappearSetAtFor(peerAddress),
       ),
       'messageType': message.type.name,
       if (encoded != null) 'attachmentData': encoded.base64Data,
