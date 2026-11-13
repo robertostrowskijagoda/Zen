@@ -174,6 +174,7 @@ Future<int> _run(List<String> args, List<String> passOn) async {
   int failedCount = 0;
   int skipped = 0;
   final List<String> failures = <String>[];
+  final Map<String, String> why = <String, String>{};
   final Map<String, int> took = <String, int>{};
   bool ok = true;
   for (final _GroupResult r in done) {
@@ -184,6 +185,7 @@ Future<int> _run(List<String> args, List<String> passOn) async {
       failedCount += c.failed;
       skipped += c.skipped;
       failures.addAll(c.failures);
+      why.addAll(c.why);
       took.addAll(c.took);
     }
   }
@@ -200,6 +202,15 @@ Future<int> _run(List<String> args, List<String> passOn) async {
     stdout.writeln('Failed:');
     for (final String f in failures) {
       stdout.writeln('  $f');
+      // What it said, here at the very end: the end of a long log is what
+      // gets read and passed on, and the error itself is far above it.
+      final List<String> said = const LineSplitter().convert(why[f] ?? '');
+      for (final String line in said.take(_errorLines)) {
+        stdout.writeln('    | $line');
+      }
+      if (said.length > _errorLines) {
+        stdout.writeln('    | ... (${said.length - _errorLines} more lines)');
+      }
     }
   }
   if (results == null) {
@@ -401,14 +412,31 @@ String _relative(String path) {
   return at < 0 ? p : p.substring(at + 1);
 }
 
-/// Counts, failed tests and how long each file took (from its first test
+/// How many lines of a failed test's error the end of the run repeats.
+const int _errorLines = 30;
+
+/// Counts, failed tests, what each said and how long each file took (from its first test
 /// starting to its last one done) of one JSON reporter file.
 final class _Counts {
-  _Counts(this.passed, this.failed, this.skipped, this.failures, this.took);
+  _Counts(
+    this.passed,
+    this.failed,
+    this.skipped,
+    this.failures,
+    this.why,
+    this.took,
+  );
 
   factory _Counts.read(File file) {
     if (!file.existsSync()) {
-      return _Counts(0, 0, 0, const <String>[], const <String, int>{});
+      return _Counts(
+        0,
+        0,
+        0,
+        const <String>[],
+        const <String, String>{},
+        const <String, int>{},
+      );
     }
     final Map<int, String> suites = <int, String>{};
     final Map<int, String> names = <int, String>{};
@@ -419,6 +447,8 @@ final class _Counts {
     int failed = 0;
     int skipped = 0;
     final List<String> failures = <String>[];
+    final Map<int, String> errors = <int, String>{};
+    final Map<String, String> why = <String, String>{};
     for (final String line in file.readAsLinesSync()) {
       if (!line.startsWith('{')) {
         continue;
@@ -443,6 +473,11 @@ final class _Counts {
           names[t['id']! as int] = (t['name'] as String?) ?? '';
           suiteOf[t['id']! as int] = suite;
           started.putIfAbsent(suite, () => time);
+        case 'error':
+          // The error, then where: the first of a test's errors is the one
+          // that made it fail.
+          final String said = '${e['error']}\n${e['stackTrace']}'.trimRight();
+          errors.putIfAbsent(e['testID']! as int, () => said);
         case 'testDone':
           final int id = e['testID']! as int;
           if (suiteOf[id] case final int suite) {
@@ -458,13 +493,16 @@ final class _Counts {
             passed++;
           } else {
             failed++;
-            failures.add(
-              '${_relative(suites[suiteOf[id]] ?? '')}: ${names[id]}',
-            );
+            final String name =
+                '${_relative(suites[suiteOf[id]] ?? '')}: ${names[id]}';
+            failures.add(name);
+            if (errors[id] case final String error) {
+              why[name] = error;
+            }
           }
       }
     }
-    return _Counts(passed, failed, skipped, failures, <String, int>{
+    return _Counts(passed, failed, skipped, failures, why, <String, int>{
       for (final MapEntry<int, int> s in started.entries)
         if (suites[s.key] case final String path)
           if (ended[s.key] case final int end) _relative(path): end - s.value,
@@ -475,5 +513,6 @@ final class _Counts {
   final int failed;
   final int skipped;
   final List<String> failures;
+  final Map<String, String> why;
   final Map<String, int> took;
 }
