@@ -352,6 +352,7 @@ const List<_Name> _names = <_Name>[
   _Name('recovery/sealed', used: 0.25, min: 150, max: 300),
   _Name('recovery/gen', used: 0.25, min: 120, max: 3000),
   _Name('recovery/out', used: 0.25, min: 200, max: 30000),
+  _Name('recovery/forgot', used: 0.05, min: 90, max: 2000),
 ];
 
 /// What `account/sync/<id>` is kept for (account_state_sync_app.dart).
