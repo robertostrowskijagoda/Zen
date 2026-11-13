@@ -2718,8 +2718,15 @@ final class WebRtcCallMediaSessionController
     }
     RTCSessionDescription desc = original;
     if (_localCameraWanted) {
+      // An answer to an offer whose camera was switched off sends only: a
+      // `sendrecv` there is refused by the other side, and the call ends.
       desc = RTCSessionDescription(
-        forceCameraSectionSendRecv(desc.sdp ?? ''),
+        localCallSdpToSend(
+          sdp: desc.sdp ?? '',
+          type: desc.type,
+          cameraWanted: true,
+          remoteOffer: _lastRemoteOfferSdp,
+        ),
         desc.type,
       );
     }
@@ -2987,7 +2994,23 @@ final class WebRtcCallMediaSessionController
     }
     // VP8 first whatever the other side listed first: this side sends the
     // first of its codecs (see call_video_codecs.dart).
-    final String applied = preferVp8InRemoteSdp(original.sdp ?? '');
+    String applied = preferVp8InRemoteSdp(original.sdp ?? '');
+    // An answer that asks for more than this side's offer allowed (a phone
+    // with its camera on answers `sendrecv` while the camera here was
+    // switched off, as up to 1.17.1) is cut to what the offer allowed:
+    // WebRTC refuses it as it came, and the call would end.
+    final Object? offered = _lastSentOfferDescription?['sdp'];
+    if (original.type == 'answer' && offered is String && offered.isNotEmpty) {
+      final String fitted = fitCameraAnswerToOffer(applied, offered);
+      if (fitted != applied) {
+        logZenMessage(
+          'Call SDP remote answer: camera '
+          '${cameraSectionDirection(applied)} cut to '
+          '${cameraSectionDirection(fitted)} to fit our offer',
+        );
+        applied = fitted;
+      }
+    }
     // Never the peer's original SDP: its candidates carry LAN/public
     // addresses, and ICE could then route the media around the mesh.
     await applyRemoteSdpViaLocalRelay(
@@ -3374,7 +3397,96 @@ final RegExp _hostCandidatePattern = RegExp(
 /// Forces the camera's video section (the first `m=video`) to `sendrecv`,
 /// leaving every other section — the screen slot among them — as WebRTC
 /// produced it.
-String forceCameraSectionSendRecv(String sdp) {
+String forceCameraSectionSendRecv(String sdp) =>
+    _setCameraSectionDirection(sdp, 'sendrecv');
+
+const Set<String> _sdpDirections = <String>{
+  'sendrecv',
+  'sendonly',
+  'recvonly',
+  'inactive',
+};
+
+/// The direction of the camera's video section (the first `m=video`) of
+/// [sdp]: `sendrecv`, `sendonly`, `recvonly` or `inactive`, and `sendrecv`
+/// for a section that names none (the SDP default). Null without a video
+/// section.
+String? cameraSectionDirection(String sdp) {
+  bool inCamera = false;
+  bool seenVideo = false;
+  for (final String raw in sdp.split(RegExp(r'\r?\n'))) {
+    final String line = raw.trim();
+    if (line.startsWith('m=')) {
+      if (inCamera) {
+        return 'sendrecv';
+      }
+      inCamera = !seenVideo && line.startsWith('m=video');
+      seenVideo = seenVideo || line.startsWith('m=video');
+      continue;
+    }
+    if (inCamera &&
+        line.startsWith('a=') &&
+        _sdpDirections.contains(line.substring(2))) {
+      return line.substring(2);
+    }
+  }
+  return inCamera ? 'sendrecv' : null;
+}
+
+/// [answer] with its camera section's direction cut to what the camera
+/// section of the [offer] it answers allows: the answering side sends only
+/// what the offering side receives, and receives only what it sends. The
+/// offering side's WebRTC refuses anything more ("Incompatible send
+/// direction"), and a refused answer ends the call: a `sendrecv` answer to
+/// an offer whose camera was switched off (`recvonly`) becomes `sendonly`.
+/// Every other section stays as it was.
+String fitCameraAnswerToOffer(String answer, String offer) {
+  final String? offered = cameraSectionDirection(offer);
+  final String? answered = cameraSectionDirection(answer);
+  if (offered == null || answered == null) {
+    return answer;
+  }
+  final bool send =
+      answered.startsWith('send') &&
+      (offered == 'sendrecv' || offered == 'recvonly');
+  final bool receive =
+      (answered == 'sendrecv' || answered == 'recvonly') &&
+      offered.startsWith('send');
+  final String fitted = send && receive
+      ? 'sendrecv'
+      : send
+      ? 'sendonly'
+      : receive
+      ? 'recvonly'
+      : 'inactive';
+  if (fitted == answered) {
+    return answer;
+  }
+  return _setCameraSectionDirection(answer, fitted);
+}
+
+/// The local description [sdp] of type [type] as it is set and sent. With
+/// the camera wanted, its section says `sendrecv` (a platform that left it
+/// receive-only would never send the camera); an answer then says no more
+/// than the other side's [remoteOffer] allows ([fitCameraAnswerToOffer]):
+/// with their camera switched off it sends only.
+String localCallSdpToSend({
+  required String sdp,
+  required String? type,
+  required bool cameraWanted,
+  String? remoteOffer,
+}) {
+  if (!cameraWanted) {
+    return sdp;
+  }
+  final String forced = forceCameraSectionSendRecv(sdp);
+  if (type != 'answer' || remoteOffer == null || remoteOffer.isEmpty) {
+    return forced;
+  }
+  return fitCameraAnswerToOffer(forced, remoteOffer);
+}
+
+String _setCameraSectionDirection(String sdp, String direction) {
   if (sdp.isEmpty) {
     return sdp;
   }
@@ -3388,7 +3500,7 @@ String forceCameraSectionSendRecv(String sdp) {
     final String line = raw.trim();
     if (line.startsWith('m=')) {
       if (inCamera && !foundDirection) {
-        result.add('a=sendrecv');
+        result.add('a=$direction');
       }
       inCamera = !seenVideo && line.startsWith('m=video');
       seenVideo = seenVideo || line.startsWith('m=video');
@@ -3397,18 +3509,16 @@ String forceCameraSectionSendRecv(String sdp) {
       continue;
     }
     if (inCamera &&
-        (line == 'a=recvonly' ||
-            line == 'a=sendonly' ||
-            line == 'a=inactive' ||
-            line == 'a=sendrecv')) {
-      result.add('a=sendrecv');
+        line.startsWith('a=') &&
+        _sdpDirections.contains(line.substring(2))) {
+      result.add('a=$direction');
       foundDirection = true;
       continue;
     }
     result.add(raw);
   }
   if (inCamera && !foundDirection) {
-    result.add('a=sendrecv');
+    result.add('a=$direction');
   }
   return result.join(separator);
 }

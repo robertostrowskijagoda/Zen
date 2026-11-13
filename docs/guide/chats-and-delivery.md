@@ -307,7 +307,10 @@ decoded; it is now bound once the system has the stream, and again if
 decoded frames never reach the screen. The microphone, loudspeaker and
 camera buttons work while the call rings, not only once it is active. These
 fixes need both sides on this version; a call with an older Zen keeps the
-old behaviour on that side. The technical log (**Diagnostics**) shows for each call which
+old behaviour on that side. Switching the camera off and on during a call
+keeps the call, sound and all, when one of the two phones has Zen 1.17.5 or
+later; before, the call ended when the other side's camera was on. The
+technical log (**Diagnostics**) shows for each call which
 codecs were offered and how many video frames went out, came in and were
 shown.
 
