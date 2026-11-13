@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.17.0 — 13.11.2026
+
 ### What's new
 - [en] Video calls show the other person's picture every time, and the camera, microphone and speaker buttons work while a call is still ringing.
 - [en] Chats no longer jump under your finger while you scroll, even when a message, a photo or typing arrives.
