@@ -8,7 +8,7 @@
 //   dart run tool/mutation.dart                 every target, 15 changes each
 //   dart run tool/mutation.dart --max 40 --seed 7 --summary FILE
 //   dart run tool/mutation.dart lib/src/features/social/peer_share_codec.dart
-//   dart run tool/mutation.dart --shard 2/3    every third target (CI's jobs)
+//   dart run tool/mutation.dart --shard 2/6    every sixth target (CI's jobs)
 //
 // The changes are picked at random among all possible ones (--seed), so
 // every run looks at others. The file is put back after every change,

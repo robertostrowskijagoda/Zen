@@ -35,6 +35,8 @@
   the runner's own, and a third time; an update that could not name the
   archive is such a failure, with no install after it; every job of
   ci.yml that installs packages goes through it.
+- Mutation testing: no runner of mutation.yml gets more files of
+  tool/mutation_targets.json than fit in its time.
 
 Standard library only.
 """
@@ -627,6 +629,31 @@ class EmulatorCachesTest(unittest.TestCase):
         image = workflow[workflow.index("name: Emulator image"):
                          workflow.index("name: The previous release")]
         self.assertIn("for attempt in 1 2 3; do", image)
+
+
+class MutationRunnersTest(unittest.TestCase):
+    # A runner with 15 files took about 27 minutes (1.16.4); with 30 it did
+    # not end within the job's 45 and every run of 1.16.5 was cut off.
+    MOST_FILES_ON_A_RUNNER = 20
+
+    def test_no_runner_gets_more_files_than_fit_in_its_time(self):
+        with open(os.path.join(ROOT, ".github/workflows/mutation.yml"),
+                  encoding="utf-8") as f:
+            workflow = f.read()
+        parts = [int(n) for n in
+                 re.search(r"shard: \[([0-9, ]+)\]", workflow).group(1).split(",")]
+        self.assertEqual(parts, list(range(1, len(parts) + 1)))
+        self.assertIn("--shard ${{ matrix.shard }}/%d" % len(parts), workflow)
+        self.assertIn("(${{ matrix.shard }} of %d)" % len(parts), workflow)
+        with open(os.path.join(ROOT, "tool/mutation_targets.json"), encoding="utf-8") as f:
+            targets = json.load(f)
+        # As tool/mutation.dart splits them: every PARTS-th target from PART on.
+        for part in parts:
+            run = [t for t in targets[part - 1::len(parts)] if "skip" not in t]
+            self.assertLessEqual(
+                len(run), self.MOST_FILES_ON_A_RUNNER,
+                "part %d of %d: add a runner to the matrix of mutation.yml"
+                % (part, len(parts)))
 
 
 class PinnedActionsTest(unittest.TestCase):
