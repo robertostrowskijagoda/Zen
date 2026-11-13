@@ -2065,6 +2065,7 @@ Future<void> _endWatching(
   final bool? ok = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
+      scrollable: true,
       title: Text(t('Zakończyć czuwanie?')),
       content: Text(
         t(

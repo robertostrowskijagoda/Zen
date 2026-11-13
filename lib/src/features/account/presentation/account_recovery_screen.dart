@@ -970,6 +970,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Mniej osób z kawałkami klucza')),
         content: Column(
           mainAxisSize: MainAxisSize.min,

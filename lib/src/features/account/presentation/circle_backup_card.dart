@@ -230,6 +230,7 @@ class CircleBackupCard extends ConsumerWidget {
     final bool? yes = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Zastąpić kopię u znajomych?')),
         content: Text(
           t(
