@@ -305,7 +305,14 @@
   {
     "file": "lib/src/features/calls/call_video_trace.dart",
     "tests": [
-      "test/call_video_trace_test.dart"
+      "test/call_video_trace_test.dart",
+      "test/call_video_quality_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_video_quality.dart",
+    "tests": [
+      "test/call_video_quality_test.dart"
     ]
   },
   {

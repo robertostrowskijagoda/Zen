@@ -10,11 +10,13 @@ import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_media_devices.dart';
 import 'package:zen/src/features/calls/call_media_e2ee.dart';
+import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_recorder.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/call_video_codecs.dart';
+import 'package:zen/src/features/calls/call_video_quality.dart';
 import 'package:zen/src/features/calls/call_video_trace.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -41,14 +43,6 @@ final class CallMediaDevice {
 typedef CallMediaStatusListener =
     void Function(String callId, CallMediaSessionLifecycle status);
 typedef CallMediaErrorListener = void Function(String? callId, Object error);
-
-/// The most a call's camera sends, in bits per second: a sharp 960 x 540
-/// (up to 1280 x 720) at 24 frames on a good connection. It is a ceiling,
-/// not a rate: WebRTC sends what the path carries, and on a tight one it
-/// lowers the resolution before the frames ([_tuneCameraSenders]). At
-/// 900 kbit/s and 640 x 360 the picture was soft even when both sides had
-/// a fast connection.
-const int kCallVideoMaxBitrate = 1800000;
 
 /// How often the other side's picture is checked while a call's media are
 /// connected and no frame of it reached the screen yet
@@ -1778,6 +1772,7 @@ final class WebRtcCallMediaSessionController
     }
     final MediaStreamTrack fresh = freshTracks.first;
     await localStream.addTrack(fresh);
+    _steadyCamera(fresh);
     RTCRtpSender? videoSender;
     try {
       final List<RTCRtpTransceiver> transceivers = await connection
@@ -1826,6 +1821,30 @@ final class WebRtcCallMediaSessionController
     await _freshKeyFrames(connection);
     _safeSetRendererSrcObject(_localRenderer, localStream);
     _notify();
+  }
+
+  /// On Android, the camera behind [track] kept from slowing down to a few
+  /// frames a second in poor light ([steadyCallCameraFrameRate]), with
+  /// what it was asked for and what it did in the technical log. The call
+  /// does not wait for it: the camera's session comes up a moment after
+  /// its track.
+  void _steadyCamera(MediaStreamTrack track) {
+    final String? id = track.id;
+    if (!Platform.isAndroid || id == null || id.isEmpty) {
+      return;
+    }
+    final Map<String, dynamic> asked = _buildVideoConstraints(
+      deviceId: _selectedCameraId,
+    );
+    unawaitedLogged(
+      steadyCallCameraFrameRate(id).then(
+        (String line) => logZenMessage(
+          'Call camera: asked ${asked['width']}x${asked['height']} at '
+          '${asked['frameRate']} fps; frame rate $line',
+        ),
+      ),
+      context: 'Steadying the call camera failed',
+    );
   }
 
   Future<void> _detachLocalVideoTracks() async {
@@ -2389,6 +2408,9 @@ final class WebRtcCallMediaSessionController
       throw StateError(t('Rozmowa została zamknięta w trakcie zestawiania.'));
     }
     _localStream = localStream;
+    for (final MediaStreamTrack track in localStream.getVideoTracks()) {
+      _steadyCamera(track);
+    }
     _safeSetRendererSrcObject(_localRenderer, localStream);
     _notify();
     if (!isIncoming) {
@@ -2851,6 +2873,9 @@ final class WebRtcCallMediaSessionController
   static const List<Duration> _callStatsDelays = <Duration>[
     Duration(seconds: 4),
     Duration(seconds: 15),
+    // A minute in: whether the picture held up once the camera and the
+    // path settled (rate, quantizer, time held back).
+    Duration(seconds: 60),
   ];
 
   /// At most this many looks a call, so a long call with cameras switched
@@ -2941,10 +2966,11 @@ final class WebRtcCallMediaSessionController
     }
   }
 
-  /// The camera over the mesh: a steady picture rather than a sharp one
-  /// that stalls. Each camera sender is capped ([kCallVideoMaxBitrate], 24
-  /// frames) and gives up sharpness before frames when the path is tight.
-  /// The shared screen keeps its own settings (sharp text matters there).
+  /// The camera over the mesh: a steady picture, sharp while the path
+  /// allows ([tuneCallCameraParameters]: between [kCallVideoMinBitrate]
+  /// and [kCallVideoMaxBitrate] at up to [kCallVideoFrameRate] frames,
+  /// sharpness given up before frames when the path is tight). The shared
+  /// screen keeps its own settings (sharp text matters there).
   Future<void> _tuneCameraSenders(RTCPeerConnection connection) async {
     try {
       for (final RTCRtpSender sender in await connection.getSenders()) {
@@ -2955,17 +2981,9 @@ final class WebRtcCallMediaSessionController
           continue;
         }
         final RTCRtpParameters parameters = sender.parameters;
-        final List<RTCRtpEncoding> encodings =
-            parameters.encodings ?? const <RTCRtpEncoding>[];
-        if (encodings.isEmpty) {
+        if (!tuneCallCameraParameters(parameters)) {
           continue;
         }
-        for (final RTCRtpEncoding encoding in encodings) {
-          encoding.maxBitrate = kCallVideoMaxBitrate;
-          encoding.maxFramerate = 24;
-        }
-        parameters.degradationPreference =
-            RTCDegradationPreference.MAINTAIN_FRAMERATE;
         if (!await sender.setParameters(parameters)) {
           logZenWarning('Call video: the camera sender refused its cap');
         }
@@ -2994,7 +3012,11 @@ final class WebRtcCallMediaSessionController
     }
     // VP8 first whatever the other side listed first: this side sends the
     // first of its codecs (see call_video_codecs.dart).
-    String applied = preferVp8InRemoteSdp(original.sdp ?? '');
+    // The estimate of the path starts where a sharp picture can
+    // (call_video_quality.dart), not at WebRTC's 300 kbit/s.
+    String applied = withCallVideoStartBitrate(
+      preferVp8InRemoteSdp(original.sdp ?? ''),
+    );
     // An answer that asks for more than this side's offer allowed (a phone
     // with its camera on answers `sendrecv` while the camera here was
     // switched off, as up to 1.17.1) is cut to what the offer allowed:
@@ -3705,36 +3727,15 @@ Map<String, dynamic> _buildAudioConstraints({String? deviceId}) {
   };
 }
 
-/// The camera for a call: 960 x 540 at 24 frames (up to 1280 x 720 at
-/// 30). The picture crosses the mesh through a relay and every frame is
-/// encrypted on its way: 720p at 30 frames with nothing to give way came
-/// through late and jerky, so the senders keep the frames and give up
-/// sharpness on a tight path ([kCallVideoMaxBitrate]); on a good one the
-/// picture stays sharp (640 x 360 was soft for everyone).
-Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
-  final bool isMobile = Platform.isAndroid || Platform.isIOS;
-  if (isMobile) {
-    return <String, dynamic>{
-      if (deviceId != null && deviceId.isNotEmpty)
-        'deviceId': deviceId
-      else
-        'facingMode': 'user',
-      'width': <String, dynamic>{'ideal': 960, 'max': 1280},
-      'height': <String, dynamic>{'ideal': 540, 'max': 720},
-      'frameRate': <String, dynamic>{'ideal': 24, 'max': 30},
-    };
-  }
-  return <String, dynamic>{
-    if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
-    if (deviceId != null && deviceId.isNotEmpty)
-      'optional': <Map<String, dynamic>>[
-        <String, dynamic>{'sourceId': deviceId},
-      ],
-    'width': 1280,
-    'height': 720,
-    'frameRate': 24,
-  };
-}
+/// The camera for a call ([callCameraConstraints]): 1280 x 720 at
+/// [kCallVideoFrameRate] frames, in plain numbers, the only form
+/// flutter_webrtc on Android reads (with `{'ideal': …}` maps every call
+/// opened the camera at the plugin's default instead).
+Map<String, dynamic> _buildVideoConstraints({String? deviceId}) =>
+    callCameraConstraints(
+      deviceId: deviceId,
+      mobile: Platform.isAndroid || Platform.isIOS,
+    );
 
 @visibleForTesting
 Map<String, dynamic> buildAudioConstraintsForTesting({String? deviceId}) =>

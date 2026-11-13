@@ -752,6 +752,35 @@ the camera's frames were sealed and opened, the video packets sent and
 received and the frames decoded and shown (`call_video_trace.dart`, lines
 `Call video`).
 
+**Picture** (since 1.17.5, `call_video_quality.dart`): the camera is asked
+for 1280 x 720 at 24 frames in plain numbers (flutter_webrtc on Android
+skips `{ideal: …}` maps, so it had opened every camera at its own default).
+On Android the camera's auto-exposure frame-rate range is pinned once the
+camera runs (`ZenCallCamera.kt`) to the steadiest range the camera offers:
+the highest floor from 15 up to 24 frames (24-24 where there is one), else
+the lowest floor above 24; WebRTC's own pick was the lowest floor (7-30 on
+most phones), and in poor light the camera then sent 5-6 frames, each
+smeared by movement. The camera sender keeps between 150 kbit/s and 2.5
+Mbit/s at up to 24 frames, and keeps its frames before its resolution when
+the path is tight (`MAINTAIN_FRAMERATE`); the estimate of the path starts at
+1 Mbit/s (`x-google-start-bitrate` added to the camera's VP8 and H.264
+formats of the other side's description before it is applied) instead of
+300 kbit/s. What is promised: on a path that carries 1.5 Mbit/s or more
+each way, a sharp 1280 x 720 picture at a steady 24 frames (15 at the least
+in poor light where the camera has no steady range of 24), also when it
+moves; on a worse path the frames keep coming at a lower resolution, and
+below 150 kbit/s the path's own losses decide. A camera sends VP8, in
+software where the phone's WebRTC has no VP8 encoder (the frame encryption
+leaves only VP8 and H.264 readable, and H.264 left pictures black); the
+log line `encoder` says which. The `Call stats` lines (4 s, 15 s and a
+minute after the media connect and after each offer or answer) give the
+camera's size and frames captured, the frames sent with the encoder's aim
+(`target`), its average quantizer (`qp`, above about 80 blocky), how often
+it changed the resolution and how long the processor or the path held it
+back, and for the picture coming in its frames a second and freezes; a
+`Call camera` line says what the camera was asked for and which frame-rate
+range it offered, ran at and was pinned to.
+
 **Group calls** (`groupId` and `callId` mandatory): `group_call_invite`,
 `group_call_join`, `group_call_state`, `group_call_leave`, `group_call_decline`,
 `gc_offer`, `gc_answer` with `groupName`, `kind`, `participants` (address list),
