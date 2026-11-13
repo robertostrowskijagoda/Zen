@@ -1014,8 +1014,18 @@ jobs:
             fi
             gh release create "$TAG" --draft --verify-tag --title "$TAG" \
               --notes "$notes" \
-              --repo "$repo"
+              --repo "$repo" || {
+              # Its own failure, not the "already published" below: with
+              # immutable releases a tag whose published release was
+              # deleted can never have a release again (v1.17.0).
+              echo "::error::The draft of $TAG could not be made (gh's own message is above). If a published release of this tag was deleted, the tag's name is used up: release under the next version."
+              exit 1
+            }
             found=$(lookup)
+            if [ -z "$found" ]; then
+              echo "::error::The draft of $TAG was made and is not in the list of releases."
+              exit 1
+            fi
           fi
           id=${found% *}
           if [ "${found#* }" != true ]; then

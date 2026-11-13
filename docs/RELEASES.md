@@ -547,6 +547,14 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    one build). Then delete the draft in the GitHub UI and run again. More
    than one release of one tag stops it too: delete the extra ones.
 
+   **Never make the release of a tag by hand, and never publish before the
+   draft holds its files.** With immutable releases (section 8.6) a
+   published release takes no file any more, and after it is deleted its
+   tag's name can never have a release again. 1.17.0 was published by hand
+   while its run was still building: the release had no files, the attach
+   job refused it, and deleting it left `v1.17.0` used up. The same build
+   went out as 1.17.1.
+
    **When runs never start (GitHub outage).** If pushing the tag starts
    no Release run, start the workflow by hand: Actions, Release, Run
    workflow, with the tag chosen as the ref (not a branch: a branch run

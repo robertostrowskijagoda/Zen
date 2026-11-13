@@ -10,6 +10,18 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Video calls show the other person's picture every time, and the camera, microphone and speaker buttons work while a call is still ringing.
+- [en] Chats no longer jump under your finger while you scroll, even when a message, a photo or typing arrives.
+- [en] Passwords fill in Chrome and other apps more easily, plus many fixes to security, account recovery and battery use.
+- [pl] Wideo w rozmowach zawsze pokazuje obraz drugiej osoby, a przyciski kamery, mikrofonu i głośnika działają już podczas dzwonienia.
+- [pl] Rozmowy nie przeskakują pod palcem podczas przewijania, także gdy przyjdzie wiadomość, zdjęcie albo „pisze…”.
+- [pl] Hasła łatwiej wypełniają się w Chrome i innych aplikacjach, do tego wiele poprawek bezpieczeństwa, odzyskiwania konta i baterii.
+
+### Fixes and changes
+**This is 1.17.0 under a new number.** 1.17.0 never had files to download: its release was published before the build had attached them, a published release takes none, and its tag cannot have a release again. The app is the same as described under 1.17.0 below; the note above is that version's.
+- **A release whose draft cannot be made says so**: the release workflow went on after the draft's creation had failed and reported the release as already published, which it was not.
+
 ## 1.17.0 — 13.11.2026
 
 ### What's new
