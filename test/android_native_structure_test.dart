@@ -250,7 +250,7 @@ void main() {
         expect(service, isNot(contains(read)), reason: read);
       }
       // The page's address only from a known browser; Zen's own forms never.
-      expect(service, contains('trustedWebOrigin(client,'));
+      expect(service, contains(RegExp(r'trustedWebOrigin\(\s*client,')));
       expect(service, contains('if (client == packageName)'));
       expect(
         service,

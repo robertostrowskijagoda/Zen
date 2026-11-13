@@ -21,6 +21,7 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -149,6 +150,7 @@ Future<({List<bool> rings, List<String> missed})> _lockedPhoneAfter(
       recipientPublicKey: Uint8List(32),
     ),
     notices: shade,
+    noticeKit: const LockedNoticeKit(),
     mailboxPollInterval: Duration.zero,
     presenceRoundEvery: Duration.zero,
     noticeThrottle: Duration.zero,
