@@ -740,7 +740,14 @@ platform has registered its stream (it was bound when the track was first
 reported, before that, so in some calls it stayed bound to nothing while
 frames were decoded), and bound again if decoded frames never reach the
 screen; the microphone, loudspeaker and camera controls are shown and work
-while the call rings, not only once it is active. The technical log names per call the codecs offered, whether
+while the call rings, not only once it is active. A camera switched off
+during a call is a new `offer` whose camera section is `recvonly`; the
+answer's camera section never asks for more than the offer allows (a side
+with its camera on answers `sendonly` then, not `sendrecv`), and since
+1.17.5 the offering side also cuts an answer that asks for more (as every
+Zen up to 1.17.1 sent) to what its offer allowed before applying it:
+WebRTC refuses such an answer, and the call ended.
+The technical log names per call the codecs offered, whether
 the camera's frames were sealed and opened, the video packets sent and
 received and the frames decoded and shown (`call_video_trace.dart`, lines
 `Call video`).
