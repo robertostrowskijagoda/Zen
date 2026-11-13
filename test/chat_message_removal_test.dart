@@ -374,12 +374,17 @@ final class _Device implements RelayPeerSource {
         key,
       )).where((ChatMessage m) => m.id == id).firstOrNull;
 
-  /// How many files this phone keeps (the media vault among them).
-  int fileCount() => directory
-      .listSync(recursive: true)
-      .whereType<File>()
-      .where((File f) => f.lengthSync() > 0)
-      .length;
+  /// How many files this phone keeps (the media vault among them). A file
+  /// being written is renamed into place meanwhile: one gone between the
+  /// listing and the look at it is not kept.
+  int fileCount() =>
+      directory.listSync(recursive: true).whereType<File>().where((File f) {
+        try {
+          return f.lengthSync() > 0;
+        } on FileSystemException {
+          return false;
+        }
+      }).length;
 }
 
 Future<_Mesh> _buildMesh() async {
