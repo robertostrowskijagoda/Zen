@@ -10,7 +10,9 @@
 # over eight runners, about 12 files and 25 minutes each: the list grows
 # with every release and a file takes about two minutes, so a runner with
 # 30 files did not end within its 45 minutes and no run of 1.16.5 said
-# anything; with 16 files a runner took 35. A check of
+# anything; with 16 files a runner took 35. A file's changes get 90
+# seconds (--budget): files with slow tests made one runner of eight take
+# over its 45 minutes while another took 15, each with 13 files. A check of
 # tool/ci/test_ci_checks.py fails when a runner would get more than 16:
 # then the matrix below gets another runner. The summary is written file
 # by file, so a runner that is cut off still says how far it got. Each
@@ -62,5 +64,5 @@ jobs:
       - name: Mutants
         run: >-
           dart run tool/mutation.dart --max 10 --seed ${{ github.run_number }}
-          --shard ${{ matrix.shard }}/8
+          --shard ${{ matrix.shard }}/8 --budget 90
           --summary "$GITHUB_STEP_SUMMARY"

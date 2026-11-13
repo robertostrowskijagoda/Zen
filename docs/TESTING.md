@@ -885,7 +885,12 @@ more than 16 files, and the workflow's matrix then gets another runner. The
 limit was 20 before; a runner with 30 files did not end within its 45
 minutes and no run of 1.16.5 said anything, and at 20 a runner took about
 43 of them. The summary is written file by file, so a runner cut off
-by its 45 minutes still says how far it got. A change that makes a test hang (after `--timeout`, 240 s)
+by its 45 minutes still says how far it got. On the runners a file's
+changes get 90 seconds (`--budget 90`): once they took that long no further
+change of that file is started, and the summary says how many were tried.
+Without it one runner of eight took over its 45 minutes in 1.17.0 while
+another took 15, each with 13 files: a file with slow tests ran them
+eleven times. A change that makes a test hang (after `--timeout`, 240 s)
 or eat memory (a `flutter_tester` past 2 GB, as an endless loop that writes
 on every turn does within seconds) counts as noticed; the test is stopped
 before it takes the machine down. Locally:

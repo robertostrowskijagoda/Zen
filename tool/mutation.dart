@@ -15,6 +15,9 @@
 // also when the run is stopped (Ctrl+C) or a test hangs (--timeout,
 // seconds per change). --summary appends Markdown (CI's job summary) file
 // by file: a run cut off by its time limit still says how far it got.
+// --budget (seconds per file): no further change of a file is started once
+// its changes took that long, so a file with slow tests gets fewer of them
+// and not ten times its tests' time (CI's jobs; the first is always run).
 // A target with "skip" (and the reason in it) is listed but not run.
 // Exit code 0 always unless the tests fail on the unchanged code (then 1):
 // the score informs, it does not block.
@@ -64,6 +67,7 @@ Future<void> main(List<String> args) async {
   int max = 15;
   int seed = DateTime.now().millisecondsSinceEpoch;
   int timeout = 240;
+  int? budget;
   String? summary;
   (int, int)? shard;
   final List<String> only = <String>[];
@@ -75,6 +79,8 @@ Future<void> main(List<String> args) async {
         seed = int.parse(args[++i]);
       case '--timeout':
         timeout = int.parse(args[++i]);
+      case '--budget':
+        budget = int.parse(args[++i]);
       case '--summary':
         summary = args[++i];
       case '--shard':
@@ -151,6 +157,9 @@ Future<void> main(List<String> args) async {
     final List<_Mutant> all = _mutantsOf(lines)..shuffle(Random(seed));
     int caught = 0;
     final List<String> lived = <String>[];
+    final int planned = min(max, all.length);
+    int tried = 0;
+    final Stopwatch spent = Stopwatch()..start();
     void restore() => source.writeAsStringSync(original);
     final StreamSubscription<ProcessSignal> stop = ProcessSignal.sigint
         .watch()
@@ -160,6 +169,10 @@ Future<void> main(List<String> args) async {
         });
     try {
       for (final _Mutant m in all.take(max)) {
+        if (budget != null && tried > 0 && spent.elapsed.inSeconds >= budget) {
+          break;
+        }
+        tried++;
         final String line = lines[m.line];
         final String changed =
             line.substring(0, m.start) +
@@ -182,7 +195,13 @@ Future<void> main(List<String> args) async {
       restore();
       await stop.cancel();
     }
-    say('| `$file` | $caught | ${lived.length} |');
+    // Fewer than planned: the file's tests are slow (--budget). Another
+    // run tries other changes of it.
+    final String cut = tried < planned ? ' ($tried of $planned tried)' : '';
+    if (cut.isNotEmpty) {
+      stdout.writeln('   $tried of $planned changes tried: out of time');
+    }
+    say('| `$file` | $caught | ${lived.length}$cut |');
     for (final String s in lived) {
       survivors.writeln('- `$s`');
     }
