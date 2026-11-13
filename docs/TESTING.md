@@ -223,6 +223,7 @@ header, and that nothing else brings it in.
 | `test/chat_message_removal_test.dart`, `test/chat_history_removal_test.dart` | a message deleted for everyone, disappeared or edited leaves no words in notifications, the notification list or the queue; changes that come before their message; chunks after a deletion or a cleared chat bring nothing back, also from another device of the account; leaving, declining or "Wyczyść historię" in a group removes its chat, files and notifications |
 | `test/group_membership_test.dart` | who left a group stays out on every phone, in any order of leaves, lists and invitations; a later invitation brings them back; only the leaver can say they left; a leave from a Zen before 1.16.5 (no time) |
 | `test/call_second_caller_test.dart`, `test/call_missed_test.dart`, `test/call_video_codecs_test.dart`, `test/call_video_trace_test.dart` | a second caller hears "busy" and the call already there goes on (ringing out, ringing in, in the background, talking, two calling each other at once, group calls); a ring nobody answered is told to the callee once, through mailboxes, from friends only, never ringing; VP8 first in every offer and answer, also where the platform refuses the preferences; the `Call video` lines of the technical log, with no address, credential or fingerprint |
+| `test/call_video_quality_test.dart`, `test/call_camera_off_test.dart` | the camera asked in plain numbers (1280 x 720 at 24 frames), the camera encoder between 150 kbit/s and 2.5 Mbit/s at up to 24 frames with frames kept before resolution, the path's estimate starting at 1 Mbit/s on the camera's VP8 and H.264 only, the steadiest auto-exposure range a camera offers and what the Android side answers, the statistics lines that judge the picture (target, quantizer, resolution changes, time held back, freezes); switching the camera off and on keeps every answer acceptable to the other side |
 | `test/relay_backlog_test.dart`, `test/locked_mailbox_kit_writes_test.dart` | two weeks and more of a small circle that barely uses Zen on the real relay engines: what "Czeka na doręczenie" and "Przechowujesz dla znajomych" hold at the end, the kinds where only the newest matters, a friend's device taken for gone, a receipt reaching a sender who was away, mail for a former friend going; a locked phone's mailbox kit written once per burst |
 | `test/locked_presence_sim_test.dart`, `test/locked_presence_open_sim_test.dart` | the real `LockedReceiver` of several locked friends on a virtual clock (frames 80 ms on the way, a phone awake 5 s from its own round and 3 s from a frame, phones on 1.16.4 modelled as that version pinged and answered): how often they wake each other (each number with its "before"), lost pings, silent friends, a clock set back, `presence.zbox` writes; and what the first screen shows of friends the moment Zen opens after a lock |
 | `test/locked_alert_conformity_test.dart` | each frame ends the same on a locked phone as in the app: rings, call cards and message notices from one shared decision, a flood of mentions from one member |
@@ -927,9 +928,10 @@ pick but never past the same end), whose certificate may vouch for a
 page (`ZenAutofillTrustTest`: a browser's word counts only when the
 installed package is signed by that browser's maker, the fingerprints are
 pinned, a browser without a confirmed one is filled like any other app),
-who signs an APK as Android verified it, with its lineage (`ApkSignersTest`)
-and the window of an inexact alarm that ends on the ten-minute grid
-(`InexactAlarmWindowTest`). The CI job
+who signs an APK as Android verified it, with its lineage (`ApkSignersTest`),
+the window of an inexact alarm that ends on the ten-minute grid
+(`InexactAlarmWindowTest`) and a call camera's frame-rate ranges read in
+frames a second whatever unit the camera reports in (`CallCameraRangesTest`). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
 

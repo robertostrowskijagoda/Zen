@@ -214,6 +214,10 @@ still exists:
 >    off and on during the call. The log of each phone has the
 >    `Call video codec: VP8 both ways` line and the `Call video:` lines of
 >    the first camera frame and the first remote frame on the screen.
+>    In a dim room, waving a hand in front of the camera, the picture stays
+>    smooth: the `Call camera` line says `pinned to` (or `already at`) a
+>    range, and the `Call stats` lines show `camera … captured at` 15 fps or
+>    more and `video out … 1280x720` with no `held back` of many seconds.
 > 8. A GIF from the gallery as the profile photo keeps moving on both
 >    phones; a HEIC photo (an iPhone's, copied over) is taken as the profile
 >    photo and in a post.

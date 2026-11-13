@@ -190,6 +190,16 @@ object ZenCallBridge {
                     (context as? MainActivity)?.setPipCall(active, video)
                     result.success(null)
                 }
+                "callCameraFrameRates" -> {
+                    val trackId = call.argument<String>("trackId") ?: ""
+                    ZenCallCamera.frameRates(trackId) { result.success(it) }
+                }
+                "pinCallCameraFrameRate" -> {
+                    val trackId = call.argument<String>("trackId") ?: ""
+                    val min = call.argument<Int>("min") ?: 0
+                    val max = call.argument<Int>("max") ?: 0
+                    ZenCallCamera.pinFrameRate(trackId, min, max) { result.success(it) }
+                }
                 else -> result.notImplemented()
             }
         }
