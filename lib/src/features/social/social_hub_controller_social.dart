@@ -96,6 +96,127 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         nicknameChanged: sanitizeFriendNickname(nickname).isNotEmpty,
       ),
     );
+    // On its way: whether it reaches them is told by the mailbox layer
+    // ([_applyFriendInviteReport]).
+    state = state.copyWith(
+      outgoingInvites: _outgoingInvitesWith(
+        normalizedAddress,
+        OutgoingInvite(token: inviteToken),
+      ),
+    );
+    await _persistState();
+  }
+
+  /// [outgoingInvites] with [invite] for [address] (none when null), and
+  /// only for those whose invitation still waits for an answer.
+  Map<String, OutgoingInvite> _outgoingInvitesWith(
+    String address,
+    OutgoingInvite? invite,
+  ) {
+    final Map<String, OutgoingInvite> next = <String, OutgoingInvite>{
+      for (final MapEntry<String, OutgoingInvite> e
+          in state.outgoingInvites.entries)
+        if (!PeerShareCodec.addressesEqual(e.key, address) &&
+            state.friendByAddress(e.key)?.status ==
+                FriendRelationshipStatus.pendingOutgoing)
+          e.key: e.value,
+    };
+    if (invite != null) {
+      next[address] = invite;
+    }
+    while (next.length > kMaxOutgoingInvites) {
+      next.remove(next.keys.first);
+    }
+    return next;
+  }
+
+  /// Sends the invitation to [peerAddress] again, as it went (with the code
+  /// it was sent with and its note): one that expired without reaching
+  /// them ("Nie dotarło"), from the menu, or by itself once they are heard
+  /// from. Nothing for anyone not invited from here.
+  @override
+  Future<void> resendFriendRequest({required String peerAddress}) async {
+    final String address = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? friend = state.friendByAddress(address);
+    if (friend == null ||
+        friend.status != FriendRelationshipStatus.pendingOutgoing) {
+      return;
+    }
+    final String token = state.outgoingInviteTo(address)?.token ?? '';
+    final String? senderName = _ownSenderName(null);
+    final String note = friend.requestMessage?.trim() ?? '';
+    await _sendFriendLifecycleSignal(
+      peerAddress: address,
+      payload: <String, dynamic>{
+        'type': 'friend_request',
+        'senderName': ?senderName,
+        if (token.isNotEmpty) 'it': token,
+        if (note.isNotEmpty) 'message': note,
+      },
+    );
+    state = state.copyWith(
+      book: state.book.edit(
+        address,
+        (FriendProfile f) => f.copyWith(
+          lastMessagePreview: t('Zaproszenie oczekuje na odpowiedź.'),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+        ),
+      ),
+      outgoingInvites: _outgoingInvitesWith(
+        address,
+        OutgoingInvite(token: token),
+      ),
+    );
+    await _persistState();
+  }
+
+  /// The mailbox layer's word on the invitation to [address]: it reached
+  /// their device ([delivered]), or it was given up after two weeks without
+  /// reaching it. The conversation and the chat list say so; a lost one can
+  /// be sent again. An invitation answered meanwhile changes nothing.
+  @override
+  Future<void> _applyFriendInviteReport(
+    String address, {
+    required bool delivered,
+  }) async {
+    final FriendProfile? friend = state.friendByAddress(address);
+    if (friend == null ||
+        friend.status != FriendRelationshipStatus.pendingOutgoing) {
+      return;
+    }
+    final OutgoingInvite had =
+        state.outgoingInviteTo(friend.address) ?? const OutgoingInvite();
+    if (!delivered && had.status == OutgoingInviteStatus.delivered) {
+      // A copy of it reached them already.
+      return;
+    }
+    final OutgoingInviteStatus status = delivered
+        ? OutgoingInviteStatus.delivered
+        : OutgoingInviteStatus.lost;
+    if (had.status == status) {
+      return;
+    }
+    state = state.copyWith(
+      book: state.book.edit(
+        friend.address,
+        (FriendProfile f) => f.copyWith(
+          lastMessagePreview: delivered
+              ? t('Zaproszenie dotarło, czeka na odpowiedź.')
+              : t(
+                  'Nie dotarło — oboje musicie być w sieci w tym samym czasie.',
+                ),
+          lastActivityLabel: activityStamp(
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+        ),
+      ),
+      outgoingInvites: _outgoingInvitesWith(
+        friend.address,
+        had.copyWith(status: status),
+      ),
+    );
     await _persistState();
   }
 
@@ -475,7 +596,18 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
-  Future<void> blockFriend({required String peerAddress, String? note}) async {
+  /// Blocks [peerAddress] in the messenger and the person behind it
+  /// everywhere ([SocialHubState.blocks]): their account when the ledger
+  /// knows it, with every address and dating key ([datingKeys]) known to be
+  /// theirs. [origin]: the feature the block was made in; [name]: what the
+  /// list of blocked people shows when the entry has no name.
+  Future<void> blockFriend({
+    required String peerAddress,
+    String? note,
+    List<String> datingKeys = const <String>[],
+    BlockOrigin origin = BlockOrigin.messenger,
+    String name = '',
+  }) async {
     final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
     if (canonical.isEmpty) {
       return;
@@ -489,6 +621,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
             note: note?.trim().isNotEmpty == true ? note!.trim() : null,
           )
           .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+    );
+    // The same decision, by person: the stamp the messenger's record got.
+    final FriendProfile? entry = book.profileOf(canonical);
+    final BlockBook blocks = state.blocks.block(
+      account: _blockAccountOf(canonical) ?? '',
+      addresses: <String>[canonical],
+      datingKeys: datingKeys,
+      name: name.trim().isNotEmpty
+          ? name
+          : entry != null && entry.hasProfileName
+          ? entry.displayLabel
+          : '',
+      origin: origin,
+      tick: _friendshipTick,
+      at: book.recordOf(canonical)?.stamp,
     );
 
     final List<InboxEntry> nextInbox = _removeEntriesForPeer(
@@ -516,6 +663,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
 
     state = state.copyWith(
       book: book,
+      blocks: blocks,
       inbox: nextInbox,
       backgroundAlerts: nextAlerts,
       pendingSignalCount: nextQueue.length,
@@ -527,23 +675,216 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
+  /// Lifts the block of [peerAddress] in the messenger and of the person
+  /// behind it everywhere.
   Future<void> unblockFriend({required String peerAddress}) async {
     final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
     final FriendProfile? current = state.friendByAddress(canonical);
     if (current == null || current.status != FriendRelationshipStatus.blocked) {
+      final BlockBook blocks = state.blocks.lift(
+        account: _blockAccountOf(canonical) ?? '',
+        addresses: <String>[canonical],
+        tick: _friendshipTick,
+      );
+      if (!identical(blocks, state.blocks)) {
+        state = state.copyWith(blocks: blocks);
+        await _persistState();
+      }
       return;
     }
-
+    final FriendshipBook book = state.book.unblock(
+      canonical,
+      _friendshipTick,
+      shape: (FriendProfile base) => _friendReducer
+          .applyRemoved(current: base)
+          .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+    );
+    // Lifted by the same decision as the messenger's.
     state = state.copyWith(
-      book: state.book.unblock(
-        canonical,
-        _friendshipTick,
-        shape: (FriendProfile base) => _friendReducer
-            .applyRemoved(current: base)
-            .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+      book: book,
+      blocks: state.blocks.lift(
+        account: _blockAccountOf(canonical) ?? '',
+        addresses: <String>[canonical],
+        tick: _friendshipTick,
+        at: book.recordOf(canonical)?.stamp,
       ),
     );
     await _persistState();
+  }
+
+  /// Blocks a person known by [address], [account] or [datingKey] in every
+  /// feature (see [blockFriend]). Without an address (a dating profile
+  /// whose owner is not known, a follower) it is a block by account or by
+  /// key, which becomes one by address as soon as that is known
+  /// ([learnBlocked]).
+  Future<void> blockPerson({
+    String address = '',
+    String account = '',
+    String datingKey = '',
+    String name = '',
+    BlockOrigin origin = BlockOrigin.messenger,
+  }) async {
+    final String canonical = PeerShareCodec.normalizeAddress(address);
+    final List<String> keys = <String>[if (datingKey.isNotEmpty) datingKey];
+    if (canonical.isNotEmpty && isRoutablePeerAddress(canonical)) {
+      await blockFriend(
+        peerAddress: canonical,
+        datingKeys: keys,
+        origin: origin,
+        name: name,
+      );
+      if (account.isNotEmpty) {
+        await learnBlocked(address: canonical, account: account);
+      }
+      return;
+    }
+    final BlockBook blocks = state.blocks.block(
+      account: account,
+      datingKeys: keys,
+      name: name,
+      origin: origin,
+      tick: _friendshipTick,
+    );
+    if (identical(blocks, state.blocks)) {
+      return;
+    }
+    state = state.copyWith(blocks: blocks);
+    await _persistState();
+  }
+
+  /// Lifts the block [id] of [SocialHubState.blocks] (and the messenger's
+  /// block of every address it names).
+  Future<void> unblockPerson(String id) async {
+    final BlockRecord? record = state.blocks.records[id];
+    if (record == null || !record.on) {
+      return;
+    }
+    for (final String a in record.addresses) {
+      await unblockFriend(peerAddress: a);
+    }
+    final BlockBook blocks = state.blocks.liftId(id, _friendshipTick);
+    if (!identical(blocks, state.blocks)) {
+      state = state.copyWith(blocks: blocks);
+      await _persistState();
+    }
+  }
+
+  /// Lifts every block of [account] (a follower unblocked).
+  Future<void> unblockAccount(String account) async {
+    if (account.isEmpty) {
+      return;
+    }
+    final List<String> ids = <String>[
+      for (final MapEntry<String, BlockRecord> e
+          in state.blocks.covering(account: account).entries)
+        if (e.value.on) e.key,
+    ];
+    for (final String id in ids) {
+      await unblockPerson(id);
+    }
+  }
+
+  /// Lifts every block made in [origin] ("W pobliżu": "Odblokuj
+  /// wszystkich").
+  Future<void> unblockAllFrom(BlockOrigin origin) async {
+    final List<String> ids = <String>[
+      for (final MapEntry<String, BlockRecord> e
+          in state.blocks.records.entries)
+        if (e.value.on && e.value.origin == origin) e.key,
+    ];
+    for (final String id in ids) {
+      await unblockPerson(id);
+    }
+  }
+
+  /// What became known about someone blocked: another [address] or
+  /// [datingKey] of theirs, or their [account]. A block known only by a
+  /// dating key whose owner turns out to be at [address] becomes a block of
+  /// that person everywhere, the messenger included. Nothing for someone
+  /// not blocked.
+  Future<void> learnBlocked({
+    String address = '',
+    String account = '',
+    String datingKey = '',
+  }) async {
+    final String canonical = PeerShareCodec.normalizeAddress(address);
+    final List<String> addrs = <String>[if (canonical.isNotEmpty) canonical];
+    final List<String> keys = <String>[if (datingKey.isNotEmpty) datingKey];
+    final String who = account.isNotEmpty
+        ? account
+        : canonical.isEmpty
+        ? ''
+        : _blockAccountOf(canonical) ?? '';
+    final Map<String, BlockRecord> before = state.blocks.covering(
+      account: who,
+      addresses: addrs,
+      datingKeys: keys,
+    )..removeWhere((String _, BlockRecord r) => !r.on);
+    if (before.isEmpty) {
+      return;
+    }
+    final BlockBook blocks = state.blocks.learn(
+      account: who,
+      addresses: addrs,
+      datingKeys: keys,
+    );
+    if (!identical(blocks, state.blocks)) {
+      state = state.copyWith(blocks: blocks);
+      await _persistState();
+    }
+    final bool keyOnly = before.values.every(
+      (BlockRecord r) => r.account.isEmpty && r.addresses.isEmpty,
+    );
+    final FriendProfile? entry = canonical.isEmpty
+        ? null
+        : state.friendByAddress(canonical);
+    if (keyOnly &&
+        canonical.isNotEmpty &&
+        isRoutablePeerAddress(canonical) &&
+        entry?.status != FriendRelationshipStatus.blocked) {
+      final BlockRecord first = before.values.first;
+      await blockFriend(
+        peerAddress: canonical,
+        datingKeys: keys,
+        origin: first.origin,
+        name: first.name,
+      );
+    }
+  }
+
+  /// Puts the blocks by person in line with the messenger's and with what
+  /// the ledger knows of accounts ([accountOf] an address): blocks made by
+  /// Zen 1.16.5 become records, and a record that names an address whose
+  /// account is known now becomes a block of the account.
+  Future<void> noteBlockedAccounts(
+    String? Function(String address) accountOf,
+  ) async {
+    final String own =
+        ref.read(accountDirectoryHolderProvider).directory?.ownAccount ?? '';
+    String? lookup(String address) {
+      final String? account = accountOf(address);
+      return account == null || account.isEmpty || account == own
+          ? null
+          : account;
+    }
+
+    BlockBook blocks = state.blocks.reconcile(state.book, accountOf: lookup);
+    for (final BlockRecord r in blocks.active.toList()) {
+      if (r.account.isNotEmpty) {
+        continue;
+      }
+      for (final String a in r.addresses) {
+        final String? account = lookup(a);
+        if (account != null) {
+          blocks = blocks.learn(account: account, addresses: <String>[a]);
+          break;
+        }
+      }
+    }
+    if (!identical(blocks, state.blocks)) {
+      state = state.copyWith(blocks: blocks);
+      await _persistState();
+    }
   }
 
   Future<void> sendCallInvite({
@@ -1136,12 +1477,23 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
+  /// Whether the controls of [session] act on its media now: in the call,
+  /// and while an outgoing call rings or a call connects once its media
+  /// are set up ([CallMediaSessionController.controlsReady]). What is
+  /// chosen before the answer holds when the call connects.
+  bool _callControlsWork(CallSession session) =>
+      session.status == CallSessionStatus.active ||
+      (!session.isGroup &&
+          session.ownControlsShown &&
+          _callMedia.activeCallId == session.id &&
+          _callMedia.controlsReady);
+
   Future<void> toggleActiveCallMute() async {
     if (state.activeCall?.isGroup ?? false) {
       return _toggleGroupCall(GroupCallToggle.mute);
     }
     final CallSession? session = state.activeCall;
-    if (session == null || session.status != CallSessionStatus.active) {
+    if (session == null || !_callControlsWork(session)) {
       return;
     }
     final bool nextMuted = !session.isMuted;
@@ -1164,7 +1516,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return _toggleGroupCall(GroupCallToggle.speaker);
     }
     final CallSession? session = state.activeCall;
-    if (session == null || session.status != CallSessionStatus.active) {
+    if (session == null || !_callControlsWork(session)) {
       return;
     }
     final bool nextSpeakerOn = !session.isSpeakerOn;
@@ -1178,6 +1530,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     if (now == null || now.id != session.id) {
       return;
     }
+    if (now.status != CallSessionStatus.active) {
+      // Chosen before the answer: routed once more when the call connects.
+      _speakerChosenBeforeConnectFor = now.id;
+    }
     state = state.copyWith(
       activeCall: now.copyWith(isSpeakerOn: nextSpeakerOn),
     );
@@ -1189,7 +1545,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return _toggleGroupCall(GroupCallToggle.camera);
     }
     final CallSession? session = state.activeCall;
-    if (session == null || session.status != CallSessionStatus.active) {
+    if (session == null || !_callControlsWork(session)) {
       return;
     }
     final bool nextCameraEnabled = !session.isCameraEnabled;
@@ -1442,8 +1798,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
     _stopCallReRing();
+    // The media say whether this was the answer or a copy of it.
     await _callMedia.applyRemoteAnswer(description);
-    logZenMessage('Call answer applied');
     // Read again: the media may have connected while the answer was being
     // applied, and the call it made active must not go back to
     // "Łączenie…" (no second "active" comes to undo that).
@@ -1480,10 +1836,20 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       _dismissCallNotification(session.peerAddress),
       context: 'Dismissing the connected call notification failed',
     );
+    if (_speakerChosenBeforeConnectFor == session.id) {
+      _speakerChosenBeforeConnectFor = null;
+      // "Głośnik" switched while it rang: the platform picks a route of its
+      // own when the other side's sound starts, the one chosen goes back.
+      unawaitedLogged(
+        _callMedia.setSpeakerOn(session.isSpeakerOn),
+        context: 'Routing the call sound as chosen before the answer failed',
+      );
+    }
     state = state.copyWith(
       activeCall: session.copyWith(
         status: CallSessionStatus.active,
         kind: _callMedia.activeKind ?? session.kind,
+        // What the camera is, also when it was switched before the answer.
         isCameraEnabled: _callMedia.hasLocalVideo,
         // The sound went to a car's speakers or earphones: out loud, so
         // "Głośnik" is on, and off takes the call to the phone's ear.
@@ -2307,8 +2673,21 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       // a word: refused here, where the person adding can be told.
       throw FormatException(groupFullText());
     }
-    final int now = DateTime.now().millisecondsSinceEpoch;
+    // Stamped after their leave, whatever the clocks say: a leaver whose
+    // clock ran ahead stamped it later than this phone's now, and every
+    // member took this addition for an older one than the leave.
+    final int? left = _groupStampFor(current.departedAt, member);
+    final int now = max(
+      DateTime.now().millisecondsSinceEpoch,
+      left == null ? 0 : left + 1,
+    );
     final GroupProfile updated = current.copyWith(
+      // A creator who left comes back as a member like any other.
+      createdById:
+          left != null &&
+              PeerShareCodec.addressesEqual(current.createdById, member)
+          ? ''
+          : null,
       // Added by name now: a new invitation, whoever left before, and a
       // late copy of an older leave takes nobody out.
       departedAt: _withoutGroupStamp(current.departedAt, member),
@@ -2340,11 +2719,15 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     // was offline when someone left), and a member who left must not come
     // back on anyone's phone with it - not on a Zen before 1.16.5 either,
     // which merges whatever list comes.
+    // It also tells which other additions this device knew of: a member
+    // that knows of more (someone else added someone meanwhile) tells the
+    // newcomer of them (`_tellOfAddsMissed`).
     final Map<String, dynamic> sync = <String, dynamic>{
       ..._groupInvitePayload(updated),
       'memberAddresses': <String>[if (localAddr.isNotEmpty) localAddr, member],
       kGroupAddedKey: member,
       'at': now,
+      kGroupAddsKey: _recentGroupAdds(updated, now)..remove(member),
     };
     // The newcomer gets the invite; everyone already in the group gets the
     // update (they merge it without any inbox entry). Without that, the
@@ -2553,11 +2936,20 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
     // Stamped with this phone's clock: the same time on every member's
     // phone, so an invitation made after it (and only such) brings this
-    // person back (`_groupAfterLeave`).
+    // person back (`_groupAfterLeave`). Never before this person was added
+    // (the inviter's list tells when): an adder whose clock ran ahead
+    // stamped the addition later than this phone's now, and every member
+    // took the leave for an older one.
+    final int? added = localAddr.isEmpty
+        ? null
+        : _groupStampFor(removed.addedAt, localAddr);
     final Map<String, dynamic> leave = <String, dynamic>{
       'type': 'group_leave',
       'groupId': groupId,
-      'at': DateTime.now().millisecondsSinceEpoch,
+      'at': max(
+        DateTime.now().millisecondsSinceEpoch,
+        added == null ? 0 : added + 1,
+      ),
     };
     for (final String member in removed.memberAddresses) {
       if (localAddr.isNotEmpty &&

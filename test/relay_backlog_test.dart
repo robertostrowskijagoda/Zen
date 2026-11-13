@@ -54,12 +54,16 @@ final class _Device implements RelayPeerSource {
   _Device(this.world, this.person, this.address) {
     engine = RelayEngine(
       store: store,
+      blobStore: world.blobs ? MemoryRelayStateStore() : null,
       peers: this,
       send: (String to, Map<String, dynamic> payload) async =>
           world._send(address, to, payload),
-      clock: () => world.now,
+      clock: () => world.now + clockAhead,
     );
   }
+
+  /// How far this device's clock is ahead of the world's (negative: behind).
+  int clockAhead = 0;
 
   final _World world;
   final _Person person;
@@ -114,7 +118,11 @@ final class _Device implements RelayPeerSource {
 }
 
 final class _World {
-  _World({int seed = 7}) : random = Random(seed);
+  _World({int seed = 7, this.blobs = false}) : random = Random(seed);
+
+  /// Engines with a blob store (as the app has), so payloads over 48 KB go
+  /// to the mailboxes as blobs.
+  final bool blobs;
 
   final Random random;
   int now = DateTime.utc(2026, 11, 1).millisecondsSinceEpoch;
@@ -1002,12 +1010,354 @@ void main() {
     expect(ania.heldEnvelopeCount, 6);
     expect(ania.heldForPeerCount, 1);
   });
+
+  group('a device taken for gone that comes back', () {
+    test('only what the app sends by itself and what catches up by itself '
+        'is left out for it; a kind added later is not', () {
+      expect(
+        <String>{
+          for (final String type in kReliablePayloadTypes)
+            if (!relayIsPersonalPayload(<String, dynamic>{'type': type})) type,
+        },
+        <String>{
+          'friend_list',
+          'nearby_key',
+          'intent',
+          'graph_open',
+          'lg_push',
+          'lg_mention',
+          'message_ack',
+          'message_read',
+          'pyr_rec',
+          'pyr_recs',
+          'pyr_nat',
+          'date_lantern',
+          'date_key',
+        },
+      );
+      expect(
+        relayIsPersonalPayload(<String, dynamic>{'type': kRelayReceiptType}),
+        isFalse,
+      );
+      expect(
+        relayIsPersonalPayload(<String, dynamic>{'type': 'a_kind_from_later'}),
+        isTrue,
+      );
+    });
+
+    test('a second device silent for a week gets every kind a person sends '
+        'when it is back, as the device that was online did: a group leave, '
+        'a friend removal, a "joined", a transfer cancel, a group board post '
+        'and the rest', () async {
+      final _World w = await _circle(<String, int>{
+        'owner': 1,
+        'ania': 1,
+        'tomek': 2,
+      });
+      final _Device me = w['owner'].devices.first;
+      final _Device phone = w['tomek'].devices.first;
+      final _Device laptop = w['tomek'].devices.last;
+      await _laptopSilentForAWeek(w);
+      await w.setOnline(phone, true);
+      await w.advance(const Duration(minutes: 1));
+      expect((await me.store.load()).goneDevices.keys, <String>[
+        laptop.address,
+      ]);
+      // The steps a device must not miss, and every other kind a person
+      // sends.
+      final List<String> kinds = <String>[
+        'group_leave',
+        'friend_remove',
+        'group_invite_ack',
+        'message_transfer_cancel',
+        'group_post',
+        for (final String type in kReliablePayloadTypes)
+          if (relayIsPersonalPayload(<String, dynamic>{'type': type}) &&
+              !<String>{
+                'group_leave',
+                'friend_remove',
+                'group_invite_ack',
+                'message_transfer_cancel',
+                'group_post',
+              }.contains(type))
+            type,
+      ];
+      for (final String type in kinds) {
+        await w.sendToPerson(me, w['tomek'], <String, dynamic>{
+          'type': type,
+          'groupId': 'g1',
+          'msgId': 'x-$type',
+        });
+      }
+      await w.advance(const Duration(minutes: 1));
+      await w.setOnline(phone, false);
+      await w.setOnline(laptop, true);
+      await w.advance(const Duration(minutes: 5));
+      final List<String> atPhone = <String>[
+        for (final String type in kinds)
+          if ((phone.received[type] ?? 0) > 0) type,
+      ];
+      final List<String> atLaptop = <String>[
+        for (final String type in kinds)
+          if ((laptop.received[type] ?? 0) > 0) type,
+      ];
+      expect(atPhone, kinds);
+      expect(atLaptop, atPhone);
+    });
+
+    test('a long message (over 48 KB, it goes to the mailboxes as a blob) '
+        'reaches a device taken for gone through its mailboxes', () async {
+      final _World w = await _circle(<String, int>{
+        'owner': 1,
+        'ania': 1,
+        'tomek': 2,
+      }, blobs: true);
+      final _Device me = w['owner'].devices.first;
+      final _Device ania = w['ania'].devices.first;
+      final _Device phone = w['tomek'].devices.first;
+      final _Device laptop = w['tomek'].devices.last;
+      await _laptopSilentForAWeek(w);
+      await w.setOnline(phone, true);
+      await w.advance(const Duration(minutes: 1));
+      await w.setOnline(phone, false);
+      await w.setOnline(ania, true);
+      expect((await me.store.load()).goneDevices.keys, <String>[
+        laptop.address,
+      ]);
+      // A long text; an inline voice message or photo is the same.
+      await w.sendToPerson(me, w['tomek'], <String, dynamic>{
+        'type': 'message',
+        'msgId': 'big',
+        'text': 'x' * (60 * 1024),
+      });
+      await w.advance(const Duration(minutes: 5));
+      final RelayState mine = await me.store.load();
+      expect(
+        <String>{
+          for (final RelayOutboxEntry e in mine.outbox.values)
+            if (e.payload['type'] == kBlobManifestType) e.recipient,
+        },
+        <String>{phone.address, laptop.address},
+      );
+      // Each of Tomek's devices is opened while the owner is away.
+      await w.setOnline(me, false);
+      await w.setOnline(phone, true);
+      await w.advance(const Duration(minutes: 5));
+      await w.setOnline(phone, false);
+      await w.setOnline(laptop, true);
+      await w.advance(const Duration(minutes: 5));
+      expect(phone.received['message'], 1);
+      expect(laptop.received['message'], 1);
+    });
+
+    test('a payload blob of what the app sends by itself is not made for a '
+        'device taken for gone', () async {
+      final _World w = await _circle(<String, int>{
+        'owner': 1,
+        'ania': 1,
+        'tomek': 2,
+      }, blobs: true);
+      final _Device me = w['owner'].devices.first;
+      final _Device ania = w['ania'].devices.first;
+      final _Device phone = w['tomek'].devices.first;
+      final _Device laptop = w['tomek'].devices.last;
+      await _laptopSilentForAWeek(w);
+      await w.setOnline(phone, true);
+      await w.advance(const Duration(minutes: 1));
+      await w.setOnline(phone, false);
+      await w.setOnline(ania, true);
+      await w.sendToPerson(me, w['tomek'], <String, dynamic>{
+        'type': 'lg_push',
+        'entries': <Object>[
+          <String, dynamic>{'k': 'post', 'd': 'x' * (60 * 1024)},
+        ],
+      });
+      await w.advance(const Duration(minutes: 5));
+      final RelayState mine = await me.store.load();
+      expect(
+        <String>{
+          for (final RelayBlobOut b in mine.outBlobs.values) b.recipient,
+        },
+        <String>{phone.address},
+      );
+      expect(
+        mine.outbox.values.where(
+          (RelayOutboxEntry e) => e.recipient == laptop.address,
+        ),
+        isEmpty,
+      );
+    });
+  });
+
+  group('mailbox receipts', () {
+    test('a receipt is not replaced in the mailbox by a later one: both '
+        'reach the sender, and nothing stays waiting there', () async {
+      final _World w = await _circle(<String, int>{
+        'ania': 1,
+        'bartek': 1,
+        'm1': 1,
+        'm2': 1,
+      });
+      final _Device ania = w['ania'].devices.first;
+      final _Device bartek = w['bartek'].devices.first;
+      final _Device m1 = w['m1'].devices.first;
+      final _Device m2 = w['m2'].devices.first;
+      await ania.engine.setManualRelays(<String>[m1.address]);
+      await bartek.engine.setManualRelays(<String>[m2.address]);
+      await w.advance(const Duration(minutes: 2));
+
+      // Ania sends P1 while Bartek is away, then goes away herself.
+      await w.setOnline(bartek, false);
+      await w.sendToDevice(ania, bartek, <String, dynamic>{
+        'type': 'lg_push',
+        'entries': <Object>[],
+        'n': 1,
+      });
+      await w.advance(const Duration(minutes: 1));
+      await w.setOnline(ania, false);
+      await w.advance(const Duration(minutes: 10));
+      // Bartek takes P1 from m2; Ania does not answer: a receipt for P1
+      // goes to her mailbox m1.
+      await w.setOnline(bartek, true);
+      await w.advance(const Duration(minutes: 2));
+      await w.setOnline(bartek, false);
+      // Ania is online for a moment while m1 is not, and sends P2.
+      await w.setOnline(m1, false);
+      await w.setOnline(ania, true);
+      await w.sendToDevice(ania, bartek, <String, dynamic>{
+        'type': 'lg_push',
+        'entries': <Object>[],
+        'n': 2,
+      });
+      await w.advance(const Duration(minutes: 1));
+      await w.setOnline(ania, false);
+      await w.setOnline(m1, true);
+      await w.advance(const Duration(minutes: 10));
+      // Bartek takes P2: a second receipt, for P2, goes to m1 as well.
+      await w.setOnline(bartek, true);
+      await w.advance(const Duration(minutes: 2));
+      await w.setOnline(bartek, false);
+      expect(
+        bartek.got.where((Map<String, dynamic> p) => p['n'] == 1),
+        hasLength(1),
+      );
+      expect(
+        bartek.got.where((Map<String, dynamic> p) => p['n'] == 2),
+        hasLength(1),
+      );
+      // Ania is back (Bartek is not): both receipts reach her.
+      await w.setOnline(ania, true);
+      await w.advance(const Duration(minutes: 3));
+      expect((await ania.store.load()).outbox, isEmpty);
+      expect(
+        relayReplaceKeyOf(<String, dynamic>{'type': kRelayReceiptType}),
+        isNull,
+      );
+    });
+  });
+
+  test('a mailbox takes the newer profile of a sender whose clock went '
+      'back, and holds only that', () async {
+    final _World w = await _circle(<String, int>{
+      'owner': 1,
+      'ania': 1,
+      'bartek': 1,
+      'celina': 1,
+    });
+    final _Device me = w['owner'].devices.first;
+    final _Device bartek = w['bartek'].devices.first;
+    await w.setOnline(bartek, false);
+    // The owner's clock runs a day ahead, then is set right.
+    me.clockAhead = Duration.millisecondsPerDay;
+    await w.sendToDevice(me, bartek, <String, dynamic>{
+      'type': 'profile_update',
+      'v': 1,
+    });
+    await w.advance(const Duration(minutes: 1));
+    me.clockAhead = 0;
+    await w.sendToDevice(me, bartek, <String, dynamic>{
+      'type': 'profile_update',
+      'v': 2,
+    });
+    final int second = w.now;
+    await w.advance(const Duration(minutes: 1));
+    for (final String m in <String>['ania', 'celina']) {
+      final Map<String, Map<String, dynamic>> held =
+          (await w[m].devices.first.store.load()).mailbox[bartek.address]!;
+      expect(held, hasLength(1), reason: '$m holds the newest only');
+      expect(held.values.single['c'], second, reason: m);
+    }
+    // Bartek opens Zen while the owner is away: the newest profile.
+    await w.setOnline(me, false);
+    await w.setOnline(bartek, true);
+    await w.advance(const Duration(minutes: 1));
+    expect(
+      <Object?>[
+        for (final Map<String, dynamic> p in bartek.got)
+          if (p['type'] == 'profile_update') p['v'],
+      ],
+      <Object?>[2],
+    );
+  });
+
+  test('a group\'s member-list update is no invitation: not counted as '
+      'waiting, no notice for a locked phone', () async {
+    final _World w = await _circle(<String, int>{
+      'owner': 1,
+      'ania': 1,
+      'bartek': 1,
+    });
+    final _Device me = w['owner'].devices.first;
+    final _Device bartek = w['bartek'].devices.first;
+    await w.setOnline(bartek, false);
+    await w.sendToDevice(me, bartek, <String, dynamic>{
+      'type': 'group_invite',
+      'groupId': 'g1',
+      'memberAddresses': <String>[me.address, bartek.address],
+    });
+    await w.advance(const Duration(minutes: 1));
+    expect(me.engine.overview.value.outboxCount, 0);
+    Map<String, Map<String, dynamic>> held =
+        (await w['ania'].devices.first.store.load()).mailbox[bartek.address]!;
+    expect(held.values.single['k'], 0);
+    // A real invitation is both.
+    await w.sendToDevice(me, bartek, <String, dynamic>{
+      'type': 'group_invite',
+      'groupId': 'g2',
+      'inviteId': 'inv-1',
+    });
+    await w.advance(const Duration(minutes: 1));
+    expect(me.engine.overview.value.outboxCount, 1);
+    held =
+        (await w['ania'].devices.first.store.load()).mailbox[bartek.address]!;
+    expect(
+      held.values.map((Map<String, dynamic> e) => e['k']).toList()..sort(),
+      <Object?>[0, 1],
+    );
+  });
+}
+
+/// Tomek's laptop silent for eight days while his phone is opened for five
+/// minutes twice a day (and Ania is away): the owner takes the laptop for
+/// gone. Ends with every device of Tomek's and Ania's offline.
+Future<void> _laptopSilentForAWeek(_World w) async {
+  final _Device phone = w['tomek'].devices.first;
+  await w.setOnline(w['tomek'].devices.last, false);
+  await w.setOnline(w['ania'].devices.first, false);
+  await w.setOnline(phone, false);
+  for (int day = 0; day < 8; day++) {
+    await w.advance(const Duration(hours: 12));
+    await w.setOnline(phone, true);
+    await w.advance(const Duration(minutes: 5));
+    await w.setOnline(phone, false);
+    await w.advance(const Duration(hours: 11, minutes: 55));
+  }
 }
 
 /// [people] (name → devices), friends with each other, everyone online
 /// for two minutes so the mailboxes are chosen and announced.
-Future<_World> _circle(Map<String, int> people) async {
-  final _World w = _World();
+Future<_World> _circle(Map<String, int> people, {bool blobs = false}) async {
+  final _World w = _World(blobs: blobs);
   people.forEach(w.person);
   for (final _Device d in w.devices.values) {
     await w.setOnline(d, true);

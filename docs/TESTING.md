@@ -92,6 +92,19 @@ are in the library (the bridge's traffic meter and the door's link check
 call those functions since before), not in the bridge's code; every test
 that asks a core for its sessions or peers while traffic flows shows them.
 
+The bridge's local links and peers have tests of their own:
+`local_link_handshake_test.go` (handshake version 3: a recorded hello answers
+nothing played back later or elsewhere, a version 2 hello makes both sides
+close, hellos of one size, a connection that says nothing leaves its slot
+after two seconds), `local_link_advert_test.go` (an advert holds only as
+many tags as keep a false match rare, a filter too full matches nothing on
+any transport, the eight devices go in turns, a forged advert with every bit
+set matches no phone), `public_peer_order_test.go` (every node's own order of
+the public peers, one pick per operator, the same after a restart, a peer
+added or dropped moves no other) and `stranger_signals_test.go` (the budget
+that a receive-only node gives senders it does not name before the app is
+woken).
+
 ## 1. Network simulator (`lib/src/dev/sim/sim_network.dart`)
 
 `SimNetwork` is an in-memory network of phones:
@@ -214,10 +227,30 @@ header, and that nothing else brings it in.
 | `test/locked_presence_sim_test.dart`, `test/locked_presence_open_sim_test.dart` | the real `LockedReceiver` of several locked friends on a virtual clock (frames 80 ms on the way, a phone awake 5 s from its own round and 3 s from a frame, phones on 1.16.4 modelled as that version pinged and answered): how often they wake each other (each number with its "before"), lost pings, silent friends, a clock set back, `presence.zbox` writes; and what the first screen shows of friends the moment Zen opens after a lock |
 | `test/locked_alert_conformity_test.dart` | each frame ends the same on a locked phone as in the app: rings, call cards and message notices from one shared decision, a flood of mentions from one member |
 | `test/account_recovery_friends_test.dart`, `test/password_vault_recovery_test.dart`, `test/account_sync_pruning_test.dart`, `test/ledger_contacts_backup_test.dart` | key pieces at close friends (the account password's rules, the thresholds 2/3/4, recovery end to end with three close friends, pieces sent again until confirmed, former holders, a removed friend, a helper on a new phone, a stop from a device cut off, a helper on 1.16.4); passwords and notes back with every way an account comes back, the newest copy taken, a revoked device given none, a key copy with no friend at all; the state log started over so a deleted password or note leaves it; friends and groups saved in parts above some 240 friends and the private log started over within its bound |
-| `test/password_vault_test.dart`, `test/password_generator_test.dart`, `test/password_csv_import_test.dart`, `test/password_match_test.dart`, `test/password_screens_test.dart`, `test/password_autofill_test.dart` | "Hasła": the store's limits, earlier versions, edits on two devices, a newer or damaged vault left as it is, no secret in a debug string; the generator (classes, no modulo bias, strength); CSV files of Chrome, Edge, Firefox, Bitwarden, KeePass and KeePassXC, broken files and random bytes; matching by exact host, registrable domain, port and package, look-alike pages getting nothing; the screens behind the app password; the autofill picker (nothing leaves Zen without an unlock and a pick, a lock closes it) with the Android side faked |
+| `test/password_vault_test.dart`, `test/password_generator_test.dart`, `test/password_csv_import_test.dart`, `test/password_match_test.dart`, `test/password_screens_test.dart`, `test/password_autofill_test.dart` | "Hasła": the store's limits, earlier versions, edits on two devices, a newer or damaged vault left as it is, no secret in a debug string; the generator (classes, no modulo bias, strength); CSV files of Chrome, Edge, Firefox, Bitwarden, KeePass and KeePassXC, broken files and random bytes; matching by exact host, registrable domain, port and package, look-alike pages getting nothing; the screens behind the app password; the autofill picker (nothing leaves Zen without an unlock and a pick, a lock closes it) with the Android side faked; one question per request (the lock screen's unlock is the question for the request that was waiting, once, within its minute, never after a wrong or an emergency password, an unlock older than the request does not count, a lock forgets it), a login added in the picker (saved under the request's address, used at once, the held request, a form that ended meanwhile, a full or newer vault, a lock while typing), the first page of a login in two steps and a page with the password alone |
+| `test/password_manager_setup_test.dart` | the password manager's setup with the device faked: nothing asked where Zen fills nothing, the installed browsers Zen knows in its order with what each needs (a switch of its own, nothing, probably not shown, unverified), Zen's list equal to the autofill's list of browsers and to the manifest's `<queries>`, the Android side's answer read defensively, a browser's name as one short line, the channel's calls and a missing or failing Kotlin side, the screen on Android (Chrome off or on, reading again on return, no known browser, an Android that cannot fill, the import at the end), the honest page elsewhere, the button in "Hasła" also when empty |
+| `test/onboarding_first_run_setup_test.dart` | the first-start setup: the steps and their count, the password manager's step (asked first, yes shows the same setup as "Hasła", no changes nothing, the honest page where Zen fills nothing), after an update only the new step for who went through the revision before and every step for anyone further behind, the last step closing the setup opened from Ustawienia |
 | `test/secure_clipboard_test.dart` | a copied secret leaves the clipboard at a lock and at the end of its time in the background, without the clipboard being read; a failed marked copy copies nothing and says so; the plain clipboard where the system has no marked one |
 | `test/pyramid_era_seal_test.dart`, `test/pyramid_treasury_test.dart`, `test/pyramid_court_anonymity_test.dart` | on the pyramid's simulated world: operations dated into a sealed era count nowhere, late changes of the treasurers undo no payment, two seals of one era; a number split between orders freed by a release, a dishonest treasurer among six, what treasurers keep; the court's one-time cards (two distinct cards decide, one judge counts once, a card of one matter counts in no other, nobody outside the court holds one) |
 | `test/profile_photo_gif_test.dart`, `test/diagnostics_go_crash_accounts_test.dart`, `test/ledger_device_record_key_test.dart` | a GIF profile photo keeps moving, HEIC read by the phone's own decoder (faked), animated WebP and PNG made GIFs; the Go crash file given to the bridge only for a listed account; a key named in a friend's device record is a hint from that friend's account, never a pin |
+| `test/account_password_devices_test.dart`, `test/device_after_cut_off_test.dart`, `test/account_devices_names_test.dart` | the account password protects the key on every device: the wrapped key travels with the account (a link, a copy, a backup, the paper key) and between devices, the newest password wins, a device without it offers to set one; a device that appears after another was cut off is not taken until the person says it is theirs; device names are translated |
+| `test/account_replace_rule_test.dart` | another account never replaces one that holds anything, by a copy, a backup, a link or a key (one rule, the holdings read in `account_holdings.dart`); adding it beside, or wiping on purpose, and passwords only when ticked |
+| `test/circle_backup_fresh_copy_test.dart`, `test/circle_backup_restore_guard_test.dart`, `test/contacts_backup_fit_test.dart`, `test/password_circle_backup_switch_test.dart` | the copy with friends: a phone that is still looking never replaces it (the search goes on daily, a fresh copy needs the person's word), a copy under half the kept one waits 30 days, a copy dated ahead or signed by a cut-off device is refused, the owner is told; one large group no longer stops the copy; the passwords are a switch, the same on every device |
+| `test/recovery_pieces_kept_test.dart`, `test/recovery_reduction_test.dart`, `test/recovery_forgotten_devices_test.dart` | pieces of the account key: kept until told to forget, a change to fewer holders waits a week unless confirmed with the account password, a holder silent for five weeks does not count, a forgotten piece does not come back from a device that was away |
+| `test/friend_level_devices_test.dart` | a friend's level is the same on every device, the newest change wins, taken before the audience keys, back from every copy without undoing a later change |
+| `test/block_book_test.dart`, `test/blocked_everywhere_test.dart`, `test/dating_block_everywhere_test.dart`, `test/feed_blocked_people_test.dart` | a block is of the person in every feature and on every device (one list, every address and key, back from every copy, a lifted block stays lifted); the wall, a post's page, the profile, the bell and notifications leave a blocked person out |
+| `test/outgoing_media_metadata_test.dart`, `test/picked_file_cap_test.dart`, `test/tappable_icons_named_test.dart`, `test/password_strength_fit_test.dart` | everything sent in a chat leaves without place, time and device data however it was picked (a file that cannot be cleaned goes unchanged and says so); files opened from outside are read up to a bound; icon buttons have names for a screen reader; the strength line of a password |
+| `test/call_remote_picture_test.dart`, `test/call_controls_before_answer_test.dart`, `test/call_answered_elsewhere_test.dart` | the remote renderer is bound by the track once the platform has the stream, and again when decoded frames never reach the screen; VP8 first whatever either side lists; microphone, loudspeaker and camera work while it rings; a call taken on another device leaves no missed call |
+| `test/chat_scroll_touch_test.dart` | the conversation does not move under a finger: while the list is dragged or flung, a message, a receipt, the typing line or a file shifts nothing and waits on *to newest* |
+| `test/message_copy_vault_test.dart`, `test/disappearing_timer_order_test.dart`, `test/friend_invite_delivery_test.dart` | a message copy that comes again writes its file once; a disappearing timer carries a stamp that orders every change, an older message does not switch it back on; an invitation says whether it arrived and can be sent again |
+| `test/background_runner_conformity_test.dart` | one test runs the same signals through the app and through every runner (the default account, an additional account receiving in the background, the computer's tray): each rings and notifies by its own account's rules, a runner without a notice kit stays quiet, a muted friend's other devices stay quiet |
+| `test/locked_stranger_wake_test.dart`, `test/locked_wake_grid_sim_test.dart` | strangers cannot keep a locked phone awake (the hold only for friends, own devices and mailboxes, sixty an hour for the others, urgent pings only for friends); a model of Android's alarm windows for phones in a star of locked friends, with and without exact alarms (the wakes an hour and the longest gap; the figure "6 an hour" is this model's, not a phone's) |
+| `test/ledger_fold_test.dart`, `test/relayed_comment_test.dart`, `test/pebble_found_by_friends_test.dart` | what friends keep of reactions and profile is folded with a bound (a signed start of the log, the author's word, a bound per friend, posts never folded); a relayed comment carries the signed part its id hashes, a copy that proves itself wins; a pebble's "found" count takes only the author's friends |
+| `test/dating_minor_report_test.dart`, `test/dating_safe_date_clock_test.dart` | a profile is hidden for everyone only when two of its owner's own friends reported it, two keys of one person count once, a report is withdrawn, a switched-off profile announces no match; the date watcher counts from when the word arrived, an unconfirmed date goes a week after the alarm |
+| `test/pyramid_sign_rule_test.dart`, `test/pyramid_order_time_test.dart`, `test/pyramid_outside_verdict_test.dart`, `test/pyramid_wallet_uncounted_test.dart` | a treasurer signs only what its own ledger counts, a payee counts only what the statement lists, a refused order is dated again, a statement fits any number of treasurers; an outside verdict is shown as named friends' word; what a seal left out is shown in the wallet |
+| `test/password_public_suffix_test.dart` (with `test/fixtures/public_suffix/test_psl.txt`, the list's own vectors), `test/password_vault_two_devices_test.dart`, `test/password_csv_recovery_test.dart`, `test/account_decoys_vault_size_test.dart` | a login is offered only within one registrable domain of the Public Suffix List, hosts in their ASCII form; two devices editing and importing, each version naming its parent, conflicts never pruned, duplicates merged; a damaged CSV row costs that row; a decoy's password file can be as large as a real one |
+| `test/update_notice_signed_versions_test.dart`, `test/net_address_test.dart` | the update notice waits for the signed checksums and forgets a withdrawn version; addresses not worth announcing (6to4, Teredo, the newer documentation range) are left out |
+| `test/i18n_labels_test.dart`, `test/i18n_plural_one_test.dart` | a text that quotes a button or a screen uses that label's own translation, and a plural's form for one shows the number in languages where that form also covers 21 or 0 (section 5) |
 
 A new scenario: build a world, perform actions, `await w.net.run()`, check the
 state at a **different** person than the one who acted, and finally
@@ -469,6 +502,16 @@ translations in all files (under the same Polish key, with the same
 placeholders; plural forms per the language's CLDR), finally `--prune` and
 once more without options.
 
+Two more checks keep the translations honest. A text that quotes a button
+or a screen of the app must use that label's own translation (the empty
+"Close friends" filter once told people to mark someone as "Friend", the
+middle level; `test/i18n_labels_test.dart`, with the scanner in
+`tool/i18n/scanner.dart` and the few allowed exceptions in
+`tool/i18n/label_exceptions.dart`), and a plural's form for one must show
+the number in the languages where that form also covers 21 or 0
+(`test/i18n_plural_one_test.dart`: where 21 takes the form of 1, a text must
+not drop the number from it). `tool/i18n.dart` reports both.
+
 `test/i18n_test.dart` (part of `flutter test`, hence of CI) checks the
 translation layer (placeholders, missing translation = Polish text, plural
 forms in Polish, English, Russian and Arabic, language selection: chosen, then
@@ -540,7 +583,7 @@ cover that and the slow-start screen.
 | Job | Where | What it does |
 |---|---|---|
 | What to run | Ubuntu | decides whether a pull request changes code or only documentation, and whether the Linux build runs in the prebuilt image (`tool/ci/ci_plan.py`, below) |
-| Docs and site | Ubuntu | every run: no broken link in the Markdown files (`tool/ci/check_links.py`), the release contract (`tool/release.dart check`), the Python tests of `tool/ci` and that every screenshot of the website is there (`tool/screenshots.dart --check`); when only documentation changed, also the app's tests that read it (`flat_door_link_test.dart`, `legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`, `security_hardening_test.dart`) |
+| Docs and site | Ubuntu | every run: no broken link in the Markdown files and on the website (`tool/ci/check_links.py`, which runs `tool/ci/check_site.py` too: every page holds its menu and footer without JavaScript, in a `<noscript>` block made from `site.js`'s own list, `--write` makes them; every link, image, script and style names a file or folder that exists, a `#fragment` an id of its page, a repository link a path that exists, a download link a file the release attaches; nothing is loaded from another host; every page has a language, one title and one h1, a description, a canonical address and alt texts), the release contract (`tool/release.dart check`), the Python tests of `tool/ci` and that every screenshot of the website is there (`tool/screenshots.dart --check`); when only documentation changed, also the app's tests that read it (`flat_door_link_test.dart`, `legal_consent_test.dart`, `pages_site_test.dart`, `release_contract_test.dart`, `security_hardening_test.dart`) |
 | Format and analyze | Windows | `dart format` (no changes) and `flutter analyze` |
 | Tests (1 of 6) … (6 of 6) | Windows | the app's tests (including translations), a sixth of the files each, at the same time (`dart run tool/test.dart --shard N/6`, see "Running the tests") |
 | Tests on Linux | Ubuntu | the tests the Windows jobs skip: POSIX file modes (`media_temp_folder_test.dart`) and the app's calls into the real Go bridge, built first (`hybrid_kem_test.dart`, `hybrid_signature_test.dart`) |
@@ -812,7 +855,10 @@ fuzz target for every parser of what comes from the network or a nearby
 device (relay frames, IPv6 packets, LAN beacons, the local link's hello and
 frames, the door's JSON, DNS questions, signal reassembly), with round trips
 where there is a builder. `go test` runs their seeds; the CI job *Go
-bridge* also fuzzes each target for 8 seconds in every run. A finding is
+bridge* also fuzzes **every target of every package** for 8 seconds in every
+run (`tool/ci/go_fuzz_targets.sh` lists every `func Fuzz` of every
+`*_test.go` under `native/`, the ironwood copy included, and fails on an
+empty list: the step once read one file, so 14 targets ran as seeds only). A finding is
 written to `testdata/fuzz/<target>/`; committed, it becomes a seed.
 
 ### 11.3 Coverage
@@ -829,12 +875,22 @@ The core files of `tool/mutation_targets.json` changed in one small place
 at a time, as a slip would change them (`==`/`!=`, `<`/`>=`, `&&`/`||`,
 `true`/`false`, a `!` dropped, `+ 1`/`- 1`), each change run against the
 file's tests; a change no test notices is named in the summary, a line to
-pin down. On every pull request to `main` (six runners beside CI, about
-15 files and under half an hour each, 10 changes per file), weekly and by
+pin down. On every pull request to `main` (eight runners beside CI, about
+13 files and 26 minutes each, 10 changes per file; a file takes about two
+minutes), weekly and by
 hand; each run tries other changes (the seed is the run's number). The
-list grows with every release: `tool/ci/test_ci_checks.py` fails when a
-runner would get more than 20 files, and the workflow's matrix then gets
-another runner. A change that makes a test hang (after `--timeout`, 240 s)
+list grows with every release (100 files in 1.17.0, of the 128 that eight
+runners hold): `tool/ci/test_ci_checks.py` fails when a runner would get
+more than 16 files, and the workflow's matrix then gets another runner. The
+limit was 20 before; a runner with 30 files did not end within its 45
+minutes and no run of 1.16.5 said anything, and at 20 a runner took about
+43 of them. The summary is written file by file, so a runner cut off
+by its 45 minutes still says how far it got. On the runners a file's
+changes get 90 seconds (`--budget 90`): once they took that long no further
+change of that file is started, and the summary says how many were tried.
+Without it one runner of eight took over its 45 minutes in 1.17.0 while
+another took 15, each with 13 files: a file with slow tests ran them
+eleven times. A change that makes a test hang (after `--timeout`, 240 s)
 or eat memory (a `flutter_tester` past 2 GB, as an endless loop that writes
 on every turn does within seconds) counts as noticed; the test is stopped
 before it takes the machine down. Locally:
@@ -857,9 +913,23 @@ JVM tests (JUnit) of the Kotlin code with no Android in it: the
 power-button alarm's counting (`PowerPressCounter`), where a link Zen
 claims goes instead of back to Zen (`linkTargetWithoutZen`) and which
 fields of a login form autofill takes for the login and the password
-(`ZenAutofillFieldsTest`: hints first, a new password or a one-time code
-is no password to fill, two password fields offer nothing, a page's
-address counts only in a known browser). The CI job
+(`ZenAutofillFieldsTest`: hints first, hints that say nothing, as
+`autocomplete="off"`, leave the field to its type, a new password or a
+one-time code is no password to fill, two password fields offer nothing,
+the first page of a login in two steps fills the login alone, a page's
+address counts only in a known browser), which browsers the password
+setup looks at and what their provider's answer means
+(`ZenAutofillSetupTest`: only package names, each once and at most 40,
+only the documented values of the switch, the provider is the browser's
+own) and how long a request waits while a new login is typed
+(`ZenAutofillTimeoutTest`: five minutes from when it opened, a minute to
+pick but never past the same end), whose certificate may vouch for a
+page (`ZenAutofillTrustTest`: a browser's word counts only when the
+installed package is signed by that browser's maker, the fingerprints are
+pinned, a browser without a confirmed one is filled like any other app),
+who signs an APK as Android verified it, with its lineage (`ApkSignersTest`)
+and the window of an inexact alarm that ends on the ten-minute grid
+(`InexactAlarmWindowTest`). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
 
@@ -908,15 +978,22 @@ tests leave behind; a new class in its report is worth a look.
 - Of 1.16.5, only a phone shows: video between two Android phones (the
   VP8 preference is tested on descriptions, not on hardware codecs); the
   autofill service with real apps and browsers (of the Kotlin side only
-  the reading of a form's fields has unit tests and the manifest an
-  emulator test, section 9; the picker is tested with the Android side
-  faked); the phone's own
+  the reading of a form's fields, the setup's packages and a request's
+  time have unit tests and the manifest an emulator test, section 9; the
+  picker is tested with the Android side faked); the phone's own
   decoder for HEIC photos (faked); the clipboard emptied from the
   background; the alarm windows of a real phone (section 1, the model);
   the Android service taking over from a hung app; key pieces and the copy
   with friends end to end between real phones (simulated between
   services only). [RELEASES.md](RELEASES.md), section 3, lists what to
   try before a release.
+- The password manager's setup and the autofill row of the release after
+  1.16.5 were tried on no phone: Chrome's switch read through its provider
+  and its settings page opened, what Brave, Vivaldi, Firefox and its forks
+  really need, whether Edge, Samsung Internet and Opera show Zen at all,
+  the row in the light and the dark theme, and the suggestion inside a
+  real keyboard. The setup is tested with the device faked, the browsers'
+  answers as the documentation describes them.
 - The harness works only in debug builds.
 - Apps on one computer share one link: network splits are tested in the
   simulator.

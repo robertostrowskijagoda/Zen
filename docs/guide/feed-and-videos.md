@@ -53,7 +53,11 @@ post starts with the audience you picked last.
   limits likewise count only pictures fetched for posts and comments.
 - You can hide comments and block people in your own threads; **Report**
   keeps the signed original as evidence and can remove the post from your
-  device.
+  device. Likes and comments of someone you blocked in the messenger (a block
+  is of the person everywhere, see [Chats](chats-and-delivery.md#blocking-a-person))
+  no longer show under friends' posts: not on the wall, a post's page, the
+  profile, the bell or the system notifications, and their names leave the
+  counts.
 
 ## Mentions
 
@@ -139,7 +143,16 @@ friends.
   and phones that hold the post fetch the new version, or your signed
   removal.
 - Likes and comments of friends of friends reach you through the friend who
-  passed the post on, shown as "Ada (via Bob)".
+  passed the post on, shown as "Ada (via Bob)". A friend who passes on
+  comments cannot hide or rewrite someone else's: a comment comes with the
+  signed part its id is the hash of, a copy that proves itself wins over any
+  that does not, and without a proof the post author's copy wins; films read
+  comments the same way.
+- What friends keep of each other's reactions and profile is folded: the
+  author folds what no longer counts into a new start of the log and friends
+  drop what came before by the author's signed word, so likes taken back no
+  longer pile up on every friend's phone (200 taps that ended with no like
+  cost each friend a megabyte). Posts are never folded.
 - Limits: notices only about posts from the last 30 days; each post passed
   on once (again only when it changes, or when the friend list's audience
   changes); at most 10 posts of one person and 300 notices in all a day

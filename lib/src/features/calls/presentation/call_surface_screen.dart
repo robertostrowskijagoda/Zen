@@ -144,6 +144,13 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                   : null;
               final bool animateEntrance = !_controlsEntrancePlayed;
               _controlsEntrancePlayed = true;
+              // Microphone, loudspeaker and camera work while it still
+              // rings out or connects, once the media are set up.
+              final bool controlsWork =
+                  session.status == CallSessionStatus.active ||
+                  (ownsMedia &&
+                      session.ownControlsShown &&
+                      callMedia.controlsReady);
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -246,7 +253,7 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                                   ),
                             )
                           : null,
-                      onToggleMute: session.status == CallSessionStatus.active
+                      onToggleMute: controlsWork
                           ? () => runCallAction(
                               context,
                               ref
@@ -254,8 +261,7 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                                   .toggleActiveCallMute,
                             )
                           : null,
-                      onToggleSpeaker:
-                          session.status == CallSessionStatus.active
+                      onToggleSpeaker: controlsWork
                           ? () => runCallAction(
                               context,
                               ref
@@ -263,7 +269,7 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                                   .toggleActiveCallSpeaker,
                             )
                           : null,
-                      onToggleCamera: session.status == CallSessionStatus.active
+                      onToggleCamera: controlsWork
                           ? () => runCallAction(
                               context,
                               ref
@@ -271,13 +277,13 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                                   .toggleActiveCallCamera,
                             )
                           : null,
-                      onSwitchCamera: session.status == CallSessionStatus.active
+                      onSwitchCamera: controlsWork
                           ? () => runCallAction(
                               context,
                               () => callMedia.switchCamera(),
                             )
                           : null,
-                      onOpenDevices: session.status == CallSessionStatus.active
+                      onOpenDevices: controlsWork
                           ? () {
                               _openDevicePicker(context, callMedia);
                             }

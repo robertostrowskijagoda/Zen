@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Finds broken links in the repository's Markdown files.
+"""Finds broken links in the repository's Markdown files and on its website.
 
   python3 tool/ci/check_links.py              (from the repository root)
   python3 tool/ci/check_links.py docs/TESTING.md README.md
 
 Without arguments: every *.md at the top of the repository, under docs/ and
-under .github/. For every link and image (Markdown and the HTML inside it):
+under .github/, and the website in tool/pages (links, anchors, download
+names, the menu for visitors without JavaScript: tool/ci/check_site.py).
+For every link and image (Markdown and the HTML inside it):
 
 - a relative path must name a file or folder of the repository;
 - a #fragment must be a heading of the file it points to (GitHub's anchor:
@@ -25,6 +27,10 @@ import os
 import re
 import sys
 import urllib.parse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import check_site  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -177,6 +183,13 @@ def main(argv):
     for line in found:
         print(line)
     print("%d Markdown files, %d broken links." % (len(files), len(found)))
+    if not argv:
+        site = check_site.Site()
+        problems = site.problems()
+        for line in problems:
+            print(line)
+        print("%d site pages, %d problems." % (len(site.names), len(problems)))
+        found = found + problems
     return 1 if found else 0
 
 

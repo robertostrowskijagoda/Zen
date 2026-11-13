@@ -48,6 +48,7 @@ final class YggdrasilSignalTransport implements SignalTransport {
     this.openWaiter,
     this.waitTimeout = const Duration(seconds: 2),
     this.fallbackPollInterval = const Duration(seconds: 1),
+    this.holdOnArrival = true,
   });
 
   final NativeSignalBridge bridge;
@@ -62,6 +63,14 @@ final class YggdrasilSignalTransport implements SignalTransport {
 
   /// Polling interval used only without a working waiter.
   final Duration fallbackPollInterval;
+
+  /// Whether every signal that arrives holds the phone awake a moment
+  /// ([ZenWake.signalArrived]) before it is read. Off for a locked phone's
+  /// node: anyone who knows its address can send it signals, so its
+  /// receiver holds the phone only once it knows the sender is someone it
+  /// listens to (LockedReceiver.handleFrame), and what a frame sets to work
+  /// holds it while that runs.
+  final bool holdOnArrival;
 
   final StreamController<SignalTransportFrame> _frames =
       StreamController<SignalTransportFrame>.broadcast();
@@ -171,7 +180,9 @@ final class YggdrasilSignalTransport implements SignalTransport {
           // The packet woke the phone; it stays awake a moment so the
           // signal is read (no lock holds it otherwise). Whoever keeps it
           // (the inbox, a notice, a ring) holds the phone until done.
-          ZenWake.signalArrived();
+          if (holdOnArrival) {
+            ZenWake.signalArrived();
+          }
           await _processSignalResult(result);
           // Whatever queued up meanwhile, without another round trip.
           await _pollOnce();

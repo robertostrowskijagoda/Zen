@@ -31,7 +31,7 @@ stay classical, for reasons explained below.
 | A future quantum computer | break X25519 / Ed25519 | ML-KEM-768 and ML-DSA-65 in every hybrid; the secret holds while either half holds |
 | A thief with your device, locked | read your data | AES-256-GCM, password via Argon2id, hardware-held keys, throttled attempts |
 | Someone who picks up your unlocked device or forces you to open it | find other accounts | hidden accounts and decoy folders, the emergency wipe password |
-| A forged update | install malware as "Zen" | `SHA256SUMS`, Android signing certificate, the hybrid signature once maintainer keys are pinned |
+| A forged update | install malware as "Zen" | `SHA256SUMS` signed by the release signing key (one key is pinned; friend-to-friend updates stay off until a second one is), the Android signing certificate |
 | A modified Zen of another person | forge pyramid or ledger records, money | every phone checks every signed record and every order by the same rules; a past era of the pyramid's treasurers is sealed by the next one (what treasurers can still do together: "Honest limits") |
 | Tools inside Zen's own process (debugger, Frida, hooks) | sign what you never asked for | detection; money and the pyramid power key are blocked while detected |
 
@@ -66,7 +66,7 @@ or X25519 holds. It protects:
 | Mailbox mail and the locked inbox (Android, iPhone) | sealed again for the recipient's hybrid key (plus ephemeral and static X25519 for sender authentication); one encapsulation per recipient key per day, a fresh key for every envelope |
 | Neighbours' doors | every door runs the same session layer; a sealed knock also has a second layer from the sticker's token (knock) or the knocker's hybrid key (answer) |
 | Nearby (Bluetooth) hellos and answers | a one-time ML-KEM-768 + X25519 key per hello, sent in chunks over GATT |
-| Local link handshakes (Wi-Fi, Wi-Fi Direct, Bluetooth) | both sides add a one-time ML-KEM-768 to the link key |
+| Local link handshakes (Wi-Fi, Wi-Fi Direct, Bluetooth) | both sides add a one-time ML-KEM-768 to the link key; handshake version 3: both sides open with a fresh nonce and a selector names the sender and the other side's nonce, so a recorded hello answers nothing played back later or elsewhere (a 1.16.5 device links with this version only over the internet until it updates); hellos are padded to one of a few sizes; an advert holds the tags of eight devices in turns |
 | The pair secret of local links between friends' and own devices (adverts, handshake authentication) | each device sends 32 random bytes inside the sealed session above (`local_pair`, address checked against the proven device list); once both confirm, the secret is HKDF of the X25519 pair secret and both contributions, re-made after a reinstall |
 | Call keys | a fresh exchange in every call's offer and answer |
 | Dating: questions, answers, profiles, "Yes", messages, matchmaking | a fresh encapsulation for every box, so boxes cannot be linked; the weekly lantern is a SHA-256 commitment to a one-time hybrid key, and the match test is a sealed offer (no Diffie–Hellman) |
@@ -134,6 +134,17 @@ computer could break. So Zen does not rely on it for identity:
   shows a warning), and the audience keys it could read are rotated.
   Revocations are kept only for accounts the device knows: at most the
   account's devices + 4 (up to 32), 2 per device and 512 in all.
+  **What cutting a device off does not do:** it does not take the account
+  key off that device. If the device was unlocked, and the key was not
+  protected by an account password (or whoever holds it knows the
+  password), it can make itself a new device of the account after the
+  cut-off. The account's own devices then ask the person before they give
+  that new device anything, and say so ("Odłącz" explains it and what to do
+  next); **friends, who cannot tell, still accept it as the person's own**.
+  The way out is a new account (Settings, Accounts on this device, Add
+  account), inviting friends again, and wiping the old one. With an account
+  password set, the account key travels wrapped under it, on every device
+  (below), so a stolen unlocked phone does not hold it in the clear.
 - A hello from a stranger that only names a certificate is dropped without
   an answer, so nobody can probe whom you know.
 
@@ -152,7 +163,9 @@ encryption falls back to DTLS-SRTP inside the relay layer. Both sides
 prefer VP8 for the camera and a shared screen, before every offer and
 answer, a codec whose frames the frame encryptor handles (two hardware
 codecs could otherwise agree on one whose sealed frames the other side
-cannot open).
+cannot open). The side that answers puts VP8 first in the other side's
+description before applying it, whatever that side listed first, so an
+offer that lists H.264 first no longer gets a hardware H.264 call.
 
 ### QR tickets, cell votes and the court
 
@@ -328,7 +341,9 @@ friend list or device record names it only as a hint, see above).
   decoys are "used": while Zen runs they get something like a session now
   and then, at some moment of a run, so their files change as an
   account's in use do; the others stay as they were made, as an unused
-  account's. Decoys of 1.16.4 and earlier are written anew at a later
+  account's. A decoy's password file can be as large as a real one's (it
+  stopped at 60 KB while a vault of a thousand logins is larger, so one
+  folder listing told that an account was no decoy). Decoys of 1.16.4 and earlier are written anew at a later
   start, one at a time (the update itself changes no file). Keystore
   entries of extra accounts have hashed names. There is no list of hidden
   accounts. While an account that is not on the list is open, nothing goes
@@ -359,7 +374,21 @@ friend list or device record names it only as a hint, see above).
   (computers) runs it without the password; someone with full access to the
   device (root, or on a computer any program of the same user) can then tell
   that the account exists and read its mesh address and whom it accepts
-  messages from. Its notifications are generic.
+  messages from. Its notifications are generic. It rings and notifies by
+  that account's own rules: every account writes its own notice kit, and a
+  background runner without one (an extra account's, a computer's tray)
+  stays quiet instead of guessing: no ring and no call card with
+  "Połączenia" off, none with "Powiadomienia z tego konta" off, none for a
+  muted chat, and a hidden account does not give itself away by ringing.
+  "Odbierz" opens the account that is called.
+- **The account key on every device.** With an account password set, the key
+  is kept only wrapped by it, on every device of the account: a device that
+  took the account by a link, a copy, a backup or the paper key used to keep
+  it behind the app lock alone. The wrapped key (signed by the account key,
+  with the time it was set) now travels with the account and between its
+  devices, the newest password wins, and a device that took the account
+  without it offers to set one. A wrong password at a backup is told apart
+  from a file whose header cannot say.
 - **The copy with friends.** Chosen friends keep an encrypted copy of your
   data, with no recovery circle needed: the friends who serve as your
   mailboxes, then your close friends, others only to reach two, at most
@@ -367,8 +396,10 @@ friend list or device record names it only as a hint, see above).
   with their levels, settings, your pyramid state (votes, private data,
   the power key of the head), your household (flat key, resident key,
   household profile and housemates' names; not the door key or the
-  neighbours), your dating profile and its settings, your **passwords**,
-  your **notes to self**, and (switchable) the text of your one-to-one and
+  neighbours), your dating profile and its settings, your **passwords**
+  (a switch, "Hasła w kopii u znajomych", on by default and the same on
+  every device of the account; switched off, the friends' copy is replaced
+  at once with one without them), your **notes to self**, and (switchable) the text of your one-to-one and
   group conversations — no photos, videos, files or disappearing
   messages; at most 10 MB, the oldest messages go first. Every section and
   every month of every conversation is split into chunks sealed with
@@ -386,12 +417,21 @@ friend list or device record names it only as a hint, see above).
   60 MB of it for friends' copies, 10 MB each), drops one when neither is
   true any more, keeps only the newest it was offered, and gives a copy
   back only to a device the account certified and has not cut off (a
-  signed request, made within the hour). After a recovery, and after a key
+  signed request, made within the hour). A copy that is much smaller than
+  the one kept (under half) does not replace it at once: the holder keeps
+  the larger previous copy for 30 days. A copy dated ahead of the holder's
+  clock, or signed by a device that was cut off, is refused and no longer
+  blocks every real copy, and the owner is told when friends refuse one. After a recovery, and after a key
   copy is restored (where one friend's invitation code, typed there, gives
   a new phone someone to ask), Zen asks the holders and friends, gathers
   the copies offered for 30 seconds, takes the newest, checks it and
   restores it with progress shown; passwords and notes are merged, never
-  written over what is there. A friend still on 1.16.4 refuses a copy
+  written over what is there. A phone that is looking for its copy never
+  replaces it with its own: the search does not give up (a copy from a newer
+  Zen, or thirty days without finding one used to end it, and the new phone
+  then made a copy of its nearly empty data, which friends kept as the
+  newest), it goes on once a day, and a fresh copy from such a phone needs
+  the person's word. A friend still on 1.16.4 refuses a copy
   unless it is a helper of that account's old circle, and the next friend
   is asked.
 - **Recovery by close friends.** With an account password set, every
@@ -414,7 +454,15 @@ friend list or device record names it only as a hint, see above).
   confirmed their pieces, or a key copy exists. People no longer close are
   told to forget their pieces, and an honest holder deletes them, and
   those of someone no longer a friend six weeks later; a piece follows its
-  holder to a new phone and into copies. The limits: the delays, the alarm
+  holder to a new phone and into copies. A holder keeps every set until
+  told to forget (it used to keep the two newest, so two changes in a row
+  dropped the last complete set); older sets are forgotten only by holders
+  who confirmed the new one, and a forgotten piece does not come back from
+  a device that was away. A change to **fewer holders** (fewer than two
+  close friends included, which used to make everyone forget at once, with
+  no wait and no password) waits a week, tells the person, and goes at once
+  only when confirmed with the account password. A holder silent for five
+  weeks no longer counts towards "Konto jest zabezpieczone". The limits: the delays, the alarm
   and forgetting are kept by honest apps only. As many holders of one set
   as its threshold, together, get the sealed key and can guess the account
   password offline, one Argon2id run per guess; if they guess it, they
@@ -425,18 +473,44 @@ friend list or device record names it only as a hint, see above).
   forget and keep their pieces. Pieces handed out before 1.15.4 hold an
   `emergency` half that four helpers open without a password; helpers on
   1.15.4 or later never release it, and a new set replaces it.
+- **Blocking is of the person.** One list, kept by account with every address,
+  device and dating key known for the person, is read by the messenger,
+  Dating, nearby, the wall, films, pebbles, introductions, mentions and
+  followers, on every device of the account, and comes back from every copy
+  (it used to be a list per feature, so someone blocked in the messenger
+  still got your dating profile through a mutual friend, and a block in
+  Dating was beaten by a new dating key). A lifted block stays as a lifted
+  record (up to a bound), so a device that was away never brings it back.
+  Their likes and comments are left out under friends' posts and their
+  names out of the counts; a removed friend's account is remembered so that
+  a block still finds it. **The honest limit:** an account costs nothing, so
+  a new account, a new device key or a new dating key of the same person
+  cannot be recognised; Zen refuses what it knows to be theirs, never the
+  person.
+- **What leaves with a file you send.** Photos, films and recordings sent in
+  a chat leave without place, time and device data (EXIF and the like),
+  whichever way they were picked (gallery, camera, drop, paste, recording);
+  one module (`outgoing_media.dart`) cleans them as posts already were. A
+  file of another kind goes unchanged, and so does one that cannot be
+  cleaned (the attach sheet says so), and it may carry such data.
 - **What friends keep of you.** Friends hold your ledger: `feed` (posts),
   `acts` (reactions, comments and the like), `profile`, and `private`
   (sealed to your own devices: the copy of your friends and groups, saved
   in parts above 40 KiB, so it no longer stops at about 240 friends). Your
   `own` space (settings, notes, passwords, chat copies for your other
-  devices) stays on your own devices. Only `private` is pruned at friends:
+  devices) stays on your own devices. `private` is pruned at friends:
   once copies that no longer count outweigh the current one (64 KiB of
   slack), a device starts its private log over at a checkpoint, and
   friends drop what came before once the new start has fully reached them,
-  on that device's signed word only. `feed`, `acts` and `profile` are never
-  pruned (other people's entries refer to them): a deleted post adds a
-  deletion, and the post's own entry stays with the friends who hold it.
+  on that device's signed word only. `feed` is never pruned or folded (other people's entries refer to
+  posts): a deleted post adds a deletion, and the post's own entry stays
+  with the friends who hold it. What friends keep of reactions (`acts`) and
+  profile (`profile`) is **folded with a bound**: every like, every like
+  taken back and every older profile entry used to stay on every friend's
+  phone for ever (200 taps that ended with no like cost each friend a
+  megabyte). The author folds what no longer counts into a new start of the
+  log that carries what still does, friends drop what came before it by the
+  author's signed word, and a friend's log has a bound of its own.
 - **The full account copy.** "Create a full account copy" writes the chosen parts of the
   account (always the account key) into one file, in parts of 1 GB when
   larger. It is sealed in frames of 1 MiB with AES-256-GCM under a key from
@@ -444,8 +518,13 @@ friend list or device record names it only as a hint, see above).
   post-quantum safe); each frame's number and whether it is the last are
   bound to it, so frames cannot be cut, swapped or added, and every file
   inside is checked by its SHA-256. A wrong password is told apart from a
-  damaged file. A copy of another account is refused before its files are
-  read on a device that already holds an account with data. A copy made by
+  damaged file. Another account never replaces one that holds anything: a copy, a
+  backup file, a link or a key taken onto a device with a name, notes,
+  passwords, posts, chats, invitations, an accepted friend, a group or a
+  pyramid is refused before its files are read (one rule for every way in).
+  The person adds the other account beside this one, or wipes this one on
+  purpose after being offered a backup; saved passwords go along only when
+  ticked. A copy made by
   a newer Zen is refused with "update first", never half-read.
 - **Data from a newer Zen.** Stored files carry a format version. A file
   written by a newer version is left untouched (not overwritten, not
@@ -486,11 +565,19 @@ entries, 4 MB).
   (the `own` space, which friends do not keep): an edit made on two
   devices at once keeps both passwords (the other one in the entry's
   history, marked), and a deletion removes only the versions it saw. Each
-  entry keeps its last 5 versions.
+  entry keeps its last 5 versions. Whether two edits clashed is not judged
+  by the devices' clocks (a password changed offline once became ordinary
+  history when the other device edited twice, and was gone after six
+  edits): each version names the version it was made from, and one that is
+  not an ancestor of the current one is shown as a conflict and is never
+  pruned. The same logins imported on two devices merge into one entry. A
+  damaged row in an imported CSV costs that row only.
 - **How they come back.** In every way an account comes back: another
   device of the account, the full account copy, moving the account, and
-  the copy with friends (above), which a key copy or close friends open.
-  They are merged into what is there, never written over it.
+  the copy with friends (above), which a key copy or close friends open,
+  unless "Hasła w kopii u znajomych" is off (a switch, on by default, the
+  same on every device of the account). They are merged into what is there,
+  never written over it.
 - **What is not protected.** An overwritten or deleted password stays in
   each device's sealed log of account states until that log starts over,
   at most 6 hours after the change was looked at (deletions are carried
@@ -507,32 +594,123 @@ entries, 4 MB).
 
 On Android 9 and later Zen can fill logins into other apps and browsers,
 once the person picks Zen as Android's autofill service (off until then).
-A login form then gets one suggestion, "Odblokuj Zen", which carries no
-login and no password: nothing is read from disk for it and no password
-exists on the Android side. Nothing leaves Zen before the person taps it,
-unlocks Zen, confirms who they are and picks an entry; only that entry's
-login and password go back, and only to the request still open. Closing
-the picker, Zen locking, the time running out, going back to the app
-instead of picking, or any error ends the request with nothing filled.
-This version never offers to save what is typed elsewhere.
+A login form then gets one suggestion, a row of Zen's own with its icon,
+"Zen" and "Odblokuj Zen", which carries no login and no password: nothing
+is read from disk for it and no password exists on the Android side. The
+same holds for the suggestion inside the keyboard (Android 11 and later,
+built with `androidx.autofill`): it holds the icon, the two words and a
+description for screen readers, and its long press opens Zen from an
+immutable intent with no extras. Nothing leaves Zen before the person taps
+the suggestion, is asked who they are once (below) and picks an entry; only
+that entry's login and password go back, and only to the request still
+open. Closing the picker, Zen locking, the time running out, going back to
+the app instead of picking, or any error ends the request with nothing
+filled. This version never offers to save what is typed elsewhere.
+
+- **Which forms get it.** A form with exactly one field that says it takes
+  the current password, and at most one login field before it; or the first
+  page of a login in two steps: no password field of any kind and exactly
+  one field that says it is the login (`username`; an e-mail field alone is
+  not enough). A hint that says nothing about a field (`autocomplete="off"`
+  and the words pages put there to keep browsers away) is passed over, and
+  the field is read by its type and its name; a field that says it is
+  something else (a new password, a one-time code, a search, a phone
+  number) is never filled, and a form with two password fields (signing up,
+  changing a password) gets nothing. Only the fields the form has are
+  filled: the login alone on the first page of two, the password alone on
+  the second.
+- **One question, and the unlock that counts as it.** An unlocked Zen asks
+  who the person is when a request's picker is to open, as for opening
+  "Hasła", every time. When Zen was locked, asking again right after the
+  lock screen would be the same question twice, so that unlock is the
+  question, within these limits. The lock screen asks the Android side, as
+  it starts to check a password or a fingerprint, which request is open;
+  only an answer that came back before the check ended counts, so only a
+  request already waiting at that moment. Only a check that opened this
+  account passes; the emergency wipe password, "Nie pamiętam hasła" and
+  "Inne konto" never start one, so a hidden or another account's unlock
+  passes nothing, and a wrong password forgets it. The pass is for that one
+  request (by its id), is taken once, whatever the answer, and only within
+  a minute of when the request was seen open, the longest the Android side
+  keeps a request. Locking Zen forgets it, so does any later check, and a
+  host with nothing to take it up lets it go. It opens nothing else: it does
+  not touch the clock of confirmations that "Hasła" and every other
+  sensitive place use, so "Hasła" itself still asks every time. What it
+  gives up compared with a second question: that question confirmed the
+  person at the moment the picker was about to open, with the requesting
+  app named on the screen; now the confirmation is the unlock made up to a
+  minute earlier, on the lock screen, which does not name the app. What
+  remains: the request exists only because someone tapped Zen's suggestion
+  in that app a moment before, the picker still names the app and the page,
+  and nothing goes to the form without an entry picked there. Someone who
+  holds the phone and can unlock it could answer a second question just as
+  well, since it asks for the same password or finger.
+- **A login added in the picker.** With nothing saved for the page or app,
+  the picker opens the ordinary entry form to add one. Its address is taken
+  from the request alone, never from what the page or app wrote: the page's
+  scheme, host and port as a known browser reported them, or
+  `android-app://` with the package as the system reports it, shown and not
+  editable, so the next request from the same page or app finds the entry
+  as an exact match. While it is typed the request is kept open for up to
+  five minutes from when it began (`hold`; the Android side never keeps it
+  longer, and Zen locking or the person leaving still ends it). The request
+  holds only the ids of the form's fields: when the form has gone, nothing
+  is filled and the new entry is kept and said so. What a longer wait gives
+  up: the form stays fillable for minutes instead of one. An entry added
+  this way is typed by the person for that page, so a page cannot make Zen
+  save a login under an address of its choosing.
+- **The setup looks at browsers.** "Konfiguracja haseł" tells which of 21
+  known browsers are installed, so the manifest names them under
+  `<queries>` (package visibility, no permission; Zen sees whether these
+  packages are installed and nothing else about the others): `com.android.chrome`,
+  `com.chrome.beta`, `com.chrome.dev`, `com.chrome.canary`,
+  `org.chromium.chrome`, `com.brave.browser`, `com.vivaldi.browser`,
+  `com.microsoft.emmx`, `com.sec.android.app.sbrowser`, `com.opera.browser`,
+  `com.kiwibrowser.browser`, `org.mozilla.firefox`,
+  `org.mozilla.firefox_beta`, `org.mozilla.fenix`, `org.mozilla.focus`,
+  `org.mozilla.klar`, `org.torproject.torbrowser`, `us.spotco.fennec_dos`,
+  `org.mozilla.fennec_fdroid`, `org.ironfoxoss.ironfox` and
+  `com.duckduckgo.mobile.android`. For the Chromium family it reads the
+  browser's own provider
+  (`content://<package>.AutofillThirdPartyModeContentProvider/autofill_third_party_mode`)
+  for its "Autofill using another service" switch, off the main thread
+  (the browser may start for it), and takes anything unexpected for
+  unknown; "Otwórz ustawienia przeglądarki" starts an activity only when
+  it resolves in that very package, never a chooser. What Dart names is
+  checked again on the Android side (only valid package names, at most 40
+  in a call). Nothing about it leaves the phone or goes to the log.
 
 - **Matching.** The picker lists only the logins saved for the app or
   page that asked; every other entry is shown only after a warning
   ("Szukaj w hasłach"), since a password given to the wrong page is how
   phishing works. An app matches only an entry for exactly its package, as
-  Android reports it. A page matches by its address only in a known
-  browser, by the same host or another host of the same registrable domain
-  (never by a part of a name: `evil-example.com` and
-  `example.com.evil.net` are not `example.com`; hosts under a public
-  suffix such as `co.uk` or `github.io` match only their own name); a page
-  that is not https matches only entries that say `http://`, and a port
-  must be the same.
+  Android reports it, and an `android://` address also its signing
+  certificate's hash, which is kept and checked (a login saved from the
+  picker names the app's certificate). A page matches by its address only
+  in a known browser **whose installed package is signed by that browser's
+  maker** (the certificate fingerprints are pinned in `ZenAutofillTrust.kt`
+  with their sources; a browser without a confirmed one is filled like any
+  other app, by package alone, because browsers were once recognised by
+  package name alone and an app installed under a known browser's name
+  could name any page), by the same host or another host of the same
+  registrable domain **of the Public Suffix List**, which ships with the
+  app (`public_suffix_rules.dart`, refreshed by `tool/public_suffix_list.dart`;
+  the earlier list was made by hand and incomplete, so a login saved under
+  `gdynia.pl`, `trycloudflare.com` or `s3.amazonaws.com` was offered on
+  anyone else's page there without the warning). Never by a part of a name:
+  `evil-example.com` and `example.com.evil.net` are not `example.com`;
+  hosts under a public suffix such as `co.uk` or `github.io` match only
+  their own name. Hosts are compared in their ASCII form, so addresses in
+  other scripts match. A page that is not https matches only entries that
+  say `http://`, and a port must be the same.
 - **What a malicious app can and cannot do.** Any app with a login form
   gets the "Odblokuj Zen" suggestion and learns from it only that an
   autofill service answers. It cannot name a web page to be matched as
-  one (only a known browser's page counts; any other app is matched by its
-  package alone), cannot change what the suggestion carries to Zen, and
-  gets nothing unless the person unlocks Zen and picks an entry for it;
+  one (only a known browser's page counts, and only when the installed
+  package carries that browser's maker's signature; any other app is
+  matched by its package alone), cannot change what the suggestion carries to Zen, and
+  gets nothing unless the person unlocks Zen (or confirms who they are)
+  and picks an entry for it;
   the picker shows its package (and the name it gives itself) at the top.
   What it can do: ask, look like another app, and receive whatever the
   person picks for it past the warning. A browser is trusted to report
@@ -588,16 +766,49 @@ still locked (for the last 64 messages noticed).
 
 Whether a locked phone rings, shows the call card or tells of a message is
 decided by the same functions the unlocked app uses, from what the
-capability and the notice kit say: nothing with "Połączenia" off; a call
+capability and the notice kit say, **by the rules of the account that
+receives**: each account (an additional one receiving in the background, and
+a computer's tray too) writes its own notice kit, and a runner without one
+stays quiet (it used to ring and show the call card with "Połączenia" off,
+with "Powiadomienia z tego konta" off and for muted chats, and a hidden
+account gave itself away). "Odbierz" opens the account that is called, a
+muted friend's other devices stay quiet, and groups past the kit's size no
+longer go silent. One test runs the same signals through the app and
+through every runner. Within an account: nothing with "Połączenia" off; a call
 only from a friend, or a group call from someone who speaks in that joined
 group; a group message only from someone who speaks in that group; a
 mention past a mute or a mentions-only group only from a member and within
 the limit per sender; muted conversations stay quiet. Whatever the locked
-phone does not know counts as "no", the quiet outcome; with no notice kit
-at all only friends' calls and messages count. A notice kit written before
+phone does not know counts as "no", the quiet outcome; a runner with no
+notice kit at all (the app was not unlocked since the kit came in, or the
+file does not open) treats every switch that can be off as off and names
+nobody: nothing rings and no call, message or invitation is told about,
+frames are still kept for the app, and only a friend's alarm, which no
+switch turns off, still shows. A notice kit written before
 1.16.5 does not say who speaks in which group: until the app is unlocked
 once and writes a new one, the capability's friends and members of joined
 groups count, as they did before.
+
+**Strangers cannot keep a locked phone awake.** Every signal that reaches
+the node used to hold the phone for three seconds before its sender was
+looked at, and a group member who is no friend got an answer to every urgent
+ping. Now the hold is taken only for friends, the account's own devices and
+mailboxes; the work of other senders holds the phone at most sixty times an
+hour each; a receive-only node gives senders it does not name (not friends,
+own devices or contacts the locked receiver heard from) a budget before the
+app is woken (30 signals an hour per /64 network, bursts of 20, and 240 an
+hour from all of them together, bursts of 60; what strangers legitimately
+send, a friend request, a deposit for a friend it is a mailbox of, a knock,
+fits in it), and urgent pings are answered only for friends. **The ten-minute
+grid without exact alarms:** the beat's wakes keep to the clock's ten-minute
+grid also where Android gives no exact alarms (Android 14 and later do not by
+default), by an inexact alarm asked for so that its window ends on the grid,
+and a wake delivered early runs nothing early; before, such a phone kept a
+phase of its own and the phone in the middle of ten locked friends woke 36 to
+39 times an hour. "6 wakes an hour" is a figure for that phone in the model
+of Android's alarms in `test/locked_wake_grid_sim_test.dart` (friends' phones
+all locked and on the grid, other apps' wakes as the model has them), not a
+measurement on a phone.
 
 Limits: someone who takes the background key out of a running, unlocked-
 since-boot phone (root, a forensic tool) can run this device's mesh identity
@@ -629,7 +840,8 @@ inbox.
 ## Build and supply chain
 
 - The Go bridge is built with the Go version pinned in `go.mod`'s
-  `toolchain` line (the latest 1.26 security release), and CI runs
+  `toolchain` line (1.27.4, a security release of Go; `go.mod` itself asks
+  for 1.26.0 at least), and CI runs
   `govulncheck` against the bridge's modules and Go itself.
 - Flutter packages come exactly from `pubspec.lock` (`--enforce-lockfile`).
 - The prebuilt libwebrtc that `flutter_webrtc` downloads for Windows and
@@ -687,6 +899,21 @@ inbox.
 - libwebrtc logs key material at its info log level; release builds keep
   WebRTC logging off, and it must stay off. The bundled libwebrtc is M150;
   fixes from newer Chrome releases arrive only with a new WebRTC-SDK build.
+- A friend who passes on comments cannot hide or rewrite someone else's:
+  a comment comes with the signed part its id is the hash of, a copy that
+  proves itself wins over any that does not, and without a proof the post
+  author's copy wins (a copy under the same id with a blocked account or
+  other words used to replace the real one); films read comments the same
+  way. A pebble's "found" count takes only the author's friends and counts
+  how many of *your* friends collected it: nothing proves that a finder
+  stood at the sticker, so it is a count of claims, not of visits.
+- Dating: the sealed match test protects only against apps that follow the
+  rules (a modified app can ask without wishes and read the offer); what
+  protects a profile from a particular friend is the hide list. A profile
+  is switched off for everyone on a phone only when two of its owner's own
+  friends reported it as a minor.
+- Blocking cannot recognise a person who makes a new account (see
+  "On the device").
 - A comment naming files that are not its own can still make a device fetch
   them (network traffic, bounded per entry), but no longer remove them.
 - Pyramid transfers are private, but not from the treasurers: every
@@ -708,17 +935,50 @@ inbox.
   majority makes money from nothing; but a phone that is not a treasurer
   keeps only the treasurers' signed statements of its balance, and a
   dishonest majority could sign a false one.
-- Self-update checks the maintainers' signature only once their keys are
-  pinned in the app; until then it relies on `SHA256SUMS` and, on Android,
-  the signing certificate.
+- Pyramid, what counts and what is shown (since 1.17.0): a treasurer signs
+  only what its own ledger would count (an order dated before the money it
+  spends, a payer's clock nine minutes slow, was signed by every treasurer,
+  counted by none and shown as received); a refused order says why and is
+  dated again by itself, so the account number is not left stuck. A payee
+  counts a payment, and shows "waiting for confirmation" until then, only
+  once the agreed statement lists it. A statement keeps a majority of
+  signatures per operation and fits a signal with any number of treasurers
+  (with seven it was 2.5 MB and never sent), and the list of what a
+  treasurer signed is pruned once it counts or its era is sealed. A verdict
+  seen outside the pyramid is shown as the word of the named friends who
+  passed it on and only while a current friend stands by it (outside readers
+  took a verdict from any friend and any key, so a friend could make one up
+  and the accused could hide a real one with an overturning of their own;
+  an overturning now takes back only its sender's word). A payment a seal
+  left out, one signed against the rules and a treasurer who signed two
+  seals of one era are shown in the wallet. **Known limits, not fixed in
+  this version** (the pyramid is not open): the seal of an era can stall
+  after a late change among the treasurers, and a back-dated change in a
+  quiet pyramid can still undo a payment.
+- Self-update from GitHub takes only a file whose `SHA256SUMS` carries the
+  release signing key's signature (one maintainer key is pinned in
+  `release.dart`) and, on Android, an APK signed by the installed copy's
+  key or by a later link of its rotation lineage (as Android verifies it:
+  an unrelated key, a branch off an old key and a return to an old key are
+  refused). Friend-to-friend updates need two pinned keys and stay off. A
+  version is announced (the notification) only once its signed checksums
+  are read, and a remembered version that was withdrawn is forgotten, so a
+  mistaken tag or a false answer from GitHub's unsigned API no longer
+  silences the notice for every real version below it. Losing or rotating
+  the signing keys is in [RELEASES.md](RELEASES.md).
 - Recovery by close friends: the waiting time, the alarm and forgetting
   old pieces are kept by the holders' honest apps; as many holders of one
   set as its threshold (former ones who kept copies too) can guess the
   account password offline (see "Recovery by close friends" above).
-- Unlinking a device does not change the account's own key: entries in
-  `private/` sealed with it stay readable to the unlinked device if it gets
-  them from somewhere. Friends stop syncing, sending keys and messages to
-  it once the revocation reaches them.
+- Unlinking a device does not change the account's own key and does not take
+  it off the device: entries in `private/` sealed with it stay readable to
+  the unlinked device if it gets them from somewhere. Friends stop syncing,
+  sending keys and messages to it once the revocation reaches them. A
+  device that held the key unwrapped and unlocked (the account password
+  not set, or known to whoever holds it) can make itself a new device
+  after the cut-off; the account's own devices ask before they give it
+  anything, but **friends still accept it** as the account's, so the only
+  remedy is a new account (see "Device keys and pinning").
 - A lost device you have not cut off could still send a newer (validly
   signed) copy with friends, and the newest copy is the one restored; its
   data is yours anyway, but it could make the copy smaller. Holders also

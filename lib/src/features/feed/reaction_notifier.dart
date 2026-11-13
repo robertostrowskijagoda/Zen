@@ -32,6 +32,7 @@ final class ReactionSystemNotifier {
     required this.nameOf,
     required this.notify,
     required this.shouldNotify,
+    this.blockedAccounts = _nobody,
     this.quiet = const Duration(seconds: 5),
     this.atMost = const Duration(seconds: 30),
     int Function()? now,
@@ -43,6 +44,11 @@ final class ReactionSystemNotifier {
 
   /// False while the app is in front.
   final bool Function() shouldNotify;
+
+  /// The people blocked in the messenger: nothing is announced of them.
+  final Set<String> Function() blockedAccounts;
+
+  static Set<String> _nobody() => const <String>{};
 
   /// Quiet time before a burst of reactions is announced.
   final Duration quiet;
@@ -105,7 +111,11 @@ final class ReactionSystemNotifier {
         key: kNotifiedReactionsKey,
       );
       final List<FeedPost> own = <FeedPost>[
-        for (final FeedPost p in buildFeed(node, nameOf: nameOf))
+        for (final FeedPost p in buildFeed(
+          node,
+          nameOf: nameOf,
+          blockedAccounts: blockedAccounts(),
+        ))
           if (p.isOwn && p.resharedBy.isEmpty) p,
       ];
       // First run: what is there is not news. In front of the app: you see it.

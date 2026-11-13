@@ -479,7 +479,8 @@ class _AnonymousNote extends StatelessWidget {
 
 /// The verdicts of the pyramid's court about whoever uses [address] (null:
 /// this person), as their profile shows them — to members and to anybody
-/// a member friend passed them on to. Nothing when there are none.
+/// a member friend passed them on to (as that friend's word, named).
+/// Nothing when there are none.
 class PyrVerdictList extends StatelessWidget {
   const PyrVerdictList({required this.pyr, this.address, super.key});
 
@@ -558,6 +559,27 @@ class PyrVerdictList extends StatelessWidget {
                       'date': pyrDate(v.until!),
                     }),
                 ].join(' · '),
+                style: TextStyle(color: zen.textMuted, fontSize: 12),
+              ),
+              if (v.by.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 2),
+                Text(
+                  t('Przekazali znajomi z piramidy: {names}', <String, Object?>{
+                    'names': v.by.join(', '),
+                  }),
+                  key: Key('pyr-verdict-by-${v.id}'),
+                  style: TextStyle(color: zen.textMuted, fontSize: 12),
+                ),
+              ],
+            ],
+            if (list.any((PyrVerdictView v) => v.by.isNotEmpty)) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                t(
+                  'Ten telefon nie jest w piramidzie i nie sprawdzi wyroku '
+                  'sam: to słowo znajomych, którzy go przekazali.',
+                ),
+                key: const Key('pyr-verdict-outside'),
                 style: TextStyle(color: zen.textMuted, fontSize: 12),
               ),
             ],

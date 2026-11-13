@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"net"
 	"net/url"
 	"sort"
@@ -38,8 +37,15 @@ import (
 // below the person's node. All doors of a phone (the flat's own and the
 // mailbox doors it runs for friends) hang below one "door host": a third
 // node with a random key made anew whenever it starts, that dials up to
-// doorHostPeerCount of the main node's public peers on its own (avoiding the
-// main node's tree parent) and answers nothing either. One host instead of
+// doorHostPeerCount public peers on its own and answers nothing either. Its
+// peers are never the main node's: an operator that had both the main node
+// and the door host on its links would see the person's key and the door's
+// come from one IP address, and so learn which person lives behind the
+// sticker on a door (doorHostCandidates). Only when the pool has nothing
+// else does the host take one of the main node's peers (avoiding the main
+// node's tree parent). What still links them: the two keys use the same IP
+// address, so whoever sees the links of both peers (or the phone's
+// network) can pair them. One host instead of
 // a connection per door: a phone may run up to 1+maxHostedDoors doors, and
 // each own upstream connection would cost a TLS session, keepalives and
 // tree traffic. What the shared host gives away: the doors of one phone sit
@@ -148,6 +154,11 @@ var doorHostPeerAllowed = func(uri string) bool {
 	return !isLocalPeerURI(uri)
 }
 
+// doorHostPublicPool is the pool the door host takes its peers from: the
+// one the main node chooses from (the user's list, or the built-in one).
+// Tests that run a mesh of their own leave it empty.
+var doorHostPublicPool = activePublicPeerPool
+
 type doorNode struct {
 	core     *core.Core
 	listener *core.Listener
@@ -236,7 +247,10 @@ type doorHost struct {
 	main *bridgeNode
 	mu   sync.Mutex
 	// The public peers it dials now: as GetPeers lists them → as dialled.
-	peers  map[string]string
+	peers map[string]string
+	// Its own order of the pool (a new one each start, as its key), and
+	// how far into it the peers that failed have moved it.
+	seed   []byte
 	offset int
 	// Its peerings as the app reads them, asked off the app's thread
 	// (node_view.go).
@@ -293,12 +307,12 @@ func newDoorHost(main *bridgeNode) (*doorHost, error) {
 		return nil, err
 	}
 	host := &doorHost{
-		core:   hostCore,
-		main:   main,
-		peers:  make(map[string]string),
-		offset: rand.IntN(1 << 16),
-		quit:   make(chan struct{}),
-		done:   make(chan struct{}),
+		core:  hostCore,
+		main:  main,
+		peers: make(map[string]string),
+		seed:  peerOrderSeed(cfg.PrivateKey),
+		quit:  make(chan struct{}),
+		done:  make(chan struct{}),
 	}
 	host.repeer()
 	go host.drain()
@@ -344,8 +358,58 @@ func (host *doorHost) watch() {
 			host.offset += doorHostPeerCount
 			host.mu.Unlock()
 			host.repeer()
+			continue
+		}
+		if host.sharesWithMain() {
+			// The main node's rotation moved onto the host's peer: the host
+			// moves away.
+			host.repeer()
 		}
 	}
+}
+
+// sharesWithMain reports whether the host dials an operator the main node
+// dials too while the pool has another one for it.
+func (host *doorHost) sharesWithMain() bool {
+	mainPeers := host.main.configSnapshot().Peers
+	groups := peerGroups(mainPeers)
+	host.mu.Lock()
+	shared := false
+	for _, uri := range host.peers {
+		shared = shared || groups[peerGroup(uri)]
+	}
+	host.mu.Unlock()
+	return shared && len(host.candidates(mainPeers)) > 0
+}
+
+// peerGroups are the operators (peerGroup) of peers.
+func peerGroups(peers []string) map[string]bool {
+	groups := make(map[string]bool, len(peers))
+	for _, uri := range peers {
+		if uri != "" {
+			groups[peerGroup(uri)] = true
+		}
+	}
+	return groups
+}
+
+// candidates are doorHostCandidates of the pool for the host, in its order.
+func (host *doorHost) candidates(mainPeers []string) []string {
+	return doorHostCandidates(phonePeerCandidates(doorHostPublicPool(), host.seed), mainPeers)
+}
+
+// doorHostCandidates are the peers of pool (in its order) the door host may
+// dial: none run by an operator (peerGroup) the main node dials, whatever
+// the URI.
+func doorHostCandidates(pool, mainPeers []string) []string {
+	groups := peerGroups(mainPeers)
+	out := make([]string, 0, len(pool))
+	for _, uri := range pool {
+		if uri != "" && doorHostPeerAllowed(uri) && !groups[peerGroup(uri)] {
+			out = append(out, uri)
+		}
+	}
+	return out
 }
 
 func (host *doorHost) peerCount() int {
@@ -378,18 +442,24 @@ func (host *doorHost) peerView() []core.PeerInfo {
 }
 
 // repeer dials the public peers doorHostPeers picks now and drops the ones
-// it dialled before.
+// it dialled before: from the pool without the main node's operators, or,
+// when that has none, from the main node's own public peers.
 func (host *doorHost) repeer() {
-	candidates := make([]string, 0)
-	for _, peer := range host.main.configSnapshot().Peers {
-		if peer != "" && doorHostPeerAllowed(peer) {
-			candidates = append(candidates, peer)
+	mainPeers := host.main.configSnapshot().Peers
+	candidates := host.candidates(mainPeers)
+	avoid := ""
+	if len(candidates) == 0 {
+		for _, peer := range mainPeers {
+			if peer != "" && doorHostPeerAllowed(peer) {
+				candidates = append(candidates, peer)
+			}
 		}
+		avoid = host.main.treeParentURI()
 	}
 	host.mu.Lock()
 	offset := host.offset
 	host.mu.Unlock()
-	chosen := doorHostPeers(candidates, host.main.treeParentURI(), offset, doorHostPeerCount)
+	chosen := doorHostPeers(candidates, avoid, offset, doorHostPeerCount)
 	next := make(map[string]string, len(chosen))
 	for _, uri := range chosen {
 		next[peerURIBase(uri)] = uri
@@ -616,6 +686,11 @@ func (door *doorNode) run(main *bridgeNode) {
 		}
 		if !door.takes(message) {
 			door.stats.add("not taken")
+			continue
+		}
+		if !main.admitSignal(source, network) {
+			// A locked phone's budget for strangers (stranger_signals.go).
+			door.stats.add("over budget")
 			continue
 		}
 		door.stats.add("taken")

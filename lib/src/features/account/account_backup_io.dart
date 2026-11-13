@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
+import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
 /// Bytes of one part of a backup file: a larger copy goes on in
@@ -130,11 +131,21 @@ Stream<List<int>> readAccountBackupParts(List<String> paths) async* {
 }
 
 /// How restoring a backup file went: the reason it did not open, or what
-/// taking it in did.
+/// taking it in did; [account] and [name] say whose copy it is, once it
+/// opened (for "Na tym urządzeniu jest już konto").
 typedef AccountBackupRestore = ({
   AccountBackupError? error,
   AccountImportOutcome? outcome,
+  String? account,
+  String? name,
 });
+
+/// The name the person set in [archive]'s profile, or ''.
+String accountArchiveName(AccountArchive archive) {
+  final Object? profile = archive.sections[CircleBackupSections.profile];
+  final Object? name = profile is Map ? profile['displayName'] : null;
+  return name is String ? name.trim() : '';
+}
 
 /// Reads the backup in [paths] for [password] and takes it in through
 /// [importer]: the manifest is checked first (another account's copy is
@@ -178,13 +189,21 @@ Future<AccountBackupRestore> restoreAccountBackup({
         },
       );
   final AccountArchive? archive = read.archive;
+  final AccountArchive? whose = archive ?? seen;
+  final String? account = whose?.account;
+  final String? name = whose == null ? null : accountArchiveName(whose);
   if (read.error != null || archive == null) {
     // What came before the damage.
     await importer.staging.clear(seen);
-    return (error: read.error ?? AccountBackupError.format, outcome: null);
+    return (
+      error: read.error ?? AccountBackupError.format,
+      outcome: null,
+      account: account,
+      name: name,
+    );
   }
   if (refused != null) {
-    return (error: null, outcome: refused);
+    return (error: null, outcome: refused, account: account, name: name);
   }
   try {
     await beforeTake?.call();
@@ -192,5 +211,10 @@ Future<AccountBackupRestore> restoreAccountBackup({
     await importer.staging.clear(archive);
     rethrow;
   }
-  return (error: null, outcome: await importer.take(taken ?? archive));
+  return (
+    error: null,
+    outcome: await importer.take(taken ?? archive),
+    account: account,
+    name: name,
+  );
 }

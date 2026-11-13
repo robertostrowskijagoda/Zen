@@ -26,6 +26,7 @@ import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -288,6 +289,20 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
         transport.send(remoteAddress: to, payload: payload),
     frames: transport.frames,
   )..encounters = ref.watch(encounterLogProvider);
+  // One block list: whoever is blocked anywhere is blocked here, and a
+  // block made here blocks the person everywhere.
+  // Encounters with someone blocked since are not shown (in the app; the
+  // background service only writes them).
+  nearby.encounters?.leaveOut = (String friend) =>
+      blockedPeopleNow(ref).address(friend);
+  nearby
+    ..blockedElsewhere = ((String a) => blockedPeopleNow(ref).address(a))
+    ..onBlock = ((String address, String name) => ref
+        .read(socialHubControllerProvider.notifier)
+        .blockPerson(address: address, name: name, origin: BlockOrigin.nearby))
+    ..onUnblockAll = (() => ref
+        .read(socialHubControllerProvider.notifier)
+        .unblockAllFrom(BlockOrigin.nearby));
   void onMeet() => nearby.friendsChanged();
   meet.addListener(onMeet);
   // Also while Bluetooth is off or not allowed yet: the network shows the

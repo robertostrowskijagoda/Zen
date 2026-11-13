@@ -196,6 +196,50 @@ void main() {
       expect(seenBy(b).single.replies, isEmpty);
     });
 
+    test('someone blocked: their films, likes and reactions are left out; '
+        'unblocked, they are back', () async {
+      final LedgerNode a = await make(ada, <String>[bob, cel]);
+      final LedgerNode b = await make(bob, <String>[ada, cel]);
+      final LedgerNode c = await make(cel, <String>[ada, bob]);
+      final LogEntry film = await b.publish(
+        kFilmKind,
+        newFilmBody(video: _video('blob-b'), audience: Audience.public),
+      );
+      final LogEntry hers = await c.publish(
+        kFilmKind,
+        newFilmBody(video: _video('blob-c'), audience: Audience.public),
+      );
+      await c.publish(kLikeKind, likeBody(film.id), spaceKind: 'acts');
+      await c.publish(
+        kFilmReactionKind,
+        filmReactionBody(film.id, '🔥'),
+        spaceKind: 'acts',
+      );
+      await _settle();
+
+      List<FilmPost> seen(Set<String> blocked) => buildFilms(
+        NodeFilmLedgerView(a),
+        nameOf: names,
+        blockedAccounts: blocked,
+      );
+      FilmPost bobs(Set<String> blocked) =>
+          seen(blocked).firstWhere((FilmPost f) => f.id == film.id);
+      expect(
+        seen(const <String>{}).map((FilmPost f) => f.id),
+        contains(hers.id),
+      );
+      expect(
+        bobs(const <String>{}).likes.map((FeedLiker l) => l.name),
+        <String>['Cel'],
+      );
+      expect(bobs(const <String>{}).reactions, <String, int>{'🔥': 1});
+
+      final Set<String> blocked = <String>{c.account};
+      expect(seen(blocked).map((FilmPost f) => f.id), isNot(contains(hers.id)));
+      expect(bobs(blocked).likes, isEmpty);
+      expect(bobs(blocked).reactions, isEmpty);
+    });
+
     test('a liked public film reaches friends of friends who opt in', () async {
       final LedgerNode a = await make(ada, <String>[bob]);
       final LedgerNode b = await make(bob, <String>[ada, cel]);

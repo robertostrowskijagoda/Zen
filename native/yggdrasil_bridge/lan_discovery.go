@@ -353,7 +353,7 @@ func (lan *lanDiscovery) wake() {
 // beacon makes a beacon with a fresh salt and remembers the salt.
 func (lan *lanDiscovery) beacon() []byte {
 	now := time.Now()
-	advert, err := buildLocalAdvert(lan.m.peers(), now, 0, cryptorand.Reader)
+	advert, err := buildLocalAdvert(lan.m.advertPeers(0, now), now, 0, cryptorand.Reader)
 	if err != nil {
 		return nil
 	}
@@ -485,9 +485,27 @@ func lanShouldDial(self string, candidates []*localPeer) bool {
 	return false
 }
 
+// lanBeaconFromNearby tells whether a beacon from src naming port may come
+// from a Zen device on one of this device's local networks: every beacon
+// goes out from the beacon port, and names the TCP port the system gave
+// the device's listener (never a well-known one). Anything else would have
+// this device answer hosts far away (a computer with a public address), or
+// connect to a printer's or a router's port and write there.
+func (lan *lanDiscovery) lanBeaconFromNearby(src *net.UDPAddr, port int) bool {
+	return src != nil && src.IP.To4() != nil && src.Port == lanBeaconPort && port >= 1024 && lan.onLan(src.IP)
+}
+
+// onLan tells whether ip is on one of this device's local networks.
+func (lan *lanDiscovery) onLan(ip net.IP) bool {
+	lan.mu.Lock()
+	defer lan.mu.Unlock()
+	_, ok := lanInterfaceFor(lan.interfaces, ip)
+	return ok
+}
+
 func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
 	beacon, ok := parseLanBeacon(packet)
-	if !ok || src == nil || src.IP.To4() == nil || lan.isOwnSalt(beacon.advert) {
+	if !ok || !lan.lanBeaconFromNearby(src, beacon.port) || lan.isOwnSalt(beacon.advert) {
 		return
 	}
 	now := time.Now()
@@ -519,8 +537,13 @@ func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
 	lan.reply(src.IP, now)
 }
 
-// reply sends a beacon straight back, so the other device can connect.
+// reply sends a beacon straight back, so the other device can connect;
+// only to an address on one of this device's local networks (the socket
+// listens on every interface).
 func (lan *lanDiscovery) reply(ip net.IP, now time.Time) {
+	if !lan.onLan(ip) {
+		return
+	}
 	key := ip.String()
 	lan.mu.Lock()
 	if last, ok := lan.lastReply[key]; ok && now.Sub(last) < lanReplyInterval {

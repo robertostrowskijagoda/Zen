@@ -382,6 +382,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       posts = buildFeed(
         node,
         nameOf: names,
+        blockedAccounts: blockedAccountsOf(node, social),
       ).where((FeedPost p) => p.account == account).toList();
       thanks = thanksFor(node, account, nameOf: names);
       if (!_isOwn) {

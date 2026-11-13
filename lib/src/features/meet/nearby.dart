@@ -405,6 +405,17 @@ final class NearbyService extends ChangeNotifier {
   final Set<String> _blockedNow = <String>{};
   final Set<String> _blockedTokens = <String>{};
 
+  /// Whether an address is a person blocked anywhere in the app (the
+  /// messenger, Dating, followers, here): nothing of theirs is taken.
+  bool Function(String address)? blockedElsewhere;
+
+  /// A block made here blocks the person everywhere (by the address they
+  /// gave, under [name]).
+  Future<void> Function(String address, String name)? onBlock;
+
+  /// "Odblokuj wszystkich": the blocks made here are lifted everywhere.
+  Future<void> Function()? onUnblockAll;
+
   /// Friends' keys as read from the book, and what was worked out of them
   /// for the slots around now.
   Map<String, FriendNearbyKey> _friendKeys = <String, FriendNearbyKey>{};
@@ -1171,7 +1182,9 @@ final class NearbyService extends ChangeNotifier {
 
   bool _isBlocked(String address) {
     final String a = PeerShareCodec.normalizeAddress(address);
-    return _blockedNow.contains(a) || meet.book.nearbyBlocked.contains(a);
+    return _blockedNow.contains(a) ||
+        meet.book.nearbyBlocked.contains(a) ||
+        (blockedElsewhere?.call(a) ?? false);
   }
 
   /// Whether one more hello from the same sender ([same]) is taken: at most
@@ -1537,6 +1550,13 @@ final class NearbyService extends ChangeNotifier {
       _blockedNow.add(key);
       _sessions.removeWhere((String _, NearbySession x) => x.address == key);
       unawaitedLogged(meet.blockNearby(key), context: 'W pobliżu: blokada');
+      final Future<void> Function(String, String)? everywhere = onBlock;
+      if (everywhere != null) {
+        unawaitedLogged(
+          everywhere(key, s.pseudonym),
+          context: 'W pobliżu: blokada wszędzie',
+        );
+      }
     }
     if (s.peerToken.isNotEmpty) {
       _blockedTokens.add(s.peerToken);
@@ -1554,6 +1574,7 @@ final class NearbyService extends ChangeNotifier {
     _blockedNow.clear();
     _blockedTokens.clear();
     await meet.unblockNearby();
+    await onUnblockAll?.call();
     notifyListeners();
   }
 

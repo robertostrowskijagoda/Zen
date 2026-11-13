@@ -42,6 +42,34 @@ void main() {
     );
   });
 
+  test('preparing a release stops on a Public Suffix List older than it '
+      'allows', () {
+    const String rules =
+        "const String kPublicSuffixListVersion = '2026-11-11_17-18-20_UTC';";
+    expect(
+      publicSuffixListAgeProblem(rules, DateTime.utc(2027, 1, 20)),
+      isNull,
+    );
+    expect(
+      publicSuffixListAgeProblem(rules, DateTime.utc(2027, 4, 1)),
+      allOf(contains('141 days'), contains('tool/public_suffix_list.dart')),
+    );
+    expect(
+      publicSuffixListAgeProblem('', DateTime.utc(2027)),
+      contains('no version'),
+    );
+    // The file the app carries names its version as the check reads it.
+    expect(
+      publicSuffixListAgeProblem(
+        File(
+          'lib/src/features/passwords/public_suffix_rules.dart',
+        ).readAsStringSync(),
+        DateTime.utc(2000),
+      ),
+      isNull,
+    );
+  });
+
   test('preparing a release names the changed logic with a fast test of '
       'its own that mutation testing does not cover yet', () {
     const String logic = "import 'dart:math';\n";
@@ -719,6 +747,122 @@ void main() {
         ).problems,
         isEmpty,
       );
+    });
+
+    group('an English line does not name a screen by its Polish text', () {
+      final Map<String, String> labels = englishLabelsFrom(<String, Object?>{
+        'Hasła': 'Passwords',
+        'Kod kopii': 'Backup code',
+        'Film': 'Video',
+        'Chat': 'Chat',
+        'Zen': 'Zen',
+        'OK': 'OK',
+        'Gdzie': 'Where',
+        'Wysłano {n} plików': 'Sent {n} files',
+        'Osoby': <String, String>{'one': 'Person', 'other': 'People'},
+      });
+      String note(String line) =>
+          "## Unreleased\n### What's new\n- [en] $line\n## 1.0.0\n";
+
+      test('only texts the two languages word differently count', () {
+        expect(labels.keys, <String>['Hasła', 'Kod kopii', 'Film', 'Gdzie']);
+      });
+
+      test('the label of 1.16.5 is refused, with what the app says', () {
+        final List<String> problems = whatsNewSection(
+          note('Choose a new password in Hasła.'),
+          required: false,
+          englishLabels: labels,
+        ).problems;
+        expect(problems, hasLength(1));
+        expect(problems.single, contains('"Hasła"'));
+        expect(problems.single, contains('"Passwords"'));
+        expect(
+          whatsNewSection(
+            note('Choose a new password in Passwords.'),
+            required: false,
+            englishLabels: labels,
+          ).problems,
+          isEmpty,
+        );
+        expect(
+          whatsNewSection(
+            note('Show the Kod kopii in About.'),
+            required: false,
+            englishLabels: labels,
+          ).problems,
+          hasLength(1),
+        );
+      });
+
+      test('words both languages have, the app name and the Polish '
+          'lines are left alone', () {
+        for (final String line in <String>[
+          'Chat and Zen work with OK pictures.',
+          // Not a whole word.
+          'The Hasłami are not named.',
+          'Where is the film shown?',
+          // An ordinary word at the start of the line.
+          'Film calls are clearer.',
+        ]) {
+          expect(
+            whatsNewSection(
+              note(line),
+              required: false,
+              englishLabels: labels,
+            ).problems,
+            isEmpty,
+            reason: line,
+          );
+        }
+        // The same word inside the line, with its capital, is a label.
+        expect(polishLabelsIn('Open the Film tab.', labels), <String, String>{
+          'Film': 'Video',
+        });
+        expect(
+          whatsNewSection(
+            "## Unreleased\n### What's new\n- [en] Fine.\n"
+            '- [pl] Hasła są w Ustawieniach.\n## 1.0.0\n',
+            required: false,
+            englishLabels: labels,
+          ).problems,
+          isEmpty,
+        );
+      });
+
+      test('the real translation flags only the two released notes that '
+          'name a Polish text', () {
+        final Map<String, String> real = englishLabelsFrom(
+          jsonDecode(File('assets/i18n/en.json').readAsStringSync())
+              as Map<String, dynamic>,
+        );
+        expect(real['Hasła'], 'Passwords');
+        expect(real.containsKey('Zen'), isFalse);
+        expect(
+          whatsNewSection(
+            File('CHANGELOG.md').readAsStringSync(),
+            required: false,
+            englishLabels: real,
+          ).problems,
+          isEmpty,
+        );
+        final String changelog = File('CHANGELOG.md').readAsStringSync();
+        final RegExp heading = RegExp(r'^## (\d+\.\d+\.\d+) ', multiLine: true);
+        final List<String> flagged = <String>[
+          for (final RegExpMatch m in heading.allMatches(changelog))
+            if (whatsNewSection(
+              changelog,
+              version: m.group(1),
+              required: false,
+              englishLabels: real,
+            ).problems.isNotEmpty)
+              m.group(1)!,
+        ];
+        // The released notes that name a Polish text ("Hasła" in 1.16.5,
+        // "Tablica" in 1.15.0; signed, they cannot change). A third one
+        // here is a false alarm of the rule to look at.
+        expect(flagged, <String>['1.16.5', '1.15.0']);
+      });
     });
 
     test('release.yml makes whats-new.json before SHA256SUMS, on tags', () {

@@ -137,8 +137,11 @@ Using Zen to break the law is forbidden by the [Terms of use](docs/TERMS.md).
   back: a second device, an encrypted account copy, a key copy, or your
   close friends, who each keep a piece of the key (with your account
   password, 2 to 4 of them bring it back). Chosen friends keep a sealed
-  copy of your data, passwords and notes included, which any of these
-  ways opens.
+  copy of your data, notes included and passwords too unless you switch
+  them out (*Passwords in the backup with friends*), which any of these
+  ways opens. Another account never replaces one that holds anything, and
+  unlinking a device does not take the account key off it (the guide says
+  what to do then).
 - ⚙️ **[Settings, public peers](docs/guide/settings-and-peers.md)**,
   **[self-updates](docs/guide/updates.md)**, *Why isn't it working?*
   diagnostics, and **21 languages**.
@@ -191,14 +194,20 @@ internet. Everything is on
   when they were made, measures how much they hold, or reads the files or
   the system's keystore may still tell which are in use
   ([details](docs/SECURITY_MODEL.md)).
-- **You decide who sees what:** friendship levels and per-field profile
-  visibility.
+- **You decide who sees what:** friendship levels (the same on every device
+  of your account) and per-field profile visibility. A block is of the
+  person in every feature; it cannot recognise someone who makes a new
+  account. Photos, films and recordings you send leave without place, time
+  and device data.
 - **GIF search goes through an outside company**, KLIPY: it sees what you
   search for, the GIF you pick and your IP address (your friend never
   contacts it). **Settings → Messages and calls → GIFs** turns it off.
 - **Updates:** Zen asks GitHub for the newest release (GitHub sees your IP
-  address) and checks a download against `SHA256SUMS` and, on Android, Zen's
-  signing certificate ([details](docs/guide/updates.md)).
+  address) and checks a download against `SHA256SUMS`, signed with the
+  release key, and, on Android, Zen's signing certificate
+  ([details](docs/guide/updates.md)). On Android, when the system's own name
+  lookup fails, the network bridge asks Quad9, Cloudflare and Google over
+  encrypted DNS to find the public peers.
 - **What runs it:** devices connect through
   [Yggdrasil](https://yggdrasil-network.github.io/), an open, encrypted mesh
   network; the devices on the way (the public nodes Zen starts from

@@ -7,8 +7,11 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_link.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/account/presentation/account_replace_dialog.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -16,6 +19,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_takeover.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/zen_link_router.dart';
@@ -117,25 +121,92 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
   String? _flatRunsOn(LedgerNode node) {
     for (final AccountDevice d in node.ownDevices) {
       if (!d.isThis && _runsFlat(d)) {
-        return t('Działa na: {device}', {'device': d.name});
+        return t('Działa na: {device}', {'device': deviceNameLabel(d.name)});
       }
     }
     return null;
   }
 
-  Future<void> _unlink(AccountDevice device) async {
+  /// The person says [device] (one that appeared after a cut-off) is
+  /// theirs: it gets what the account's devices share.
+  Future<void> _confirm(AccountDevice device) async {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
         scrollable: true,
-        title: Text(t('Odłączyć „{name}”?', {'name': device.name})),
+        title: Text(
+          t('Potwierdzić „{name}”?', {'name': deviceNameLabel(device.name)}),
+        ),
         content: Text(
           t(
-            'To urządzenie przestanie należeć do konta: nie dostanie '
-            'wiadomości ani nowych wpisów, a to, co by na nim napisano od '
-            'teraz, wszyscy odrzucą. Zrób to, gdy urządzenie zginęło albo '
-            'zostało skradzione. Tego nie da się cofnąć.',
+            'Dostanie Twoje rozmowy, znajomych, hasła i ustawienia, a to, '
+            'co na nim zapiszesz, trafi na Twoje urządzenia. Potwierdź tylko '
+            'urządzenie, które sam dodałeś.',
           ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('device-confirm-ok'),
+            onPressed: () => Navigator.of(dialog).pop(true),
+            child: Text(t('To moje urządzenie')),
+          ),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) {
+      return;
+    }
+    await _node!.confirmDevice(device.device);
+    if (mounted) {
+      setState(
+        () => _message = t('„{name}” jest potwierdzone.', {
+          'name': deviceNameLabel(device.name),
+        }),
+      );
+    }
+  }
+
+  Future<void> _unlink(AccountDevice device) async {
+    final ZenColors zen = ZenColors.of(context);
+    final bool? sure = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
+        title: Text(
+          t('Odłączyć „{name}”?', {'name': deviceNameLabel(device.name)}),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              t(
+                'Twoje urządzenia i znajomi przestaną mu cokolwiek wysyłać, a '
+                'to, co na nim napisano po odłączeniu, odrzucą. Zrób to, gdy '
+                'urządzenie zginęło albo zostało skradzione. Tego nie da się '
+                'cofnąć.',
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              t(
+                'Odłączenie nie zabiera z niego klucza konta. Jeśli było '
+                'odblokowane, a klucz nie był chroniony hasłem konta (albo '
+                'ktoś zna to hasło), ten ktoś może dodać do konta nowe '
+                'urządzenie. Twoje urządzenia zapytają Cię o nie, zanim '
+                'cokolwiek mu dadzą, ale znajomi przyjmą je jako Twoje. Wtedy '
+                'przenieś się na nowe konto: Ustawienia → Konta na tym '
+                'urządzeniu → Dodaj konto, zaproś znajomych od nowa, a stare '
+                'konto usuń.',
+              ),
+              key: const Key('device-unlink-key-note'),
+              style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
+            ),
+          ],
         ),
         actions: <Widget>[
           TextButton(
@@ -163,7 +234,9 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     try {
       await _node!.unlinkDevice(device.device);
       unlinked = true;
-      _message = t('„{name}” jest odłączone.', {'name': device.name});
+      _message = t('„{name}” jest odłączone.', {
+        'name': deviceNameLabel(device.name),
+      });
     } on Object catch (error) {
       _message = t('Nie udało się: {error}', {'error': error});
     } finally {
@@ -179,7 +252,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
         context,
         ref.read(neighborsServiceProvider),
         lead: t('„{device}” otwierało drzwi mieszkania.', {
-          'device': device.name,
+          'device': deviceNameLabel(device.name),
         }),
       );
     }
@@ -231,6 +304,22 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                       'wszędzie takie same.',
                     ),
                   ),
+                  if (node.unconfirmedDevices.isNotEmpty)
+                    ZenInfo(
+                      key: const Key('devices-unconfirmed'),
+                      icon: Icons.devices_other_rounded,
+                      tone: zen.danger,
+                      title: t('Nowe urządzenie na Twoim koncie'),
+                      text: t(
+                        'Pojawiło się po odłączeniu innego urządzenia. '
+                        'Dopóki nie potwierdzisz, że jest Twoje, Twoje '
+                        'urządzenia nic mu nie wysyłają i nie biorą niczego, '
+                        'co na nim zapisano. Jeśli go nie znasz, odłącz je: '
+                        'ktoś ma klucz Twojego konta. Wtedy przenieś się też '
+                        'na nowe konto (Ustawienia → Konta na tym urządzeniu '
+                        '→ Dodaj konto).',
+                      ),
+                    ),
                   ZenSection(t('Twoje urządzenia'), top: 12),
                   for (final AccountDevice d in node.ownDevices)
                     ZenTile(
@@ -238,28 +327,53 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                       icon: d.name.contains('Telefon') || d.name == 'iPhone'
                           ? Icons.smartphone_rounded
                           : Icons.computer_rounded,
-                      tone: d.isThis ? zen.accent : zen.tone(ZenTone.network),
-                      title: d.name,
+                      tone: d.isThis
+                          ? zen.accent
+                          : !d.confirmed
+                          ? zen.danger
+                          : zen.tone(ZenTone.network),
+                      title: deviceNameLabel(d.name),
                       subtitle: d.isThis
                           ? t('To urządzenie')
+                          : !d.confirmed
+                          ? t('Niepotwierdzone — czy to Twoje urządzenie?')
                           : d.address == null
                           ? t('Jeszcze się nie odezwało')
                           : t('Podłączone'),
                       trailing: d.isThis
                           ? const SizedBox.shrink()
-                          : TextButton(
-                              key: Key('device-unlink-${d.device}'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: zen.danger,
-                                minimumSize: const Size(0, 36),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                if (!d.confirmed)
+                                  TextButton(
+                                    key: Key('device-confirm-${d.device}'),
+                                    style: TextButton.styleFrom(
+                                      minimumSize: const Size(0, 36),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                      ),
+                                    ),
+                                    onPressed: _busy
+                                        ? null
+                                        : () => unawaited(_confirm(d)),
+                                    child: Text(t('To moje')),
+                                  ),
+                                TextButton(
+                                  key: Key('device-unlink-${d.device}'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: zen.danger,
+                                    minimumSize: const Size(0, 36),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                    ),
+                                  ),
+                                  onPressed: _busy
+                                      ? null
+                                      : () => unawaited(_unlink(d)),
+                                  child: Text(t('Odłącz')),
                                 ),
-                              ),
-                              onPressed: _busy
-                                  ? null
-                                  : () => unawaited(_unlink(d)),
-                              child: Text(t('Odłącz')),
+                              ],
                             ),
                     ),
                   if (!node.isRevoked) ...<Widget>[
@@ -502,6 +616,8 @@ Future<String?> askAccountPassword(BuildContext context, String title) async {
       scrollable: true,
       title: Text(title),
       content: TextField(
+        enableSuggestions: false,
+        autocorrect: false,
         key: const Key('account-password-field'),
         controller: controller,
         obscureText: true,
@@ -683,10 +799,16 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
     });
     try {
       final String me = ref.read(runtimeNodeSnapshotProvider).localAddress;
+      // The device the digits were checked with is this account's: it is
+      // trusted when it greets from there.
+      await node.expectOwnDevice(_sender!.target);
+      final PasswordWrappedSeed? wrapped = node.identity.wrapped;
       await _sender!.send(
         seed: key.seed,
         account: node.account,
         siblings: <String>[if (me.isNotEmpty) me, ...node.siblingAddresses],
+        // The password protects the key there from the first byte.
+        wrapped: wrapped?.signature == null ? null : wrapped,
       );
       setState(() {
         _done = true;
@@ -730,6 +852,10 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
             ),
             const SizedBox(height: 8),
             TextField(
+              enableSuggestions: false,
+              autocorrect: false,
+              enableIMEPersonalizedLearning: false,
+              keyboardType: TextInputType.visiblePassword,
               key: const Key('link-code'),
               controller: _code,
               enabled: !_done,
@@ -852,16 +978,29 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
       return;
     }
     final LedgerKeyPair key = await LedgerKeyPair.fromSeed(got.seed);
+    if (!mounted) {
+      return;
+    }
     if (key.id != got.account) {
       setState(() => _message = t('Otrzymany klucz nie pasuje do konta.'));
       return;
     }
+    // Never in place of an account that holds something (the same rule as
+    // a copy, a backup and a key): the person chooses what to do.
+    if (!await mayTakeAccountHere(context, ref, incoming: got.account) ||
+        !mounted) {
+      return;
+    }
     await node.rememberDeviceAddresses(got.siblings);
+    // The device the digits were checked with is this account's.
+    await node.expectOwnDevice(got.from);
     await LedgerIdentity.adoptAccount(
       node.disk,
       got.seed,
       deviceName: thisDeviceName,
+      wrapped: got.wrapped,
     );
+    await takeCarriedPasswords(() => ref.read(passwordVaultServiceProvider));
     await _receiver.confirm(got);
     setState(() {
       _done = true;
@@ -905,9 +1044,9 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
               icon: Icons.warning_amber_rounded,
               tone: zen.warning,
               text: t(
-                'Uwaga: jeśli to urządzenie miało już swoje konto, przejdzie na '
-                'konto z drugiego urządzenia, a dotychczasowe przestanie być '
-                'używane.',
+                'Jeśli na tym urządzeniu jest już konto z danymi, Zen go nie '
+                'zastąpi: zapyta, czy dodać to konto obok, czy najpierw '
+                'usunąć tamto.',
               ),
             ),
             const SizedBox(height: 12),

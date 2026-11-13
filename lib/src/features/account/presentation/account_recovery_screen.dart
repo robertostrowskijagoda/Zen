@@ -9,10 +9,12 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/presentation/account_import_layer.dart';
+import 'package:zen/src/features/account/presentation/account_replace_dialog.dart';
 import 'package:zen/src/features/account/presentation/circle_backup_card.dart';
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
@@ -23,6 +25,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/qr_sticker/presentation/zen_qr_view.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -187,6 +190,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     } finally {
       identity.lock();
     }
+    // The account's other devices take the password's wrapping (the newest
+    // wins): it protects the key there too.
+    await node.shareWrapping();
     _current.clear();
     _password.clear();
     _repeat.clear();
@@ -207,9 +213,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     }
     await service.beginRecovery();
     return t(
-      'Odzyskiwanie rozpoczęte. Wpisz kody osób z kręgu, które Ci pomogą: '
-      'ich urządzenia dostaną prośbę o pomoc. Możesz też pokazać im kod '
-      'tego urządzenia.',
+      'Odzyskiwanie rozpoczęte. Wpisz kody bliskich znajomych, którzy Ci '
+      'pomogą: ich urządzenia dostaną prośbę o pomoc. Możesz też pokazać im '
+      'kod tego urządzenia.',
     );
   }
 
@@ -303,6 +309,12 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       _candidates = null;
       return t('Otrzymany klucz nie pasuje do konta.');
     }
+    // Never in place of another account that holds something (the same
+    // rule as a copy, a backup, a link and a key): the person chooses.
+    if (!mounted ||
+        !await mayTakeAccountHere(context, ref, incoming: candidate.account)) {
+      return t('Nic nie zostało przejęte.');
+    }
     // The friends who helped keep a sealed copy of the friends and groups:
     // greeted first after the restart, they give it back. Senders of
     // pieces for other accounts are not greeted.
@@ -314,14 +326,18 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
               h['from'] is String)
             h['from'] as String,
     });
+    // The password just typed is the account password: the key is kept
+    // under it here from the first byte.
     await LedgerIdentity.adoptAccount(
       node.disk,
       candidate.seed,
       deviceName: thisDeviceName,
+      password: _recoverPassword.text,
     );
     // The pyramid key comes from the account key: the place and the
     // wallet come back with the records friends keep.
     await PyramidService.markRecovered(node.disk);
+    await takeCarriedPasswords(() => ref.read(passwordVaultServiceProvider));
     // The copy of the data kept by the circle comes back after the
     // restart: asked for from the helpers first, then friends.
     await CircleBackupService.markRestore(
@@ -444,6 +460,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                 ],
                 const SizedBox(height: 12),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
+                  keyboardType: TextInputType.visiblePassword,
                   key: const Key('recovery-help-address'),
                   controller: target,
                   autocorrect: false,
@@ -635,8 +653,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           Icons.check_circle_outline_rounded,
           zen.success,
           t(
-            'Wraca: znajomi i grupy, z kopii u osób z kręgu, które oddały '
-            'klucze',
+            'Wraca: znajomi i grupy, z kopii u bliskich znajomych, którzy '
+            'oddali części klucza',
           ),
         ),
         _scopeLine(
@@ -701,7 +719,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       text: t(
         'Uwaga: przyszły klucze do różnych kont. Ktoś mógł podesłać klucze '
         'do cudzego konta, żeby przejąć to urządzenie. Przejmij tylko '
-        'konto, którego odcisk potwierdzi osoba z kręgu.',
+        'konto, którego odcisk potwierdzi bliski znajomy.',
       ),
     ),
   );
@@ -727,7 +745,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
         _paragraph(
           zen,
           t(
-            'Osoba z kręgu widzi odcisk Twojego konta u siebie (Konto '
+            'Bliski znajomy widzi odcisk Twojego konta u siebie (Konto '
             'i odzyskiwanie → Przechowujesz klucze dla). Porównajcie go, '
             'najlepiej na żywo albo przez telefon. Przejmij konto tylko, '
             'jeśli się zgadza.',
@@ -823,12 +841,14 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             icon: Icons.diversity_3_rounded,
             tone: zen.tone(ZenTone.privacy),
             title: t('Klucz u przyjaciół'),
+            // Those who answered lately ([kAckFresh]), not every
+            // confirmation ever.
             status: pieces
                 ? ZenPill(
                     key: const Key('recovery-pieces-acked'),
-                    text: '${g.acked}/${g.threshold}',
-                    tone: g.complete ? zen.success : zen.warning,
-                    icon: g.complete ? Icons.check_rounded : null,
+                    text: '${p.acked}/${g.threshold}',
+                    tone: p.acked >= g.threshold ? zen.success : zen.warning,
+                    icon: p.acked >= g.threshold ? Icons.check_rounded : null,
                   )
                 : null,
           ),
@@ -836,7 +856,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             zen,
             t(
               'Każdy, kogo oznaczysz jako „Przyjaciel”, sam dostaje kawałek '
-              'klucza Twojego konta, a kto przestanie nim być, traci go. Na '
+              'klucza Twojego konta, a kto przestanie nim być, traci go '
+              '(gdy kawałki ma mieć mniej osób niż dotąd, po tygodniu). Na '
               'nowym telefonie odzyskasz konto hasłem konta i zgodą kilku '
               'z nich: 2, gdy kawałki ma do 4 osób, 3 przy 5–9, 4 przy 10 '
               'i więcej.',
@@ -869,15 +890,57 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                     <String, Object?>{'t': g.threshold, 'n': g.holders.length},
                   ),
           ),
+          if (p.reduction case final RecoveryReduction r) ...<Widget>[
+            const SizedBox(height: 8),
+            ZenInfo(
+              key: const Key('recovery-pieces-reduction'),
+              icon: Icons.hourglass_top_rounded,
+              tone: zen.warning,
+              text: r.holders == 0
+                  ? t(
+                      'Masz mniej niż 2 osoby oznaczone jako „Przyjaciel”: '
+                      '{date} przyjaciele usuną kawałki klucza i konta nie '
+                      'da się odzyskać z ich pomocą. Jeśli to pomyłka, '
+                      'przywróć im ten poziom.',
+                      <String, Object?>{
+                        'date': ZenFormat.dateTime(
+                          DateTime.fromMillisecondsSinceEpoch(r.due),
+                        ),
+                      },
+                    )
+                  : t(
+                      '{date} kawałki klucza będzie mieć mniej przyjaciół '
+                      '({n}). Jeśli to pomyłka, przywróć im poziom '
+                      '„Przyjaciel”.',
+                      <String, Object?>{
+                        'date': ZenFormat.dateTime(
+                          DateTime.fromMillisecondsSinceEpoch(r.due),
+                        ),
+                        'n': r.holders,
+                      },
+                    ),
+            ),
+            if (service.handsOut)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton(
+                  key: const Key('recovery-pieces-reduce-now'),
+                  onPressed: _busy
+                      ? null
+                      : () => unawaited(_confirmReduction(service)),
+                  child: Text(t('Zrób to od razu (hasło konta)')),
+                ),
+              ),
+          ],
           if (p.legacy > 0) ...<Widget>[
             const SizedBox(height: 8),
             ZenInfo(
               key: const Key('recovery-pieces-legacy'),
               icon: Icons.history_rounded,
               text: t(
-                'Dotychczasowy krąg działa, dopóki nowe kawałki nie potwierdzi '
-                '{t} przyjaciół. Potem jego osoby dostaną prośbę o usunięcie '
-                'starych kawałków.',
+                'Dotychczasowe kawałki klucza działają, dopóki nowych nie '
+                'potwierdzi {t} przyjaciół. Potem ich posiadacze dostaną '
+                'prośbę o usunięcie starych kawałków.',
                 <String, Object?>{
                   't': pieces ? g.threshold : kRecoveryCircleMinimum,
                 },
@@ -896,6 +959,62 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Fewer people are to hold pieces (a week from the change): made at
+  /// once only with the account password, which someone holding the
+  /// unlocked phone for a minute does not know.
+  Future<void> _confirmReduction(RecoveryService service) async {
+    final TextEditingController password = TextEditingController();
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
+        title: Text(t('Mniej osób z kawałkami klucza')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              t(
+                'Kto przestaje mieć kawałek, usunie go od razu. Wpisz hasło '
+                'konta, aby to potwierdzić.',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('recovery-pieces-reduce-password'),
+              controller: password,
+              obscureText: true,
+              autofocus: true,
+              decoration: InputDecoration(labelText: t('Hasło konta')),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialog).pop(true),
+            child: Text(t('Potwierdź')),
+          ),
+        ],
+      ),
+    );
+    final String typed = password.text;
+    password.dispose();
+    if (ok != true) {
+      return;
+    }
+    await _run(
+      () async => await service.confirmReduction(typed)
+          ? t(
+              'Zrobione: przyjaciele dostaną nowe kawałki albo prośbę o usunięcie.',
+            )
+          : t('To nie jest hasło konta.'),
     );
   }
 
@@ -1017,7 +1136,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             const SizedBox(height: 8),
             Text(
               t(
-                'Osoby z kręgu wpisują ten kod albo skanują QR w „Pomóż '
+                'Bliscy znajomi wpisują ten kod albo skanują QR w „Pomóż '
                 'odzyskać”. Kod nie jest tajny.',
               ),
               style: TextStyle(color: zen.textSecondary, fontSize: 13),
@@ -1277,6 +1396,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                         const SizedBox(height: 12),
                         if (hasPassword) ...<Widget>[
                           TextField(
+                            enableSuggestions: false,
+                            autocorrect: false,
                             key: const Key('recovery-password-current'),
                             controller: _current,
                             obscureText: true,
@@ -1289,6 +1410,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           const SizedBox(height: 10),
                         ],
                         TextField(
+                          enableSuggestions: false,
+                          autocorrect: false,
                           key: const Key('recovery-password'),
                           controller: _password,
                           obscureText: true,
@@ -1303,6 +1426,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                         ),
                         const SizedBox(height: 10),
                         TextField(
+                          enableSuggestions: false,
+                          autocorrect: false,
                           key: const Key('recovery-password-repeat'),
                           controller: _repeat,
                           obscureText: true,
@@ -1318,8 +1443,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           icon: Icons.warning_amber_rounded,
                           text: t(
                             'Zapamiętaj hasło konta: bez niego konta nie da '
-                            'się odzyskać, nawet ze wszystkimi znajomymi z '
-                            'kręgu. Zen go nie zna i nie przypomni.',
+                            'się odzyskać, nawet ze wszystkimi bliskimi '
+                            'znajomymi. Zen go nie zna i nie przypomni.',
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -1359,8 +1484,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                               tone: zen.warning,
                               title: t('Ktoś prosi o pomoc w odzyskaniu konta'),
                               text: t(
-                                'Nowe urządzenie podało Cię jako osobę z kręgu '
-                                '({time}). Pomóż tylko, jeśli wiesz na pewno, '
+                                'Nowe urządzenie wskazało Cię jako bliskiego '
+                                'znajomego, który ma pomóc ({time}). Pomóż '
+                                'tylko, jeśli wiesz na pewno, '
                                 'kto to jest — najlepiej porozmawiaj na żywo '
                                 'albo przez telefon i porównajcie odcisk konta.',
                                 <String, Object?>{'time': _when(r.at)},
@@ -1489,7 +1615,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             zen,
                             t(
                               'Najpierw zacznij odzyskiwanie: dopiero wtedy to '
-                              'urządzenie przyjmuje klucze od osób z kręgu.',
+                              'urządzenie przyjmuje części klucza od bliskich '
+                              'znajomych.',
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -1545,12 +1672,14 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             children: <Widget>[
                               Expanded(
                                 child: TextField(
+                                  enableIMEPersonalizedLearning: false,
+                                  keyboardType: TextInputType.visiblePassword,
                                   key: const Key('recovery-helper-code'),
                                   controller: _helperCode,
                                   autocorrect: false,
                                   enableSuggestions: false,
                                   decoration: InputDecoration(
-                                    labelText: t('Kod osoby z kręgu'),
+                                    labelText: t('Kod bliskiego znajomego'),
                                     hintText: t('Kod, link albo QR tej osoby'),
                                     prefixIcon: const Icon(
                                       Icons.person_add_alt_1_rounded,
@@ -1611,6 +1740,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             _mixedAccountsWarning(zen),
                           const SizedBox(height: 14),
                           TextField(
+                            enableSuggestions: false,
+                            autocorrect: false,
                             key: const Key('recovery-old-password'),
                             controller: _recoverPassword,
                             obscureText: true,
@@ -1659,8 +1790,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           zen,
                           t(
                             'Kopia klucza (kartka z kodem albo plik z hasłem) '
-                            'przywraca konto na nowym telefonie, nawet gdy nikt '
-                            'z kręgu nie pomoże. Znajomi, grupy i teksty rozmów '
+                            'przywraca konto na nowym telefonie, nawet gdy '
+                            'żaden bliski znajomy nie pomoże. Znajomi, grupy i '
+                            'teksty rozmów '
                             'wracają potem z kopii u znajomych, jeśli ją masz. '
                             'To nie jest kopia całego konta: zdjęć i plików z '
                             'rozmów nie przywróci. Kto ma kartkę albo plik '

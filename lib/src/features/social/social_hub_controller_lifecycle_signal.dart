@@ -107,6 +107,16 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       if (_controllerDisposed || !ref.mounted) {
         return;
       }
+      if (report.messageId == kFriendInviteReportId && report.groupId == null) {
+        // Not a chat message: an invitation to become friends.
+        await _enqueueStateWork(
+          () => _applyFriendInviteReport(
+            report.recipient,
+            delivered: report.status == RelayDeliveryStatus.delivered,
+          ),
+        );
+        continue;
+      }
       String peer = report.recipient;
       final String? groupId = report.groupId;
       if (groupId != null) {
@@ -465,8 +475,17 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   /// together and the caller re-sends the invite once a second, so both would
   /// decide the call is brand new and both would raise the ringing
   /// notification — over and over, on a call that was already answered.
-  Future<void> receiveSignal(ZenSignal signal, {int? receivedAtMillis}) {
+  ///
+  /// True once the signal is settled here: kept, or refused for good (a
+  /// stranger past the limits, someone outside the group, a copy already
+  /// on file). False when it was only put off and is to come again (see
+  /// [_signalWaits]), or when the hub went away before it was done (Zen
+  /// closing, another account): only then may the relay layer leave its
+  /// sender without a confirmation. A failure to store it throws.
+  Future<bool> receiveSignal(ZenSignal signal, {int? receivedAtMillis}) {
+    bool settled = false;
     final Future<void> handled = _enqueueStateWork(() async {
+      _signalWaits = false;
       if (!_hydrationCompleted) {
         // Locked app: the stored friends are not read yet, so every friend
         // would look like a stranger, and whatever this signal adds would be
@@ -494,6 +513,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           return;
         }
       }
+      settled = !_signalWaits;
       if ((askedThemToo || friendsAlready) &&
           state
                   .friendByAddress(
@@ -519,9 +539,20 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     });
     // Any signal proves the peer is reachable right now: the moment to hand
     // it the group invites it missed while it was offline.
-    return handled.whenComplete(() {
+    final Future<void> done = handled.whenComplete(() {
       if (_controllerDisposed || !ref.mounted) {
         return;
+      }
+      if (state.outgoingInviteTo(signal.sender)?.status ==
+              OutgoingInviteStatus.lost &&
+          state.friendByAddress(signal.sender)?.status ==
+              FriendRelationshipStatus.pendingOutgoing) {
+        // The invitation to them was given up without reaching them, and
+        // they are there now: it goes again.
+        unawaitedLogged(
+          resendFriendRequest(peerAddress: signal.sender),
+          context: 'Sending an invitation again failed',
+        );
       }
       if (signal.type == ZenSignalType.friendAccept &&
           state.friendByAddress(signal.sender)?.status ==
@@ -564,6 +595,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         context: 'Syncing group invites after a signal failed',
       );
     });
+    return done.then((_) => settled);
   }
 
   /// When each member still writing into a group this device left was
@@ -756,6 +788,121 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     _bumpTimelineRevision();
   }
 
+  /// This device just took [newcomer] into [group] from [signal], another
+  /// member's update. That member's update tells which additions it knew
+  /// of ([kGroupAddsKey]); the ones made lately that it did not know of
+  /// (someone else added someone at about the same time, while one of the
+  /// two had no network) are what neither newcomer learns: each got its
+  /// own adder's list, and each dropped the other's messages for good.
+  /// So the newcomer is told of them, with their times, and each of them of
+  /// the newcomer, as additions this member passes on; a leave stamped
+  /// after an addition still wins over it on every phone. Each member that
+  /// takes the newcomer does this once, and only for what the adder did
+  /// not know of.
+  void _tellOfAddsMissed(
+    GroupProfile group,
+    ZenSignal signal,
+    String newcomer,
+    String localAddress,
+  ) {
+    bool same(String a, String b) => PeerShareCodec.addressesEqual(a, b);
+    final Map<String, int> known = _groupInviteAddsOf(signal);
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final Map<String, int> recent = _recentGroupAdds(group, now);
+    final Map<String, int> missed = <String, int>{
+      for (final MapEntry<String, int> e in recent.entries)
+        if (!same(e.key, newcomer) &&
+            !same(e.key, signal.sender) &&
+            (localAddress.isEmpty || !same(e.key, localAddress)) &&
+            _groupStampFor(known, e.key) == null)
+          e.key: e.value,
+    };
+    final int? newcomerAt = _groupStampFor(group.addedAt, newcomer);
+    if (missed.isEmpty || newcomerAt == null) {
+      return;
+    }
+    final Map<String, dynamic> base = _groupInvitePayload(group);
+    unawaitedLogged(
+      _sendFriendLifecycleSignal(
+        peerAddress: newcomer,
+        payload: <String, dynamic>{
+          ...base,
+          'memberAddresses': <String>[
+            if (localAddress.isNotEmpty) localAddress,
+            ...missed.keys,
+          ],
+          kGroupAddsKey: missed,
+        },
+      ),
+      context: 'Telling a newcomer of others added meanwhile failed',
+    );
+    // What this device knew of, so whoever gets it and knows of still more
+    // passes on only that.
+    final Map<String, int> told = Map<String, int>.of(recent)
+      ..removeWhere((String a, int _) => same(a, newcomer));
+    for (final String other in missed.keys) {
+      unawaitedLogged(
+        _sendFriendLifecycleSignal(
+          peerAddress: other,
+          payload: <String, dynamic>{
+            ...base,
+            'memberAddresses': <String>[
+              if (localAddress.isNotEmpty) localAddress,
+              newcomer,
+            ],
+            kGroupAddedKey: newcomer,
+            'at': newcomerAt,
+            kGroupAddsKey: told,
+          },
+        ),
+        context: 'Telling a member of a newcomer failed',
+      );
+    }
+  }
+
+  /// When a message of each group was first put off because its sender is
+  /// no member here yet, by `groupId|address` ([_waitsForGroupMembers]).
+  final Map<String, int> _unknownMemberWaitSince = <String, int>{};
+
+  /// Whether [signal], a message of a group this device is in from someone
+  /// it does not count as a member, is put off instead of dropped: someone
+  /// added a moment ago whose addition has not reached this device yet (an
+  /// update on its way, the newcomer's own list still coming). It comes
+  /// again (its sender and its mailboxes keep it) and is taken once the
+  /// list caught up. Only for [_kUnknownMemberWait] per sender and group,
+  /// and for few at a time: past that it is dropped for good, as before.
+  /// Never for someone on record as having left, nor in a group whose
+  /// invitation is not answered.
+  bool _waitsForGroupMembers(ZenSignal signal, int timestamp) {
+    if (signal.type != ZenSignalType.groupMessage) {
+      return false;
+    }
+    final GroupProfile? group = state.groups[signal.groupId ?? ''];
+    if (group == null ||
+        group.isInvitePending ||
+        isManagedGroup(group) ||
+        _groupStampFor(group.departedAt, signal.sender) != null ||
+        state.friendByAddress(signal.sender)?.status ==
+            FriendRelationshipStatus.blocked) {
+      return false;
+    }
+    final int wait = _kUnknownMemberWait.inMilliseconds;
+    _unknownMemberWaitSince.removeWhere(
+      (String _, int since) => (timestamp - since).abs() >= wait * 2,
+    );
+    final String key =
+        '${group.id}|${PeerShareCodec.normalizeAddress(signal.sender)}';
+    final int? since = _unknownMemberWaitSince[key];
+    if (since == null) {
+      if (_unknownMemberWaitSince.length >= _kMaxUnknownMemberWaits) {
+        return false;
+      }
+      _unknownMemberWaitSince[key] = timestamp;
+      return true;
+    }
+    return timestamp - since < wait;
+  }
+
   /// [_handleIncomingSignalOnce], quiet when the hub goes away meanwhile (a
   /// device stopped while a frame was being taken in): nothing is left to
   /// show the frame to, and its queue copy is taken in at the next start.
@@ -768,10 +915,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         signal,
         receivedAtMillis: receivedAtMillis,
       );
-      // An edit that came before this message waited for it.
+      // An edit that came before this message waited for it. Whether that
+      // edit is put off again says nothing of this message.
+      final bool waits = _signalWaits;
       await _applyChangeThatWaited(
         signal.withSender(PeerShareCodec.normalizeAddress(signal.sender)),
       );
+      _signalWaits = waits;
     } on Object {
       if (_controllerDisposed || !ref.mounted) {
         return;
@@ -788,6 +938,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     final int timestamp =
         receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final FriendProfile? knownPeer = state.friendByAddress(signal.sender);
+    if (_blockedPersonAt(signal.sender)) {
+      // Another device or address of someone blocked (here, in Dating, "W
+      // pobliżu" or among followers): nothing of theirs comes in, no
+      // message, invitation or group invitation, exactly as from the
+      // blocked address itself.
+      return;
+    }
     if (signal.type == ZenSignalType.friendAccept) {
       // What it means is the book's to say (see meaningOfAccept).
       switch (state.book.meaningOfAccept(signal.sender)) {
@@ -824,6 +981,16 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     if (!_isSignalAllowedFromPeer(state, signal)) {
       // Dropped without a word: an answer would tell anyone probing an
       // address that the device is online right there.
+      if (state.snapshotUnreadable) {
+        // Only because the friends and groups could not be read: a friend's
+        // message is not refused, it comes again once they can be (its
+        // sender keeps it, and so do its mailboxes, until then).
+        _signalWaits = true;
+      } else if (_waitsForGroupMembers(signal, timestamp)) {
+        // From someone added to the group whose addition is still on its
+        // way here: it comes again once the list caught up.
+        _signalWaits = true;
+      }
       return;
     }
     // Invitations are the one thing anyone may send. Beyond the caps on what
@@ -863,6 +1030,11 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       // Group calls run their own, real-time protocol: nothing is queued,
       // nothing goes through the generic notification path.
       await _handleGroupCallSignal(signal);
+      return;
+    }
+    if (isCallTakenElsewhere(signal)) {
+      // Answered or declined on another device of this account.
+      await _endCallTakenElsewhere(signal, timestamp);
       return;
     }
     if (_isRepeatedLifecycleDelivery(signal, timestamp)) {
@@ -979,6 +1151,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
                 timestamp: timestamp,
               );
             }
+            final String? newcomer = _groupInviteNewcomerOf(signal);
+            if (newcomer != null &&
+                !existing.isInvitePending &&
+                !groupHasMember(existing, newcomer) &&
+                groupHasMember(updated, newcomer)) {
+              _tellOfAddsMissed(updated, signal, newcomer, localAddr);
+            }
           }
           return;
         }
@@ -1060,6 +1239,12 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     if (signal.type == ZenSignalType.message &&
         !_messageHeardNow(signal, timestamp)) {
       signal = await _markedIfLateCopy(signal);
+    }
+    if ((signal.type == ZenSignalType.message ||
+            signal.type == ZenSignalType.groupMessage) &&
+        await _takenAsReadElsewhere(signal, timestamp)) {
+      // Read on another device of the account before it came here.
+      return;
     }
     if (signal.type == ZenSignalType.friendRemove) {
       // They ended it: nothing we still have queued for them should keep
@@ -1706,3 +1891,11 @@ SocialHubState _withFoldedUnread(
 final Provider<Duration> typingShownForProvider = Provider<Duration>(
   (Ref ref) => const Duration(seconds: 6),
 );
+
+/// How long a group message from someone not (yet) a member here is put
+/// off for the members' list to catch up, per sender and group (see
+/// `_waitsForGroupMembers`).
+const Duration _kUnknownMemberWait = Duration(days: 1);
+
+/// The most senders whose group messages are put off at a time.
+const int _kMaxUnknownMemberWaits = 64;

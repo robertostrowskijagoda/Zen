@@ -290,6 +290,12 @@ final class ChatScrollMemory {
       return;
     }
     final ScrollPosition position = scroll.position;
+    // The user took the list (a drag or a fling): it is theirs from now on,
+    // a jump would take it from under the finger.
+    if (position.isScrollingNotifier.value) {
+      _seeking = false;
+      return;
+    }
     final _Bubble? target = _bubble(anchor.messageId);
     if (target != null) {
       position.jumpTo(

@@ -24,6 +24,20 @@ const Set<String> kRelayNoticeTypes = <String>{
   'call_missed',
 };
 
+/// Whether [payload] is worth a notice ([kRelayNoticeTypes]) and counts in
+/// "Czeka na doręczenie". A group's member-list update goes as a
+/// `group_invite` too, but without an `inviteId`: the members merge it
+/// without any inbox entry, so it is neither an invitation nor anything a
+/// locked phone should announce.
+bool relayIsNoticePayload(Map<String, dynamic> payload) {
+  final Object? type = payload['type'];
+  if (type == 'group_invite') {
+    final Object? inviteId = payload['inviteId'];
+    return inviteId is String && inviteId.isNotEmpty;
+  }
+  return kRelayNoticeTypes.contains(type);
+}
+
 /// One end-to-end sealed payload in transit through relays.
 @immutable
 final class RelayEnvelope {

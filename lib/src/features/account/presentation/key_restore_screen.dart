@@ -7,10 +7,13 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/key_file.dart';
 import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
+import 'package:zen/src/features/account/presentation/account_replace_dialog.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/passwords/password_vault_service.dart';
 import 'package:zen/src/features/runtime/zen_link_router.dart';
 import 'package:zen/src/features/security/password_text_field.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
@@ -185,6 +188,20 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
       }
     }
     setState(() => _busy = true);
+    // Never in place of an account that holds something (the same rule as
+    // a copy, a backup and a link): the person chooses what to do.
+    final bool may = await mayTakeAccountHere(
+      context,
+      ref,
+      incoming: account.account,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (!may) {
+      setState(() => _busy = false);
+      return;
+    }
     String? message;
     bool restored = false;
     try {
@@ -199,6 +216,7 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
         deviceName: thisDeviceName,
         friends: friends,
       );
+      await takeCarriedPasswords(() => ref.read(passwordVaultServiceProvider));
       restored = true;
       _input.clear();
       _filePassword.clear();
@@ -319,6 +337,7 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                 ),
                 const SizedBox(height: 8),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   key: const Key('paper-restore-input'),
                   controller: _input,
                   minLines: 2,
@@ -372,6 +391,8 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                 if (found != null) ...<Widget>[
                   const SizedBox(height: 14),
                   TextField(
+                    enableIMEPersonalizedLearning: false,
+                    keyboardType: TextInputType.visiblePassword,
                     key: const Key('key-restore-friend'),
                     controller: _friend,
                     autocorrect: false,
@@ -440,8 +461,8 @@ class _FingerprintCard extends StatelessWidget {
           Text(
             t(
               'Porównaj z odciskiem w „Konto i odzyskiwanie” na swoim '
-              'drugim urządzeniu albo ze znajomym, który go widzi. '
-              'Przejęcie zastępuje konto, które ten telefon ma teraz.',
+              'drugim urządzeniu albo ze znajomym, który go widzi. Konta '
+              'z danymi, które jest tu teraz, Zen nie zastąpi bez pytania.',
             ),
             style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
           ),

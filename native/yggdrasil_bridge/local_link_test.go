@@ -269,28 +269,33 @@ func TestLocalHandshakeRefusesStrangers(t *testing.T) {
 func TestLocalHandshakeRefusesAnotherDevicesKey(t *testing.T) {
 	keyA, keyB, keyC := testNodeKey(t), testNodeKey(t), testNodeKey(t)
 	forA, forB := testPair(t, keyA, keyB)
-	// The device with B's secret claims to be C.
+	// The device with B's secret claims to be C: its selectors name C's
+	// address, which is not the one the secret was given for (and had they
+	// named B's, C's key would fail the last step).
 	_, _, errA, _ := testHandshake(t, []localPeer{forA}, []localPeer{forB}, keyA, keyC)
-	if errA == nil || errors.Is(errA, errLocalLinkStranger) {
-		t.Fatalf("a key that is not the device's must be refused, got %v", errA)
+	if errA == nil {
+		t.Fatal("a key that is not the device's must be refused")
 	}
 }
 
 func TestLocalHelloSaysNothingAboutTheDevices(t *testing.T) {
 	peers := []localPeer{testLocalPeer(t, 1), testLocalPeer(t, 2)}
+	self := localAddressBytes(meshAddressForKey(testNodeKey(t)))
 	ephemeral := make([]byte, localEphemeralSize)
 	_, _ = rand.Read(ephemeral)
-	one, _ := buildLocalHello(peers, ephemeral, rand.Reader)
+	nonce := make([]byte, localNonceSize)
+	_, _ = rand.Read(nonce)
+	one, _ := buildLocalHello(peers, self, ephemeral, nonce, rand.Reader)
 	_, selectors, err := parseLocalHello(one)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(selectors) != 16 {
-		t.Fatalf("padded to 16 selectors, got %d", len(selectors))
+	if len(selectors) != 64 {
+		t.Fatalf("padded to 64 selectors, got %d", len(selectors))
 	}
 	other := make([]byte, localEphemeralSize)
 	_, _ = rand.Read(other)
-	two, _ := buildLocalHello(peers, other, rand.Reader)
+	two, _ := buildLocalHello(peers, self, other, nonce, rand.Reader)
 	_, again, _ := parseLocalHello(two)
 	for s := range selectors {
 		if again[s] {
@@ -300,9 +305,28 @@ func TestLocalHelloSaysNothingAboutTheDevices(t *testing.T) {
 	if _, _, err := parseLocalHello(append(one, 0)); err == nil {
 		t.Fatal("a hello with trailing bytes is refused")
 	}
-	if _, err := buildLocalHello(peers, ephemeral[:32], rand.Reader); err == nil {
+	if _, err := buildLocalHello(peers, self, ephemeral[:32], nonce, rand.Reader); err == nil {
 		t.Fatal("a hello carries both one-time keys")
 	}
+	if _, err := buildLocalHello(peers, self, ephemeral, nonce[:8], rand.Reader); err == nil {
+		t.Fatal("a hello answers a whole nonce")
+	}
+}
+
+// testOpenings exchanges openings over conn as the handshake does and
+// returns the other side's nonce.
+func testOpenings(t *testing.T, conn net.Conn) []byte {
+	t.Helper()
+	opening := make([]byte, localOpeningSize)
+	opening[0] = localHandshakeVersion
+	_, _ = rand.Read(opening[1:])
+	go func() { _ = writeLocalFrame(conn, opening) }()
+	theirs, err := readLocalFrame(conn, 1<<16)
+	if err != nil || len(theirs) != localOpeningSize {
+		t.Errorf("opening: %d bytes, %v", len(theirs), err)
+		return nil
+	}
+	return theirs[1:]
 }
 
 // recordingConn keeps what was read from it.
@@ -338,7 +362,11 @@ func TestLocalHandshakeIsHybridPostQuantum(t *testing.T) {
 	}
 	defer a.conn.Close()
 	defer b.session.conn.Close()
-	// B's hello carries an ML-KEM-768 key, and a ciphertext follows it.
+	// B's opening, then its hello with an ML-KEM-768 key, and a ciphertext.
+	opening, err := readLocalFrame(heard, 1<<16)
+	if err != nil || len(opening) != localOpeningSize || opening[0] != localHandshakeVersion {
+		t.Fatalf("an opening first: %x %v", opening, err)
+	}
 	hello, err := readLocalFrame(heard, 1<<16)
 	if err != nil {
 		t.Fatal(err)
@@ -365,10 +393,11 @@ func TestLocalHandshakeRefusesABrokenKemKey(t *testing.T) {
 	go func() {
 		// B's selector for forged one-time keys whose ML-KEM half is no
 		// key at all (every coefficient out of range).
+		nonce := testOpenings(t, right)
 		ephemeral := bytes.Repeat([]byte{0xff}, localEphemeralSize)
 		_, _ = rand.Read(ephemeral[:32])
-		hello, _ := buildLocalHello([]localPeer{forB}, ephemeral, rand.Reader)
-		_ = writeLocalFrame(right, hello)
+		hello, _ := buildLocalHello([]localPeer{forB}, localAddressBytes(meshAddressForKey(keyB)), ephemeral, nonce, rand.Reader)
+		go func() { _ = writeLocalFrame(right, hello) }()
 		_, _ = readLocalFrame(right, 1<<16)
 	}()
 	_, err := localLinkHandshake(left, []localPeer{forA}, keyA)

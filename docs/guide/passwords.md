@@ -27,9 +27,11 @@ copies; see the limits below).
 
 - **The list.** Entries sorted by name, each with its login (or its
   address) under the name and a button that copies its password. **Search**
-  looks in names, logins and addresses, never in passwords or notes. An
-  empty list offers **Add password** and **Import from a file**; later
-  **+** adds one. The menu (**More**) holds *Import from a CSV file*,
+  looks in names, logins and addresses, never in passwords or notes, and
+  ignores accents. An
+  empty list offers **Add password**, **Import from a file** and
+  **Password setup**; later **+** adds one. The top bar has **Password
+  setup** (see below). The menu (**More**) holds *Import from a CSV file*,
   *Filling in other apps* (Android) and *How it works*.
 - **An entry** shows its fields, the password hidden until you tap the eye,
   with **Copy login** and **Copy password**, **Edit** and **Delete**. A
@@ -43,7 +45,8 @@ copies; see the limits below).
   equally likely, drawn from the system's cryptographic generator.
   **Refresh** makes another, **Use** puts it in the form. A bar under the
   password field estimates how hard a password is to guess, from *Very
-  weak* to *Very strong*: it is a hint, not a guarantee.
+  weak* to *Very strong*: it is a hint, not a guarantee, and it has a line
+  of its own that a screen reader reads.
 - **Import.** Export your passwords from a browser or a password manager to
   a CSV file and choose it in *Import from a CSV file*. Zen reads the
   exports of Chrome, Edge, Firefox, Bitwarden, KeePass and KeePassXC, and
@@ -53,7 +56,13 @@ copies; see the limits below).
   unless one with the same name or address, login and password is already
   there. A report says how many came in and why the others did not (no
   password, no name or address, not a login such as a card or a note, from
-  the trash, fields too long, damaged rows, already in Zen, no room).
+  the trash, fields too long, damaged rows, already in Zen, no room), and
+  names the lines of the damaged ones: a damaged row costs that row only
+  (one stray quotation mark used to swallow the rest of the file while the
+  report said two rows were read). Archived rows of 1Password and rows from
+  a recycle bin with a translated name are not imported. The same logins
+  imported on two devices merge into one entry, and **Remove duplicate
+  passwords** in the menu removes exact duplicates.
   Nothing of the file is kept or written to the log. **The passwords are in
   plain text in that file: delete it after the import.**
 - **Earlier passwords.** Every change keeps the version before it: an
@@ -69,7 +78,12 @@ copies; see the limits below).
   version to keep.* **Keep the current one** settles it, **Restore** takes
   the other. An entry deleted on one device while it was being changed on
   another stays (*It was deleted on another device while being changed
-  here, so it stayed.*): a deletion removes only what it saw.
+  here, so it stayed.*): a deletion removes only what it saw, and the notice
+  can be dismissed. Whether two changes clashed is no longer judged by the
+  devices' clocks (a password changed offline became ordinary history when
+  the other device edited the entry twice, and was gone after six edits):
+  each version names the version it was made from, and one that is not an
+  ancestor of the current one is shown as a conflict and is never pruned.
 - **How they come back.** Passwords come back with every way the account
   comes back: from another device of the account, in a move to a new phone,
   in every full account copy (always, whatever else is ticked), and from
@@ -79,40 +93,125 @@ copies; see the limits below).
   that copy with friends: type one friend's invitation code when you
   restore a key copy. Without any friend in Zen they do not come back that
   way. A copy taken back is merged with what the device has: nothing here
-  is removed and a deletion here stays.
+  is removed and a deletion here stays. Whether the passwords are in the
+  copy your friends keep is your choice (*Passwords in the backup with
+  friends*, on by default and the same on every device of the account);
+  switched off, the friends' copy is replaced at once with one without them,
+  and after a key copy or a recovery with close friends your passwords then
+  do not come back from it.
+
+## Password setup
+
+*Passwords* → the **Password setup** button in the top bar (it is on the
+empty list too). It is also a step of the setup on the first start (see
+[Getting started](getting-started.md)): Zen asks first whether you want its
+password manager; *No* changes nothing and you can come back from
+*Settings* → *Passwords*, *Yes* shows this same page inside the step.
+After an update that adds a step to the first-start setup, someone who went
+through the one before sees only the new step, once.
+
+On Android 9 and later it shows two things, read again every time you come
+back to Zen from the settings it opened:
+
+- **Android's autofill service.** Whether Zen is the phone's autofill
+  service, with **Open Android settings**, the page where you pick it (and
+  where you switch it off). Without it no app and no browser asks Zen for a
+  login.
+- **The browsers.** Every browser from a fixed list of 21 that is
+  installed, each with what it needs. Zen finds out which are installed from
+  their package names alone (listed in the manifest; no permission, nothing
+  leaves the phone). What a browser needs:
+
+| Browser | What it needs |
+|---|---|
+| Chrome (also Beta, Dev and Canary), Chromium, Brave, Vivaldi | A switch of its own. Chrome 135 and later hands web forms to the phone's autofill service only with it on: in the browser, *Settings* → *Autofill services* → **Autofill using another service** (the browser restarts). Zen reads the switch, shows it as on, off or unknown, and **Open the browser's settings** opens the browser's own settings page where the browser allows it; you find the switch from there. An older browser may not have it. For Brave and Vivaldi the same switch is expected; that is not confirmed. |
+| Firefox (also Beta and Nightly), Fennec, Mull, IronFox, Tor Browser, DuckDuckGo | Nothing: they are believed to use Android's autofill service by themselves. Not confirmed. |
+| Edge, Samsung Internet, Opera | Probably Zen does not show up in them. They do not ask the autofill service directly but need Android's accessibility-based compatibility mode, which Zen does not use. Use Chrome or Firefox for these logins, or copy the login from its entry. |
+| Kiwi, Firefox Focus, Firefox Klar | Zen knows no confirmed steps and says so; look for an *Autofill* setting in the browser. |
+
+A browser that is not on the list is not shown; if Zen finds none it knows,
+the page says where to look. The words in quotes are those of the English
+browsers; in other languages they sound alike. These steps come from the
+browsers' and Android's own documentation and have not been confirmed on
+every browser and phone.
+
+Where Zen fills nothing in other apps (Android 8 and older, iPhone,
+Windows, macOS, Linux) the page says so plainly: open the entry in
+*Passwords* and copy the login or the password (they leave the clipboard
+after 30 seconds and when Zen locks). The passwords are the same on every
+device of the account, so on a phone with Android 9 or later they are
+offered in forms.
 
 ## Filling in other apps (Android)
 
 On Android 9 and later, logins saved in *Passwords* can fill login forms
-in other apps and in browsers. It is off until you choose it: *Passwords*
-→ **More** → *Filling in other apps* → **Open Android settings**, and pick
-Zen as the autofill service there (you switch it off in the same place).
+in other apps and in browsers. It is off until you choose it: **Password
+setup** (above), or *Passwords* → **More** → *Filling in other apps* →
+**Open Android settings**, and pick Zen as the autofill service there (you
+switch it off in the same place).
 
-- A login form then offers one suggestion, *Unlock Zen*. It carries no
-  login and no password: nothing leaves Zen before you act.
-- Tapping it brings up Zen. You unlock it (a form opened while Zen was
-  locked waits about a minute for that), confirm who you are as for
-  opening *Passwords*, and pick the login yourself in *Choose a login*.
-  Only that login and its password go to the form, and only while that
-  form still waits; otherwise *The time to fill in has run out. Try again
-  in that app.*
+- A login form then offers one suggestion from Zen: Zen's icon, *Zen* and
+  *Unlock Zen*, in colours that read in the light and the dark theme. On
+  Android 11 and later it shows inside the keyboard when the keyboard shows
+  suggestions, otherwise as a drop-down under the field. It carries no
+  login and no password: nothing leaves Zen before you act. A form whose
+  fields are marked `autocomplete="off"` or the like still gets it.
+- Tapping it brings up Zen, and you are asked **once**. If Zen was locked
+  (a form opened while Zen was locked waits about a minute for that), the
+  unlock you make for it, with your password or your finger, is the
+  confirmation and the picker opens right after; if Zen was already open,
+  it asks you to confirm who you are, as for opening *Passwords*. Then you
+  pick the login yourself in *Choose a login*. Only that login and its
+  password go to the form, and only while that form still waits; otherwise
+  *The time to fill in has run out. Try again in that app.*
 - The list shows only logins saved for that app or page. An app is known
   by its package as Android reports it, which the app cannot change; a page
-  is known by its address only in a browser Zen knows. A page matches an
+  is known by its address only in a browser Zen knows **and whose installed
+  package is signed by that browser's maker** (the fingerprints are pinned
+  in Zen; a browser without a confirmed one is filled like any other app,
+  by its package alone, so an app installed under a known browser's name can
+  no longer name any page and be offered its login). A page matches an
   entry with the same host or another host of the same registered domain
-  (`login.example.com` for `example.com`), never by part of a name
-  (`example.com.evil.net` does not match `example.com`); a page that is not
+  by the Public Suffix List, which ships with the app (`login.example.com`
+  for `example.com`; a login saved for one shop under `gdynia.pl`, a tunnel
+  under `trycloudflare.com` or a bucket under `s3.amazonaws.com` is no
+  longer offered on anyone else's page there), never by part of a name
+  (`example.com.evil.net` does not match `example.com`); addresses in other
+  scripts match in their ASCII form; a page that is not
   https matches only entries saved with `http://`; a port must be the same
   on both sides; an app matches only an entry for exactly its package, and
-  never a web entry.
+  never a web entry. The certificate hash of an `android://` address is
+  kept and checked, and a login saved from the picker names the app's
+  certificate.
 - Every other login is shown only after **Search passwords** and a
   warning: *Entering a password where it wasn't saved is how scams work: a
-  fake app or site pretends to be the real one.*
+  fake app or site pretends to be the real one.* A search past the warning
+  that finds nothing says so.
+- **Nothing saved for it yet?** The picker has a button for a new login for
+  that page or app. It opens the entry form with the name filled in and the
+  address fixed: the page's address as the browser reported it (scheme, host
+  and port), or the app's package, taken from the request and not from
+  anything the page or app wrote, so the next time the same page asks, this
+  entry is found. You cannot edit the address there. Saving it fills the
+  form with it at once. Zen keeps the request open for up to five minutes
+  from when it began while you type, instead of one. If the form ended
+  meanwhile, the login is still saved, and Zen says it was saved but not
+  filled.
+- **A login in two steps.** On the first page, with the login field alone,
+  Zen offers its suggestion when that field says it is the login
+  (`autocomplete="username"`; an e-mail field alone is not enough, or every
+  newsletter form would get it). The picker then lists only entries that
+  have a login and says that only the login is filled. The second page,
+  with the password alone, gets its own suggestion and fills the password.
+- **Forms Zen leaves alone.** A form with two or more password fields
+  (signing up, changing a password) gets no suggestion, and a field that
+  says it is something else (a new password, a one-time code, a search, a
+  phone number, an address, a card) is never filled.
 - Zen never offers to save logins typed elsewhere.
 
 **What another app can and cannot do.** Any app with a login form can get
 the *Unlock Zen* suggestion and bring Zen up. It cannot read anything by
-that: it gets a login only when you unlock Zen, confirm who you are and
+that: it gets a login only when you unlock Zen (or confirm who you are) and
 pick one, and it is offered only the logins saved for its own package.
 If you pass the warning and pick a login saved for something else, that
 app gets it. While the list is on the screen, touches that come through
@@ -120,11 +219,11 @@ another app's window drawn over Zen are ignored.
 
 ## What stays private
 
-- The passwords are kept only in the account's encrypted store on your
-  devices. Changes travel between your devices sealed for them alone.
-- Your friends who keep the copy with friends hold the passwords sealed:
-  they cannot open them, and the passwords are padded so that the copy's
-  size does not tell how many there are.
+- The passwords are kept encrypted on your devices. Changes travel between
+  your devices sealed for them alone.
+- Unless you switch it off, your friends who keep the copy with friends hold
+  the passwords sealed: they cannot open them, and the passwords are padded
+  so that the copy's size does not tell how many there are.
 - Nothing of an entry, a form or the app that asked goes to Zen's log.
 
 ## Limits
@@ -146,7 +245,13 @@ another app's window drawn over Zen are ignored.
 - Passwords saved by a newer Zen stay as they are until you update; a
   store that cannot be read is left untouched, never taken for an empty
   one.
-- Filling in other apps exists only on Android 9 and later. On a computer
-  and on iPhone copy the password instead.
+- Filling in other apps exists only on Android 9 and later. On Android 8
+  and older, on a computer and on iPhone Zen fills nothing in other apps:
+  copy the login and the password from the entry instead. Browsers that
+  hand no forms to the autofill service (Edge, Samsung Internet and Opera
+  probably among them) cannot be filled either.
+- The password setup and the suggestion in the keyboard were written from
+  the documentation of Android and of the browsers and were not tried on
+  real phones before their release.
 
 [Back to the guide](README.md)

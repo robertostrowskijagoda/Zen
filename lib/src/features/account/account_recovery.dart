@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/shamir.dart';
@@ -216,23 +217,40 @@ Uint8List _mix(Uint8List a, Uint8List b) => Uint8List.fromList(
   ]).bytes,
 );
 
-/// The account seed wrapped by the account password, kept on the device.
+/// The account seed wrapped by the account password, kept on every device
+/// of the account once the password is set: it travels with the seed when
+/// a device is linked, copied or restored from a backup, and between the
+/// account's devices when the password is set or changed on one of them.
 @immutable
 final class PasswordWrappedSeed {
   const PasswordWrappedSeed({
     required this.salt,
     required this.cost,
     required this.sealed,
+    this.at = 0,
+    this.signature,
   });
 
   final Uint8List salt;
   final PasswordCost cost;
   final Map<String, dynamic> sealed;
 
+  /// When the password was set (ms since the epoch): the newest one wins on
+  /// every device of the account. 0 for one set before wrappings carried a
+  /// time, or one made from a recovery (it never replaces a newer choice).
+  final int at;
+
+  /// The account key's signature over this wrapping ([signedBy]): another
+  /// device of the account takes only a signed one, so nobody without the
+  /// account key can make the devices drop their key for a made-up one.
+  /// Null for one set before 1.17.0 and not unlocked since.
+  final String? signature;
+
   static Future<PasswordWrappedSeed> wrap(
     Uint8List seed,
     String password, {
     PasswordCost cost = const PasswordCost(),
+    int at = 0,
   }) async {
     checkAccountPassword(password);
     final Uint8List salt = randomBytes(16);
@@ -241,6 +259,7 @@ final class PasswordWrappedSeed {
       salt: salt,
       cost: cost,
       sealed: await _seal(key, seed),
+      at: at,
     );
   }
 
@@ -248,10 +267,46 @@ final class PasswordWrappedSeed {
   Future<Uint8List?> unwrap(String password) async =>
       _open(await derivePasswordKey(password, salt, cost: cost), sealed);
 
+  /// What the account key signs: the wrapping, its time and the account.
+  Uint8List _signedBytes(String account) =>
+      canonicalJsonBytes(<String, dynamic>{
+        't': 'acct_wrap',
+        'account': account,
+        'salt': b64(salt),
+        'cost': cost.toJson(),
+        'sealed': sealed,
+        'at': at,
+      });
+
+  /// This wrapping signed by [accountKey] (the key it wraps).
+  Future<PasswordWrappedSeed> signedBy(LedgerKeyPair accountKey) async =>
+      PasswordWrappedSeed(
+        salt: salt,
+        cost: cost,
+        sealed: sealed,
+        at: at,
+        signature: b64(
+          await accountKey.signWithKey(_signedBytes(accountKey.id)),
+        ),
+      );
+
+  /// Whether [signature] is [account]'s over this very wrapping.
+  Future<bool> isSignedFor(String account) async {
+    final String? sig = signature;
+    return sig != null &&
+        await verifyLedgerSignature(
+          publicKey: account,
+          message: _signedBytes(account),
+          signature: sig,
+        );
+  }
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'salt': b64(salt),
     'cost': cost.toJson(),
     'sealed': sealed,
+    if (at != 0) 'at': at,
+    'sig': ?signature,
   };
 
   static PasswordWrappedSeed? fromJson(Object? json) {
@@ -264,7 +319,15 @@ final class PasswordWrappedSeed {
     if (salt == null || cost == null || sealed is! Map<String, dynamic>) {
       return null;
     }
-    return PasswordWrappedSeed(salt: salt, cost: cost, sealed: sealed);
+    final Object? at = json['at'];
+    final Object? sig = json['sig'];
+    return PasswordWrappedSeed(
+      salt: salt,
+      cost: cost,
+      sealed: sealed,
+      at: at is int && at > 0 ? at : 0,
+      signature: isKeyedHybridSignatureText(sig) ? sig as String : null,
+    );
   }
 }
 
@@ -345,6 +408,14 @@ final class RecoverySeal {
       at: now,
     );
   }
+
+  /// Whether [password] is the one this seal was made with.
+  Future<bool> opensWith(String password) async =>
+      await _open(
+        _innerKey(await derivePasswordKey(password, salt, cost: cost)),
+        box,
+      ) !=
+      null;
 
   /// The box as bytes (nonce, then cipher text with its tag): what the
   /// circle box of a generation seals.
@@ -540,9 +611,15 @@ Future<List<RecoveryPiece>> createRecoveryPieces({
     throw ArgumentError(
       tn(
         kRecoveryCircleMinimum,
-        one: 'Do odzyskiwania potrzeba co najmniej {n} osoby w kręgu.',
-        few: 'Do odzyskiwania potrzeba co najmniej {n} osób w kręgu.',
-        many: 'Do odzyskiwania potrzeba co najmniej {n} osób w kręgu.',
+        one:
+            'Do odzyskiwania potrzeba co najmniej {n} osoby wśród bliskich '
+            'znajomych.',
+        few:
+            'Do odzyskiwania potrzeba co najmniej {n} osób wśród bliskich '
+            'znajomych.',
+        many:
+            'Do odzyskiwania potrzeba co najmniej {n} osób wśród bliskich '
+            'znajomych.',
       ),
     );
   }

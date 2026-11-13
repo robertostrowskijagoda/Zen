@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mathbits "math/bits"
 	"net"
+	"sort"
 	"strings"
 	"time"
 )
@@ -35,6 +37,13 @@ import (
 //     other holder of a secret can test its tag; to anyone else an advert
 //     is random bytes that change every time (its size tells roughly how
 //     many devices the sender links with).
+//   - A filter holds only as many tags as keep a false match rare
+//     (localAdvertCapacity): the 16 bytes a Bluetooth advert carries made
+//     every phone nearby take a filter of 20 devices for one of its own,
+//     and dial. Own devices go in first, then the ones linked lately, then
+//     the others by turns (localAdvertOrder). A filter fuller than
+//     localLinkMaxBloomFill means nothing and is not tested at all: an
+//     advert with every bit set matched every phone.
 //   - Linking runs a handshake (local_link_handshake.go) that proves the
 //     secret on both sides before anything else is said, and encrypts the
 //     stream. Inside it each side names its Yggdrasil key, which must belong
@@ -49,16 +58,26 @@ const (
 	localLinkSlot = 5 * time.Minute
 	// Slots an advert may be off by (clocks of phones without a network
 	// drift).
-	localLinkMaxSlotSkew   = 3
-	localLinkAdvertVersion = 1
+	localLinkMaxSlotSkew = 3
+	// 2: tags with seven positions of their own (bloomPositions).
+	localLinkAdvertVersion = 2
 	// version, slot (low 16 bits), salt.
 	localLinkAdvertHeader = 1 + 2 + 4
 	// Smallest and largest Bloom filter; LAN beacons size it to the number
-	// of devices (about 1% false matches), Bluetooth asks for what fits.
+	// of devices, Bluetooth asks for what fits. Sixteen bits per device:
+	// at most 35% of the bits set, a false match for 1 in 1,400 devices
+	// tested (0.354^7).
 	localLinkMinBloomBytes = 8
 	localLinkMaxBloomBytes = 1024
-	localLinkBloomBitsPer  = 10
+	localLinkBloomBitsPer  = 16
 	localLinkBloomHashes   = 7
+	// Most of a filter's bits that may be set, in percent. Above it a
+	// filter matches too much to mean anything: at 40% a device tested
+	// matches by chance once in 600 (0.4^7), so a forged filter just below
+	// it pulls a phone that links with 40 devices into dialling one time
+	// in 16; one with every bit set pulled every phone. An honest filter
+	// stays below it (buildLocalAdvert).
+	localLinkMaxBloomFill = 40
 	// Concurrent local links at most.
 	localLinkMaxLinks = 16
 )
@@ -189,8 +208,8 @@ func localLinkSlotAt(now time.Time) int64 {
 	return now.Unix() / int64(localLinkSlot/time.Second)
 }
 
-// localLinkBloomBytes is the filter size for n devices (about 1% false
-// matches), in steps of 16 bytes so the size says little.
+// localLinkBloomBytes is the filter size for n devices (localLinkBloomBitsPer
+// each), in steps of 16 bytes so the size says little.
 func localLinkBloomBytes(n int) int {
 	size := (n*localLinkBloomBitsPer + 7) / 8
 	size = (size + 15) / 16 * 16
@@ -212,17 +231,38 @@ func (peer *localPeer) bloomPositions(slot int64, salt []byte, bits uint32) [loc
 	mac.Write(slotBytes[:])
 	mac.Write(salt)
 	sum := mac.Sum(nil)
-	h1 := binary.BigEndian.Uint32(sum[0:4])
-	h2 := binary.BigEndian.Uint32(sum[4:8]) | 1
+	// Seven positions of their own, not one step repeated: in a small
+	// filter the steps of two devices often fall in line, and a stranger
+	// then matched several times as often as the filter's fill says.
 	var out [localLinkBloomHashes]uint32
 	for i := range out {
-		out[i] = (h1 + uint32(i)*h2) % bits
+		out[i] = binary.BigEndian.Uint32(sum[4*i:4*i+4]) % bits
 	}
 	return out
 }
 
+// localAdvertCapacity is how many devices a filter of bloomBytes bytes
+// holds (localLinkBloomBitsPer bits each).
+func localAdvertCapacity(bloomBytes int) int {
+	return bloomBytes * 8 / localLinkBloomBitsPer
+}
+
+// localAdvertTooFull tells whether more than localLinkMaxBloomFill percent
+// of a filter's bits are set.
+func localAdvertTooFull(bloom []byte) bool {
+	ones := 0
+	for _, b := range bloom {
+		ones += mathbits.OnesCount8(b)
+	}
+	return ones*100 > len(bloom)*8*localLinkMaxBloomFill
+}
+
 // buildLocalAdvert makes an advert of peers for the slot of now, with a
-// Bloom filter of bloomBytes bytes (0: sized to the number of peers).
+// Bloom filter of bloomBytes bytes (0: sized to the number of peers). It
+// holds the first localAdvertCapacity of peers (the caller puts the ones
+// that matter first, localAdvertOrder), under a new salt while the filter
+// came out fuller than receivers take, and without the last of them should
+// that go on.
 func buildLocalAdvert(peers []localPeer, now time.Time, bloomBytes int, random io.Reader) ([]byte, error) {
 	if bloomBytes == 0 {
 		bloomBytes = localLinkBloomBytes(len(peers))
@@ -230,21 +270,69 @@ func buildLocalAdvert(peers []localPeer, now time.Time, bloomBytes int, random i
 	if bloomBytes < localLinkMinBloomBytes || bloomBytes > localLinkMaxBloomBytes {
 		return nil, fmt.Errorf("%w: advert of %d bytes", errLocalLinkBadInput, bloomBytes)
 	}
-	advert := make([]byte, localLinkAdvertHeader+bloomBytes)
-	slot := localLinkSlotAt(now)
-	advert[0] = localLinkAdvertVersion
-	binary.BigEndian.PutUint16(advert[1:3], uint16(slot))
-	if _, err := io.ReadFull(random, advert[3:7]); err != nil {
-		return nil, err
+	if capacity := localAdvertCapacity(bloomBytes); len(peers) > capacity {
+		peers = peers[:capacity]
 	}
-	bloom := advert[localLinkAdvertHeader:]
-	bits := uint32(len(bloom) * 8)
-	for i := range peers {
-		for _, pos := range peers[i].bloomPositions(slot, advert[3:7], bits) {
-			bloom[pos/8] |= 1 << (pos % 8)
+	slot := localLinkSlotAt(now)
+	for tries := 1; ; tries++ {
+		advert := make([]byte, localLinkAdvertHeader+bloomBytes)
+		advert[0] = localLinkAdvertVersion
+		binary.BigEndian.PutUint16(advert[1:3], uint16(slot))
+		if _, err := io.ReadFull(random, advert[3:7]); err != nil {
+			return nil, err
+		}
+		bloom := advert[localLinkAdvertHeader:]
+		bits := uint32(len(bloom) * 8)
+		for i := range peers {
+			for _, pos := range peers[i].bloomPositions(slot, advert[3:7], bits) {
+				bloom[pos/8] |= 1 << (pos % 8)
+			}
+		}
+		if !localAdvertTooFull(bloom) {
+			return advert, nil
+		}
+		if tries%8 == 0 && len(peers) > 0 {
+			peers = peers[:len(peers)-1]
 		}
 	}
-	return advert, nil
+}
+
+// localAdvertRecent is how long a device linked with counts as seen lately
+// (localAdvertOrder).
+const localAdvertRecent = 14 * 24 * time.Hour
+
+// localAdvertOrder is peers in the order an advert with room for capacity
+// of them takes them: the account's own devices, then the ones linked
+// lately (the latest first), then the rest by turns, the next ones each
+// slot, so every friend is in now and then.
+func localAdvertOrder(peers []localPeer, linked map[string]time.Time, now time.Time, capacity int) []localPeer {
+	if len(peers) <= capacity {
+		return peers
+	}
+	var own, recent, rest []localPeer
+	for _, peer := range peers {
+		at, ok := linked[peer.address]
+		switch {
+		case peer.own:
+			own = append(own, peer)
+		case ok && now.Sub(at) < localAdvertRecent:
+			recent = append(recent, peer)
+		default:
+			rest = append(rest, peer)
+		}
+	}
+	sort.SliceStable(recent, func(i, j int) bool {
+		return linked[recent[i].address].After(linked[recent[j].address])
+	})
+	out := append(append(make([]localPeer, 0, len(peers)), own...), recent...)
+	if room := capacity - len(out); room > 0 && len(rest) > 0 {
+		start := int((localLinkSlotAt(now) * int64(room)) % int64(len(rest)))
+		if start < 0 {
+			start += len(rest)
+		}
+		rest = append(rest[start:], rest[:start]...)
+	}
+	return append(out, rest...)
 }
 
 // localAdvertSlot is the full slot an advert names, if it is near now.
@@ -264,7 +352,8 @@ func localAdvertSlot(advert []byte, now time.Time) (int64, bool) {
 
 // matchLocalAdvert returns the peers whose tag the advert holds: the
 // devices that may have sent it (a Bloom filter can match by chance; the
-// handshake tells for sure).
+// handshake tells for sure). A filter too full to mean anything matches
+// nothing, on every transport.
 func matchLocalAdvert(peers []localPeer, advert []byte, now time.Time) []*localPeer {
 	slot, ok := localAdvertSlot(advert, now)
 	if !ok {
@@ -272,6 +361,9 @@ func matchLocalAdvert(peers []localPeer, advert []byte, now time.Time) []*localP
 	}
 	salt := advert[3:7]
 	bloom := advert[localLinkAdvertHeader:]
+	if localAdvertTooFull(bloom) {
+		return nil
+	}
 	bits := uint32(len(bloom) * 8)
 	var out []*localPeer
 	for i := range peers {

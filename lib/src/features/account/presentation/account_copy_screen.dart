@@ -10,10 +10,12 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_copy.dart';
+import 'package:zen/src/features/account/account_holdings.dart';
 import 'package:zen/src/features/account/account_link.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/account/presentation/account_copy_common.dart';
 import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
+import 'package:zen/src/features/account/presentation/account_replace_dialog.dart';
 import 'package:zen/src/features/account/presentation/account_restore_info.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -123,6 +125,12 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
       return;
     }
     try {
+      // The device the digits were checked with takes the account: it is
+      // trusted when it greets from its address.
+      final String? peer = source.request?.peer;
+      if (peer != null) {
+        await node.expectOwnDevice(peer);
+      }
       await source.allow();
     } on Object catch (error, stackTrace) {
       logZenError('Preparing the account copy failed', error, stackTrace);
@@ -404,14 +412,34 @@ class _AccountCopyReceiveScreenState
         );
         return;
       }
-      final String? refused = accountImportRefusal(
-        await importer.check(offer.account, withKey: offer.seed != null),
+      final AccountImportOutcome? check = await importer.check(
+        offer.account,
+        withKey: offer.seed != null,
       );
+      final String? refused = accountImportRefusal(check);
       if (refused != null) {
         _say(refused);
+        final Future<AccountHoldings> Function()? holdings = ref.read(
+          accountHoldingsProvider,
+        );
+        if (check == AccountImportOutcome.otherAccount && holdings != null) {
+          // Never in place of an account that holds something: the person
+          // chooses what to do.
+          final AccountHoldings here = await holdings();
+          if (mounted) {
+            await offerAccountReplace(
+              context,
+              ref,
+              here: here,
+              incoming: offer.account,
+            );
+          }
+        }
         return;
       }
       await node.rememberDeviceAddresses(offer.siblings);
+      // The device the digits were checked with is this account's.
+      await node.expectOwnDevice(ticket.address);
       setState(() {
         _downloading = true;
         _total = offer.totalBytes;
@@ -497,6 +525,9 @@ class _AccountCopyReceiveScreenState
                 ),
               const SizedBox(height: 8),
               TextField(
+                enableSuggestions: false,
+                autocorrect: false,
+                keyboardType: TextInputType.visiblePassword,
                 key: const Key('account-copy-code'),
                 controller: _code,
                 enabled: !_busy,

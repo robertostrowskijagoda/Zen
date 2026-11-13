@@ -16,6 +16,9 @@ import 'package:zen/src/features/passwords/presentation/password_import.dart';
 import 'package:zen/src/features/passwords/presentation/password_vault_screen.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -89,6 +92,7 @@ Future<void> _pump(
   PasswordFilePicker? picker,
   String search = '',
   Size size = const Size(420, 900),
+  AppSettings? settings,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -102,6 +106,12 @@ Future<void> _pump(
         ),
         if (picker != null)
           passwordFilePickerProvider.overrideWithValue(picker),
+        if (settings != null) ...[
+          appSettingsInitialStateProvider.overrideWithValue(settings),
+          appSettingsStoreProvider.overrideWithValue(
+            MemoryAppSettingsStore(settings),
+          ),
+        ],
       ],
       child: MaterialApp(
         theme: ZenTheme.dark(),
@@ -216,6 +226,41 @@ void main() {
       find.textContaining('Skopiowane hasło znika ze schowka po 30 sekundach'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('empty and in "Jak to działa", it says the passwords travel '
+      'sealed to the chosen friends, or that they do not when switched '
+      'off', (WidgetTester tester) async {
+    await _pump(tester, vault: _vault(MemoryLedgerDisk()));
+    await _open(tester);
+    expect(find.textContaining('tylko na Twoich urządzeniach'), findsNothing);
+    expect(
+      find.textContaining('zamkniętą kopię trzymają też wybrani znajomi'),
+      findsOneWidget,
+    );
+    await _tap(tester, 'passwords-menu');
+    await _tap(tester, 'passwords-menu-help');
+    expect(find.byKey(const Key('passwords-help-friends')), findsOneWidget);
+    expect(
+      find.textContaining('otworzy ją tylko ten, kto ma klucz Twojego konta'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Hasła w kopii u znajomych'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _pump(
+      tester,
+      vault: _vault(MemoryLedgerDisk()),
+      settings: const AppSettings(passwordsInCircleBackup: false),
+    );
+    await _open(tester);
+    expect(
+      find.textContaining('w kopii u znajomych ich nie ma'),
+      findsOneWidget,
+    );
+    await _tap(tester, 'passwords-menu');
+    await _tap(tester, 'passwords-menu-help');
+    expect(find.byKey(const Key('passwords-help-devices')), findsOneWidget);
   });
 
   testWidgets('the list: a row per entry with its letter, name and login, a '
@@ -528,6 +573,70 @@ void main() {
     await _tap(tester, 'password-keep-current');
     expect(vault.entry(bank.id)!.conflict, isFalse);
     expect(find.byKey(const Key('password-conflict-info')), findsNothing);
+  });
+
+  testWidgets('kept over a deletion on another device: said, settled by '
+      '"Zostaw" without changing a field', (WidgetTester tester) async {
+    final MemoryLedgerDisk phone = MemoryLedgerDisk();
+    final PasswordVaultService a = _vault(phone);
+    final PasswordEntry bank = await a.add(_bank);
+    final MemoryLedgerDisk laptop = MemoryLedgerDisk()
+      ..files[kPasswordVaultKey] = phone.files[kPasswordVaultKey]!;
+    final PasswordVaultService b = _vault(laptop, seed: 2);
+    await b.load();
+    await a.delete(bank.id);
+    await b.edit(
+      bank.id,
+      const PasswordFields(name: 'Bank', password: 'z-laptopa'),
+    );
+    await phone.write(
+      kPasswordVaultKey,
+      Uint8List.fromList(
+        utf8.encode(
+          jsonEncode(<String, Object?>{
+            'v': 1,
+            'e': <String, Object?>{..._versions(phone), ..._versions(laptop)},
+          }),
+        ),
+      ),
+    );
+    final PasswordVaultService vault = _vault(phone, seed: 3);
+    await vault.load();
+    expect(vault.entry(bank.id)!.keptOverDeletion, isTrue);
+
+    await _pump(tester, vault: vault);
+    await _open(tester);
+    await _tap(tester, 'password-row-${bank.id}');
+    expect(find.byKey(const Key('password-kept-info')), findsOneWidget);
+    await _tap(tester, 'password-keep-over-deletion');
+    expect(vault.entry(bank.id)!.keptOverDeletion, isFalse);
+    expect(vault.entry(bank.id)!.password, 'z-laptopa');
+    expect(find.byKey(const Key('password-kept-info')), findsNothing);
+  });
+
+  testWidgets('exact copies are removed at once after a question; one of '
+      'each stays', (WidgetTester tester) async {
+    final PasswordVaultService vault = _vault(MemoryLedgerDisk());
+    await vault.add(_bank);
+    await vault.add(_bank);
+    await vault.add(_bank);
+    await vault.add(_mail);
+    expect(vault.duplicateCount, 2);
+
+    await _pump(tester, vault: vault);
+    await _open(tester);
+    await _tap(tester, 'passwords-menu');
+    await _tap(tester, 'passwords-menu-duplicates');
+    expect(
+      find.byKey(const Key('passwords-duplicates-dialog')),
+      findsOneWidget,
+    );
+    await _tap(tester, 'passwords-duplicates-confirm');
+    expect(vault.entries.map((PasswordEntry e) => e.name), <String>[
+      'Bank',
+      'poczta',
+    ]);
+    expect(vault.duplicateCount, 0);
   });
 
   testWidgets('import: a warning first, then the report in words; the '

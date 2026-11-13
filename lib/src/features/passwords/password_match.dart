@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/passwords/password_entry.dart';
+import 'package:zen/src/features/passwords/public_suffix.dart';
 
 /// What an entry's address points at.
 enum PasswordAddressKind {
@@ -17,7 +20,8 @@ final RegExp _ipv4 = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
 final RegExp _hostChars = RegExp(r'^[^\s/\\?#@:]+$');
 
 /// An entry's address, read for matching: a web page (scheme, host, port)
-/// or an Android app (package name).
+/// or an Android app (package name, and the digest of its signing
+/// certificate when the address names one).
 @immutable
 final class PasswordAddress {
   const PasswordAddress.web({
@@ -25,9 +29,10 @@ final class PasswordAddress {
     required this.host,
     this.port,
   }) : kind = PasswordAddressKind.web,
-       package = null;
+       package = null,
+       certificate = null;
 
-  const PasswordAddress.app(String this.package)
+  const PasswordAddress.app(String this.package, {this.certificate})
     : kind = PasswordAddressKind.app,
       scheme = null,
       host = null,
@@ -47,12 +52,20 @@ final class PasswordAddress {
   /// The package name, exactly (app).
   final String? package;
 
+  /// The digest of the app's signing certificate the address names, in
+  /// lower-case hex (app, `android://<hash>@package/`): Chrome's SHA-512 of
+  /// the certificate (64 bytes), or a SHA-256 (32 bytes). Null when the
+  /// address names none: then the package alone is matched.
+  final String? certificate;
+
   /// [address] as an entry stores it, or null when it is neither a web
   /// address nor an app:
   /// * `https://host[:port]/…`, `http://host[:port]/…`, or a bare host
   ///   (`example.com/login`), which is taken as https;
   /// * `android-app://com.example`, `androidapp://com.example` (Bitwarden)
-  ///   or `android://<hash>@com.example/` (Chrome, Firefox).
+  ///   or `android://<hash>@com.example/` (Chrome, Firefox), whose hash is
+  ///   the certificate's digest in base64 ([certificate]). An address whose
+  ///   hash cannot be read is no app: it never matches one.
   static PasswordAddress? parse(String address) {
     final String a = address.trim();
     if (a.isEmpty || a.length > kMaxPasswordAddressChars) {
@@ -65,12 +78,20 @@ final class PasswordAddress {
       }
     }
     if (lower.startsWith('android://')) {
-      String rest = a.substring('android://'.length);
+      final String rest = a.substring('android://'.length);
       final int at = rest.lastIndexOf('@');
-      if (at >= 0) {
-        rest = rest.substring(at + 1);
+      if (at < 0) {
+        return _app(rest);
       }
-      return _app(rest);
+      final String hash = rest.substring(0, at).trim();
+      if (hash.isEmpty) {
+        return _app(rest.substring(at + 1));
+      }
+      final String? certificate = passwordCertificateDigest(hash);
+      if (certificate == null) {
+        return null;
+      }
+      return _app(rest.substring(at + 1), certificate: certificate);
     }
     final bool hasScheme = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://').hasMatch(a);
     final Uri? uri = Uri.tryParse(hasScheme ? a : 'https://$a');
@@ -92,24 +113,77 @@ final class PasswordAddress {
     );
   }
 
-  static PasswordAddress? _app(String rest) {
+  static PasswordAddress? _app(String rest, {String? certificate}) {
     final String name = rest.split('/').first.split('?').first.trim();
-    return _package.hasMatch(name) ? PasswordAddress.app(name) : null;
+    return _package.hasMatch(name)
+        ? PasswordAddress.app(name, certificate: certificate)
+        : null;
   }
 
   @override
   String toString() => 'PasswordAddress(${kind.name})';
 }
 
-/// [host] in lower case without a trailing dot; null when it is not a
-/// host. Letters of other alphabets are kept as they are (never folded to
-/// look-alike Latin ones), so `exаmple.com` with a Cyrillic `а` stays a
+/// The certificate digest [hash] names (`android://<hash>@package/`), in
+/// lower-case hex; null when it is not one. Chrome writes the SHA-512 of
+/// the app's signing certificate in base64 with the URL-safe alphabet and
+/// padding (components/affiliations/core/browser/affiliation_utils.h); the
+/// standard alphabet and a missing padding are read too, and a digest of 32
+/// bytes is taken as a SHA-256.
+String? passwordCertificateDigest(String hash) {
+  String b = hash.trim().replaceAll('-', '+').replaceAll('_', '/');
+  if (b.isEmpty ||
+      b.length > 100 ||
+      !RegExp(r'^[A-Za-z0-9+/]+=*$').hasMatch(b)) {
+    return null;
+  }
+  b = b.replaceAll('=', '');
+  if (b.length % 4 == 1) {
+    return null;
+  }
+  b = b.padRight((b.length + 3) ~/ 4 * 4, '=');
+  final List<int> bytes;
+  try {
+    bytes = base64.decode(b);
+  } on FormatException {
+    return null;
+  }
+  if (bytes.length != 32 && bytes.length != 64) {
+    return null;
+  }
+  return <String>[
+    for (final int x in bytes) x.toRadixString(16).padLeft(2, '0'),
+  ].join();
+}
+
+/// The address an entry saved for the app [package] gets: with the SHA-512
+/// of its signing certificate ([sha512], lower-case hex) as Chrome writes
+/// it, `android://<base64url>@package/`, so that only an app signed with
+/// that certificate (or one it proved it rotated from) matches it; without
+/// one, `android-app://package`.
+String passwordAppAddress(String package, {String? sha512}) {
+  final String digest = sha512?.toLowerCase() ?? '';
+  if (!RegExp(r'^[0-9a-f]{128}$').hasMatch(digest)) {
+    return 'android-app://$package';
+  }
+  final List<int> bytes = <int>[
+    for (int i = 0; i < digest.length; i += 2)
+      int.parse(digest.substring(i, i + 2), radix: 16),
+  ];
+  return 'android://${base64Url.encode(bytes)}@$package/';
+}
+
+/// [host] as the autofill compares it: in its ASCII form, as browsers
+/// report a page ([asciiHost]: lower case, letters of other alphabets in
+/// punycode, `bücher.de` as `xn--bcher-kva.de`), without a trailing dot;
+/// null when it is not a host. Letters that look like Latin ones are never
+/// folded into them, so `exаmple.com` with a Cyrillic `а` stays a
 /// different host from `example.com`.
 String? normalizePasswordHost(String host) {
   String h = host.trim().toLowerCase();
   if (h.contains('%')) {
     // `Uri` escapes letters of other alphabets (and anything else) in a
-    // host: compared as the letters themselves.
+    // host: read as the letters themselves.
     try {
       h = Uri.decodeComponent(h);
     } on ArgumentError {
@@ -126,6 +200,11 @@ String? normalizePasswordHost(String host) {
     // An IPv6 literal as `Uri.host` gives it (without brackets).
     return '[$h]';
   }
+  final String? ascii = asciiHost(h);
+  if (ascii == null) {
+    return null;
+  }
+  h = ascii;
   while (h.endsWith('.')) {
     h = h.substring(0, h.length - 1);
   }
@@ -139,95 +218,18 @@ String? normalizePasswordHost(String host) {
   return h;
 }
 
-/// Second-level names that countries use as a public layer under their
-/// top-level domain (`co.uk`, `com.pl`, `ne.jp`): under a two-letter
-/// top-level domain they are never the registrable part.
-const Set<String> _genericSecondLevel = <String>{
-  'ac',
-  'co',
-  'com',
-  'edu',
-  'gob',
-  'gov',
-  'go',
-  'gouv',
-  'info',
-  'ltd',
-  'me',
-  'mil',
-  'ne',
-  'net',
-  'nom',
-  'or',
-  'org',
-  'plc',
-  'sch',
-  'biz',
-};
-
-/// Public suffixes of more than one label that the rule above does not
-/// cover: shared hosting where every subdomain is somebody else's, and
-/// regional names in Poland. A host under one of these is matched only
-/// exactly or with its own subdomains.
-const Set<String> _publicSuffixes = <String>{
-  // Poland (regional and functional second-level names).
-  'waw.pl', 'krakow.pl', 'wroclaw.pl', 'poznan.pl', 'gda.pl', 'gdansk.pl',
-  'lodz.pl', 'szczecin.pl', 'lublin.pl', 'katowice.pl', 'bialystok.pl',
-  'olsztyn.pl', 'torun.pl', 'bydgoszcz.pl', 'rzeszow.pl', 'opole.pl',
-  'kielce.pl', 'zgora.pl', 'gorzow.pl', 'slask.pl', 'mazowsze.pl',
-  'pomorze.pl', 'malopolska.pl', 'wielkopolska.pl', 'warmia.pl',
-  'mail.pl', 'shop.pl', 'priv.pl', 'tm.pl', 'media.pl', 'sklep.pl',
-  'pc.pl', 'agro.pl', 'atm.pl', 'auto.pl', 'gmina.pl', 'powiat.pl',
-  'nieruchomosci.pl', 'realestate.pl', 'travel.pl', 'turystyka.pl',
-  // Hosting where each subdomain belongs to someone else.
-  'github.io', 'gitlab.io', 'blogspot.com', 'herokuapp.com', 'netlify.app',
-  'vercel.app', 'pages.dev', 'workers.dev', 'web.app', 'firebaseapp.com',
-  'appspot.com', 'azurewebsites.net', 'cloudfront.net', 'amazonaws.com',
-  'ngrok.io', 'ngrok-free.app', 'glitch.me', 'repl.co', 'onrender.com',
-  'fly.dev', 'wordpress.com', 'wixsite.com', 'blogspot.pl', 'neocities.org',
-  'surge.sh', 'bitbucket.io', 'myshopify.com', 'carrd.co', 'webflow.io',
-  'translate.goog', 'dyndns.org', 'duckdns.org', 'no-ip.org', 'ddns.net',
-  'r.appspot.com', 'sharepoint.com', 'readthedocs.io', 'deno.dev',
-  'pythonanywhere.com', 'replit.dev', 'framer.website', 'notion.site',
-  // Other countries' multi-label suffixes outside the rule above.
-  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
-  'com.br', 'net.br', 'org.br', 'gov.br', 'com.cn', 'net.cn', 'org.cn',
-  'gov.cn', 'com.tw', 'org.tw', 'com.hk', 'org.hk', 'com.sg', 'com.my',
-  'com.mx', 'com.ar', 'com.tr', 'com.ua', 'kiev.ua', 'com.ru', 'msk.ru',
-  'spb.ru', 'com.de', 'co.za', 'co.in', 'firm.in', 'gen.in', 'ind.in',
-};
-
-bool _isPublicSuffix(List<String> labels) {
-  final String name = labels.join('.');
-  if (_publicSuffixes.contains(name)) {
-    return true;
-  }
-  return labels.length == 2 &&
-      labels[1].length == 2 &&
-      _genericSecondLevel.contains(labels[0]);
-}
-
-/// The registrable part of [host] (`example.com` for `login.example.com`,
-/// `bank.com.pl` for `www.bank.com.pl`); null for an address, a single
-/// label, or a host that is itself a public suffix: those match only
-/// exactly.
+/// The registrable part of [host] by the Public Suffix List
+/// ([publicSuffixList]: `example.com` for `login.example.com`,
+/// `bank.com.pl` for `www.bank.com.pl`, `sklep.gdynia.pl` for
+/// `www.sklep.gdynia.pl`, `victim.github.io` for `a.victim.github.io`),
+/// in ASCII form; null for an address, a single label, or a host that is
+/// itself a public suffix: those match only exactly.
 String? registrablePasswordDomain(String host) {
   final String? h = normalizePasswordHost(host);
   if (h == null || h.startsWith('[') || _ipv4.hasMatch(h)) {
     return null;
   }
-  final List<String> labels = h.split('.');
-  if (labels.length < 2 || _isPublicSuffix(labels)) {
-    return null;
-  }
-  // The longest public suffix wins (`a.b.github.io` → `b.github.io`).
-  for (int start = 0; start < labels.length - 2; start++) {
-    if (_isPublicSuffix(labels.sublist(start + 1))) {
-      return labels.sublist(start).join('.');
-    }
-  }
-  // Only the top-level domain is public.
-  return labels.sublist(labels.length - 2).join('.');
+  return publicSuffixList.registrableDomain(h);
 }
 
 /// How an entry matched a request.
@@ -236,7 +238,8 @@ enum PasswordMatchKind {
   exact,
 
   /// Another host of the same registrable domain (`login.example.com` for
-  /// `example.com`).
+  /// `example.com`, by the Public Suffix List): the picker shows the
+  /// address the entry was saved for beside it.
   sameSite,
 }
 
@@ -262,14 +265,20 @@ int _defaultPort(String scheme) => scheme == 'http' ? 80 : 443;
 ///   same registrable domain ([registrablePasswordDomain]). Never by a
 ///   part of a name: `evil-example.com`, `example.com.evil.net` and
 ///   `notexample.com` do not match `example.com`; hosts under a public
-///   suffix (`co.uk`, `github.io`) match only their own registrable name.
+///   suffix of the Public Suffix List (`co.uk`, `gdynia.pl`, `github.io`,
+///   `s3.amazonaws.com`) match only their own registrable name. Both sides
+///   are compared in their ASCII form ([normalizePasswordHost]).
 /// * A page that is not https ([webScheme] `http`, or not given) never
 ///   matches an https entry; it matches only entries that say `http://`.
 ///   An https page matches both.
 /// * A port named on either side must be the same.
-/// * An app matches only an entry for exactly its package; a web page
-///   never matches an app entry, and an app never matches a web entry by
-///   any similarity of names.
+/// * An app matches only an entry for exactly its package; an entry that
+///   names a certificate ([PasswordAddress.certificate]) only when that
+///   digest is among the app's [appCertificates] (the SHA-256 and SHA-512
+///   digests of the certificates it is signed with, as Android reports
+///   them; none known: such an entry does not match). A web page never
+///   matches an app entry, and an app never matches a web entry by any
+///   similarity of names.
 ///
 /// Exact matches come first, then by name.
 List<PasswordMatch> matchPasswordEntries(
@@ -277,6 +286,7 @@ List<PasswordMatch> matchPasswordEntries(
   String? packageName,
   String? webDomain,
   String? webScheme,
+  Iterable<String> appCertificates = const <String>[],
 }) {
   final List<PasswordMatch> out = <PasswordMatch>[];
   final String domain = webDomain?.trim() ?? '';
@@ -319,11 +329,15 @@ List<PasswordMatch> matchPasswordEntries(
     if (!_package.hasMatch(package)) {
       return out;
     }
+    final Set<String> signedWith = <String>{
+      for (final String c in appCertificates) c.toLowerCase(),
+    };
     for (final PasswordEntry e in entries) {
       final PasswordAddress? a = PasswordAddress.parse(e.address);
       if (a != null &&
           a.kind == PasswordAddressKind.app &&
-          a.package == package) {
+          a.package == package &&
+          (a.certificate == null || signedWith.contains(a.certificate))) {
         out.add(PasswordMatch(e, PasswordMatchKind.exact));
       }
     }

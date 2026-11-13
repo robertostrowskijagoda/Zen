@@ -335,7 +335,7 @@ class CircleSettleUp extends StatelessWidget {
       context: context,
       builder: (BuildContext context) => AlertDialog(
         scrollable: true,
-        title: Text(t('Ile wydałeś(-aś) na zakupy (zł)?')),
+        title: Text(t('Ile wydałeś(-aś) na zakupy?')),
         content: TextField(
           key: const Key('circle-spent-input'),
           controller: input,
@@ -400,7 +400,7 @@ class CircleSettleUp extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  t('Zakupy razem: {total} zł', {'total': format(total)}),
+                  t('Zakupy razem: {total}', {'total': format(total)}),
                   style: TextStyle(
                     color: zen.textPrimary,
                     fontWeight: FontWeight.w700,
@@ -421,7 +421,7 @@ class CircleSettleUp extends StatelessWidget {
                       children: <Widget>[
                         Expanded(
                           child: Text(
-                            t('{from} oddaje {to} {amount} zł', {
+                            t('{from} oddaje {to}: {amount}', {
                               'from': nameOf(x.from),
                               'to': nameOf(x.to),
                               'amount': format(x.cents),

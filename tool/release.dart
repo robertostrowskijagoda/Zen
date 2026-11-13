@@ -16,8 +16,14 @@
 //       kOfficialApkCertificatesSha256)? CI runs it for every tag build.
 //   dart run tool/release.dart prepare 1.12.0 [--build 12] [--skip-checks]
 //       [--allow-dirty] [--no-tag] [--allow-unpinned-keys]
-//       [--allow-unpinned-native]
-//       Clean tree, a valid "### What's new" note under "## Unreleased",
+//       [--allow-unpinned-native] [--allow-missing-fixture]
+//       [--allow-old-suffix-list]
+//       Clean tree, the upgrade fixture of the version being replaced
+//       (test/fixtures/upgrade/<current version>), a valid "### What's
+//       new" note under "## Unreleased" (an [en] line may not name a screen
+//       by its Polish text), a Public Suffix List no older than 120 days
+//       (refreshed with tool/public_suffix_list.dart;
+//       --allow-old-suffix-list to go on),
 //       the app pins its release keys (kReleaseMaintainers,
 //       kOfficialApkCertificatesSha256; --allow-unpinned-keys only for a
 //       test release), the native builds pin what they download (Gradle's
@@ -121,6 +127,14 @@ List<String> _pinnedKeys() => pinnedKeyProblems(
   ).readAsStringSync(),
 );
 
+/// The Polish texts of the app that the English translation words
+/// differently (see [englishLabelsFrom]): an English line of the note may
+/// not hold one.
+Map<String, String> _englishLabels() => englishLabelsFrom(
+  (jsonDecode(File('assets/i18n/en.json').readAsStringSync())
+      as Map<String, dynamic>),
+);
+
 /// The app and the workflow agree on names and versions.
 List<String> _check() {
   final String yml = File('.github/workflows/release.yml').readAsStringSync();
@@ -185,6 +199,7 @@ List<String> _check() {
     whatsNewSection(
       File('CHANGELOG.md').readAsStringSync(),
       required: false,
+      englishLabels: _englishLabels(),
     ).problems,
   );
   return out;
@@ -203,6 +218,7 @@ bool _whatsNew(List<String> args) {
   ) = whatsNewSection(
     File('CHANGELOG.md').readAsStringSync(),
     version: version,
+    englishLabels: _englishLabels(),
   );
   // Only problems are reported: the file itself may go to stdout.
   if (problems.isNotEmpty && !_report("What's new", problems)) {
@@ -288,7 +304,9 @@ Future<bool> _prepare(List<String> args) async {
   }
 
   // 1a. The release before this one left its data for the upgrade tests
-  // (test/start_upgrade_test.dart): a reminder, never a stop.
+  // (test/start_upgrade_test.dart): without it the next release is not
+  // tested on that data, so this is a stop (--allow-missing-fixture for a
+  // test release).
   final Directory fixtures = Directory('test/fixtures/upgrade');
   final String? fixture = missingUpgradeFixture(current, <String>[
     if (fixtures.existsSync())
@@ -296,7 +314,14 @@ Future<bool> _prepare(List<String> args) async {
         if (e is Directory) e.uri.pathSegments.where((s) => s.isNotEmpty).last,
   ]);
   if (fixture != null) {
-    stdout.writeln('Reminder: $fixture');
+    if (!_flag(args, 'allow-missing-fixture')) {
+      stderr.writeln(fixture);
+      stderr.writeln(
+        'Make it first (a test release: --allow-missing-fixture).',
+      );
+      return false;
+    }
+    stderr.writeln('WARNING: --allow-missing-fixture: $fixture');
   }
 
   // 1a'. Mutation testing grows with the app: the logic changed since the
@@ -348,10 +373,30 @@ Future<bool> _prepare(List<String> args) async {
     }
   }
 
+  // 1a''. The Public Suffix List the password autofill tells one site from
+  // another by: new public suffixes (hosting where anyone gets a subdomain)
+  // are added to it every week.
+  final String? suffixes = publicSuffixListAgeProblem(
+    File(
+      'lib/src/features/passwords/public_suffix_rules.dart',
+    ).readAsStringSync(),
+    DateTime.now(),
+  );
+  if (suffixes != null) {
+    if (!_flag(args, 'allow-old-suffix-list')) {
+      _report('Public Suffix List', <String>[suffixes]);
+      return false;
+    }
+    stderr.writeln('WARNING: --allow-old-suffix-list: $suffixes');
+  }
+
   // 1b. The short note the app shows with the update notice; release.yml
   // makes whats-new.json of it, which the signature covers.
   final ({Map<String, List<String>> lines, List<String> problems}) note =
-      whatsNewSection(File('CHANGELOG.md').readAsStringSync());
+      whatsNewSection(
+        File('CHANGELOG.md').readAsStringSync(),
+        englishLabels: _englishLabels(),
+      );
   if (!_report("What's new", note.problems)) {
     stderr.writeln(
       'Write 1 to 3 short lines under "$kWhatsNewHeading" in "## Unreleased" '

@@ -993,7 +993,9 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     // even the stripped form is refused this throws, and `_serial` marks the
     // leg failed.
     await applyRemoteSdpViaLocalRelay(
-      sdp: sdp,
+      // VP8 first whatever the other side listed first: this side sends
+      // the first of its codecs (see call_video_codecs.dart).
+      sdp: preferVp8InRemoteSdp(sdp),
       type: type,
       relayPort: leg.relayPort,
       apply: (String value, String kind) =>

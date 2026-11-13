@@ -37,6 +37,18 @@ ChatMessage _msg(String id, {int at = 1000, ChatMessageDirection? dir}) =>
       direction: dir ?? ChatMessageDirection.outgoing,
     );
 
+/// Stores what it is given as it is (the zstd library is not loadable in
+/// tests everywhere).
+final class _PlainCompressor implements BinaryCompressor {
+  const _PlainCompressor();
+
+  @override
+  Future<Uint8List?> compress(Uint8List payload, int level) async => payload;
+
+  @override
+  Future<Uint8List?> decompress(Uint8List payload) async => payload;
+}
+
 final class _Harness {
   _Harness(this.dir, {Map<String, int> disappeared = const <String, int>{}}) {
     container = ProviderContainer(
@@ -456,14 +468,193 @@ void main() {
         });
         expect(h.state.disappearSecondsFor('group:g1'), 604800);
 
+        // A member's later change (stamped with when it was made, as every
+        // version since 1.16.5 does).
         await h.receive(bob, <String, dynamic>{
           'type': 'disappear_timer',
           'groupId': 'g1',
           'seconds': 0,
+          'at': DateTime.now().millisecondsSinceEpoch + 60000,
         });
         expect(h.state.disappearSecondsFor('group:g1'), 0);
       },
     );
+
+    test('a message sends the timer with when it was set; an older setting '
+        'arriving later changes nothing, switching off included', () async {
+      await h.hub.setDisappearingTimer(ada, 3600);
+      final int onAt = h.state.disappearSetAtFor(ada);
+      expect(onAt, greaterThan(0));
+      await h.hub.setDisappearingTimer(ada, 0);
+      final int offAt = h.state.disappearSetAtFor(ada);
+      expect(offAt, greaterThan(onAt));
+      await h.hub.sendLocalMessage(peerAddress: ada, text: 'po zmianie');
+      final Map<String, dynamic> sent = h.transport.sentSignals
+          .lastWhere(
+            (({String remoteAddress, Map<String, dynamic> payload}) s) =>
+                s.payload['type'] == 'message',
+          )
+          .payload;
+      expect(sent.containsKey('ttl'), isFalse);
+      expect(sent[kDisappearSetAtKey], offAt);
+
+      // Ada wrote while the timer was still on, before the change came.
+      await h.receive(ada, <String, dynamic>{
+        'type': 'message',
+        'msgId': 'a-old',
+        'text': 'sprzed zmiany',
+        'ttl': 3600,
+        kDisappearSetAtKey: onAt,
+      });
+      expect(h.state.disappearSecondsFor(ada), 0);
+      expect(
+        (await h.timelines.load(
+          ada,
+        )).firstWhere((ChatMessage m) => m.id == 'a-old').disappears,
+        isFalse,
+      );
+      // Her own later change comes with her next message: taken, off too.
+      await h.receive(ada, <String, dynamic>{
+        'type': 'message',
+        'msgId': 'a-new',
+        'text': 'włączam',
+        'ttl': 86400,
+        kDisappearSetAtKey: offAt + 10,
+      });
+      expect(h.state.disappearSecondsFor(ada), 86400);
+      await h.receive(ada, <String, dynamic>{
+        'type': 'message',
+        'msgId': 'a-off',
+        'text': 'wyłączam',
+        kDisappearSetAtKey: offAt + 20,
+      });
+      expect(h.state.disappearSecondsFor(ada), 0);
+    });
+
+    test('a change made after seeing a friend\'s is later than it, whatever '
+        'their clock says', () async {
+      final int ahead = DateTime.now().millisecondsSinceEpoch + 3600000;
+      await h.receive(ada, <String, dynamic>{
+        'type': 'disappear_timer',
+        'seconds': 3600,
+        'at': ahead,
+      });
+      expect(h.state.disappearSecondsFor(ada), 3600);
+      await h.hub.setDisappearingTimer(ada, 0);
+      expect(h.state.disappearSetAtFor(ada), greaterThan(ahead));
+      final Map<String, dynamic> told = h.transport.sentSignals
+          .lastWhere(
+            (({String remoteAddress, Map<String, dynamic> payload}) s) =>
+                s.payload['type'] == 'disappear_timer',
+          )
+          .payload;
+      expect(told['at'], greaterThan(ahead));
+      // Her message written before she saw it still says 3600 from then.
+      await h.receive(ada, <String, dynamic>{
+        'type': 'message',
+        'msgId': 'a1',
+        'text': 'stara',
+        'ttl': 3600,
+        kDisappearSetAtKey: ahead,
+      });
+      expect(h.state.disappearSecondsFor(ada), 0);
+    });
+
+    test('Zen 1.16.5 messages (no time with the timer) never undo a change '
+        'made since, but still switch on a timer nobody set', () async {
+      // A conversation whose timer nobody set since the update: a message
+      // with a timer switches it on, as it always did; one without leaves
+      // it on.
+      await h.receive(bob, <String, dynamic>{
+        'type': 'message',
+        'msgId': 'b1',
+        'text': 'z timerem',
+        'ttl': 3600,
+      });
+      expect(h.state.disappearSecondsFor(bob), 3600);
+      expect(h.state.disappearSetAtFor(bob), 0);
+      await h.receive(bob, <String, dynamic>{
+        'type': 'message',
+        'msgId': 'b2',
+        'text': 'bez timera',
+      });
+      expect(h.state.disappearSecondsFor(bob), 3600);
+
+      // Switched off here: an older message of theirs with the timer on
+      // does not switch it back on, nor does a newer one (it cannot say
+      // when its timer was set).
+      await h.hub.setDisappearingTimer(bob, 0);
+      for (final String id in <String>['b3', 'b4']) {
+        await h.receive(bob, <String, dynamic>{
+          'type': 'message',
+          'msgId': id,
+          'text': id,
+          'ttl': 3600,
+        });
+      }
+      expect(h.state.disappearSecondsFor(bob), 0);
+      // Their change itself carries its time (`at`, 1.16.5 too): a later
+      // one is taken.
+      await h.receive(bob, <String, dynamic>{
+        'type': 'disappear_timer',
+        'seconds': 86400,
+        'at': DateTime.now().millisecondsSinceEpoch + 60000,
+      });
+      expect(h.state.disappearSecondsFor(bob), 86400);
+    });
+
+    test('two changes made at the same moment end the same on both sides', () {
+      bool replaces(int seconds, int knownSeconds) => replacesDisappearTimer(
+        seconds: seconds,
+        setAt: 1000,
+        knownSeconds: knownSeconds,
+        knownAt: 1000,
+      );
+      // One phone has 3600 and hears 0, the other has 0 and hears 3600.
+      expect(replaces(0, 3600), isTrue);
+      expect(replaces(3600, 0), isFalse);
+      expect(replaces(3600, 3600), isFalse);
+      // The later one wins on both.
+      expect(
+        replacesDisappearTimer(
+          seconds: 3600,
+          setAt: 1001,
+          knownSeconds: 0,
+          knownAt: 1000,
+        ),
+        isTrue,
+      );
+      expect(
+        replacesDisappearTimer(
+          seconds: 0,
+          setAt: 1000,
+          knownSeconds: 3600,
+          knownAt: 1001,
+        ),
+        isFalse,
+      );
+    });
+
+    test('the time each timer was set is kept in the snapshot', () async {
+      await h.hub.setDisappearingTimer(ada, 3600);
+      final int at = h.state.disappearSetAtFor(ada);
+      final SocialHubState? saved = await h.snapshots.load();
+      expect(saved!.disappearSetAtFor(ada), at);
+      // Through the file, and a snapshot of 1.16.5 (none kept) reads as
+      // "not known".
+      final FileSocialSnapshotStore file = FileSocialSnapshotStore(
+        store: FileBinaryStore(
+          dir,
+          codec: BinaryCodec(compressor: const _PlainCompressor()),
+        ),
+      );
+      await file.save(saved);
+      final SocialHubState? read = await file.load();
+      expect(read!.disappearSecondsFor(ada), 3600);
+      expect(read.disappearSetAtFor(ada), at);
+      await file.save(read.copyWith(disappearTimersSetAt: <String, int>{}));
+      expect((await file.load())!.disappearSetAtFor(ada), 0);
+    });
 
     test('expired messages are swept with the timer that is kept', () async {
       await h.hub.setDisappearingTimer(ada, 3600);

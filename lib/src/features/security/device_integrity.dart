@@ -190,9 +190,12 @@ Future<DeviceIntegrity> checkDeviceIntegrity({MethodChannel? channel}) async {
   }
   if (Platform.isAndroid && !isStoreBuild) {
     try {
-      final List<String>? own = await ownSigningCertificates();
+      final ApkSigners? own = await ownApkSigners();
       if (own != null &&
-          ownCopyState(own: own, official: kOfficialApkCertificatesSha256) ==
+          ownCopyState(
+                own: own.signers,
+                official: kOfficialApkCertificatesSha256,
+              ) ==
               OwnCopyState.differs) {
         found = found.withTampering(const <String>['resigned']);
       }

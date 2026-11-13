@@ -7,6 +7,8 @@ import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -284,12 +286,10 @@ void main() {
     await b.hub.enterConversation(a.address);
     await w.deliver();
 
-    expect(dropped, <Map<String, dynamic>>[
-      <String, dynamic>{
-        'type': 'message_read',
-        'msgId': _theirs(await b.thread(a), 'Twoja').id,
-      },
+    expect(dropped.map((Map<String, dynamic> p) => p['type']), <Object?>[
+      'message_read',
     ]);
+    expect(dropped.single['msgId'], _theirs(await b.thread(a), 'Twoja').id);
     expect(bare, isEmpty);
     expect(await marks(), b2Before);
     expect(b2.state.friendByAddress(a.address)?.unreadCount, 1);
@@ -385,5 +385,177 @@ void main() {
     await w.deliver();
     expect(dropped, <Object?>['group_read']);
     expect(b2.state.groups[group]?.unreadCount, 1);
+  });
+
+  test('a chat read on the phone while the computer of the same account is '
+      'off is read on the computer once it is back: no unread count, no '
+      'notification', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    final FriendsPhone b2 = await w.addDevice(
+      b,
+      'B2',
+      device: SimDevice.desktop,
+    );
+    await b.hub.setLifecycle(_screen(w, 20));
+    // The computer is closed for the evening.
+    await w.setOnline(b2, false);
+    await w.send(a, b, 'Kolacja o 19?');
+    await w.deliver();
+    // Read on the phone at once.
+    await b.hub.enterConversation(a.address);
+    await w.deliver();
+    expect(b.state.friendByAddress(a.address)?.unreadCount, 0);
+    // The next morning the computer is opened.
+    await w.advance(const Duration(hours: 10));
+    await w.setOnline(b2, true);
+    await w.advance(const Duration(minutes: 3));
+    expect(_theirs(await b2.thread(a), 'Kolacja o 19?').isRead, isTrue);
+    expect(b2.state.friendByAddress(a.address)?.unreadCount, 0);
+    expect(b2.shownMessageNotices, isEmpty);
+    // On the screen later: nothing unread waits there either.
+    await b2.hub.setLifecycle(_screen(w, 30, v: AppVisibilityState.foreground));
+    expect(b2.state.friendByAddress(a.address)?.unreadCount, 0);
+  });
+
+  test('the reading waits a whole day for a computer that is off, and only '
+      'the newest of one chat waits', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    final FriendsPhone b2 = await w.addDevice(
+      b,
+      'B2',
+      device: SimDevice.desktop,
+    );
+    await b.hub.setLifecycle(_screen(w, 20));
+    await w.setOnline(b2, false);
+    for (final String text in <String>['Raz', 'Dwa']) {
+      await w.send(a, b, text);
+      await w.deliver();
+      await b.hub.enterConversation(a.address);
+      b.hub.leaveConversation(a.address);
+      await w.deliver();
+    }
+    int readCopiesFor(RelayState s) => s.outbox.values
+        .where(
+          (RelayOutboxEntry e) =>
+              e.recipient == b2.address && relayIsReadCopy(e.payload),
+        )
+        .length;
+    expect(readCopiesFor(await b.relayStore.load()), 1);
+    await w.advance(
+      const Duration(hours: 24),
+      step: const Duration(minutes: 5),
+    );
+    await w.setOnline(b2, true);
+    await w.advance(const Duration(minutes: 3));
+    final List<ChatMessage> atB2 = await b2.thread(a);
+    expect(_theirs(atB2, 'Raz').isRead, isTrue);
+    expect(_theirs(atB2, 'Dwa').isRead, isTrue);
+    expect(b2.state.friendByAddress(a.address)?.unreadCount, 0);
+    expect(b2.shownMessageNotices, isEmpty);
+    expect(readCopiesFor(await b.relayStore.load()), 0);
+  });
+
+  test('a message that reaches the computer after the phone read it comes '
+      'in read, with no notification and no unread count', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    final FriendsPhone b2 = await w.addDevice(
+      b,
+      'B2',
+      device: SimDevice.desktop,
+    );
+    await b.hub.setLifecycle(_screen(w, 20));
+    // A's way to the computer is cut: its copies wait at A.
+    w.partition(<FriendsPhone>[a], <FriendsPhone>[b2]);
+    await w.send(a, b, 'Pierwsza');
+    await w.send(a, b, 'Druga');
+    await w.deliver();
+    await b.hub.enterConversation(a.address);
+    b.hub.leaveConversation(a.address);
+    await w.deliver();
+    expect(await b2.textsFrom(a), isEmpty);
+    expect(b2.state.readElsewhere, hasLength(2));
+    // Then the way is back and A's copies arrive.
+    w.heal();
+    await w.until(
+      () async => (await b2.textsFrom(a)).length == 2,
+      reason: "A's messages reaching the computer",
+    );
+    await w.deliver();
+    for (final ChatMessage m in (await b2.thread(
+      a,
+    )).where((ChatMessage m) => m.direction == ChatMessageDirection.incoming)) {
+      expect(m.isRead, isTrue, reason: m.text);
+    }
+    expect(b2.messageNotices, isEmpty);
+    expect(b2.state.friendByAddress(a.address)?.unreadCount, 0);
+    // The chat list names what came (in the order it came).
+    expect(<String?>[
+      'Pierwsza',
+      'Druga',
+    ], contains(b2.state.friendByAddress(a.address)?.lastMessagePreview));
+    expect(b2.state.readElsewhere, isEmpty);
+    await b2.hub.setLifecycle(_screen(w, 30, v: AppVisibilityState.foreground));
+    expect(b2.state.friendByAddress(a.address)?.unreadCount, 0);
+    // What A writes after the reading is new on the computer.
+    await w.send(a, b, 'Trzecia');
+    await w.deliver();
+    expect(_theirs(await b2.thread(a), 'Trzecia').isRead, isFalse);
+    expect(b2.state.friendByAddress(a.address)?.unreadCount, 1);
+  });
+
+  test('a group message that reaches the computer after the phone read the '
+      'group comes in read', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    final FriendsPhone c = w['C'];
+    final FriendsPhone b2 = await w.addDevice(
+      b,
+      'B2',
+      device: SimDevice.desktop,
+    );
+    final String group = await w.createGroup(a, 'Ekipa', <FriendsPhone>[b, c]);
+    final GroupProfile? invite = b2.state.groups[group];
+    if (invite != null && invite.isInvitePending) {
+      await b2.hub.acceptGroupInvite(
+        groupId: group,
+        groupName: 'Ekipa',
+        senderAddress: a.address,
+      );
+      await w.settle();
+    }
+    for (final FriendsPhone p in <FriendsPhone>[b, b2]) {
+      p.container.read(accountDirectoryHolderProvider).directory = p.accounts;
+    }
+    await b.hub.setLifecycle(_screen(w, 20));
+    w.partition(<FriendsPhone>[a, c], <FriendsPhone>[b2]);
+    await w.sendGroup(a, group, 'Kto idzie?');
+    await w.sendGroup(c, group, 'Ja');
+    await w.deliver();
+    await b.hub.enterGroupConversation(group);
+    await w.deliver();
+    expect(await w.groupTexts(b2, group), isEmpty);
+    w.heal();
+    await w.until(
+      () async => (await w.groupTexts(b2, group)).length == 2,
+      within: const Duration(minutes: 10),
+      reason: 'the group messages reaching the computer',
+    );
+    await w.deliver();
+    expect(b2.state.groups[group]?.unreadCount, 0);
+    expect(
+      b2.notices.posted.where(
+        (RuntimeSystemNotification n) =>
+            n.category == RuntimeSystemNotificationCategory.message,
+      ),
+      isEmpty,
+    );
+    expect(b2.state.readElsewhere, isEmpty);
   });
 }

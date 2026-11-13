@@ -12,6 +12,7 @@ import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -79,6 +80,27 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
     // Profiles this person reported are hidden from them.
     isHiddenByMe: (String key) =>
         ref.read(hiddenByMeProvider).hides(datingKey: key),
+    // Whoever is blocked anywhere in the app is blocked here too, and a
+    // block made here blocks the person everywhere.
+    blocked: () => blockedPeopleNow(ref),
+    onBlock: (String key, String? address, String name) => ref
+        .read(socialHubControllerProvider.notifier)
+        .blockPerson(
+          address: address ?? '',
+          datingKey: key,
+          name: name,
+          origin: BlockOrigin.dating,
+        ),
+    // Found while a list is being read (a screen being built): written a
+    // moment later.
+    onBlockedKey: (String key, String address) => unawaitedLogged(
+      Future<void>(
+        () => ref
+            .read(socialHubControllerProvider.notifier)
+            .learnBlocked(address: address, datingKey: key),
+      ),
+      context: 'Dating: blocked key',
+    ),
     // "Podziękuj swatowi": only inside one pyramid.
     pyramidKey: () {
       final PyramidService pyramid = ref.read(pyramidServiceProvider);

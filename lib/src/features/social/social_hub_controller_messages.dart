@@ -124,14 +124,22 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     bool forwarded = false,
   }) async {
     final String normalizedFileName = fileName.trim();
-    final Uint8List? initialBytes = bytes == null || bytes.isEmpty
-        ? null
-        : bytes;
-    final String? normalizedPath = attachmentPath?.trim().isNotEmpty == true
-        ? attachmentPath!.trim()
-        : null;
-    if ((initialBytes == null && normalizedPath == null) ||
-        normalizedFileName.isEmpty) {
+    if (normalizedFileName.isEmpty) {
+      return;
+    }
+    // Whatever way it came here, it leaves without the location, device
+    // and time data Zen knows how to remove.
+    final ({Uint8List? bytes, String? path}) outgoing =
+        await _attachmentWithoutMetadata(
+          _mediaVault,
+          bytes == null || bytes.isEmpty ? null : bytes,
+          attachmentPath?.trim().isNotEmpty == true
+              ? attachmentPath!.trim()
+              : null,
+        );
+    final Uint8List? initialBytes = outgoing.bytes;
+    final String? normalizedPath = outgoing.path;
+    if (initialBytes == null && normalizedPath == null) {
       return;
     }
     final int timestamp = _outgoingStamp(peerAddress, sentAtMillis);
@@ -472,6 +480,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
     final int seconds = state.disappearSecondsFor(key);
     final int? ttl = seconds > 0 ? seconds : null;
+    final int setAt = state.disappearSetAtFor(key);
     final List<Future<void>> sends = <Future<void>>[];
     for (final String member in normalizedGroupMembers(group.memberAddresses)) {
       if (localAddr.isNotEmpty &&
@@ -497,6 +506,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             'senderName': senderDisplayName,
             'timestamp': timestamp,
             'ttl': ?ttl,
+            if (setAt > 0) kDisappearSetAtKey: setAt,
             // A reply, forwarding, a file.
             ...extra,
           },
@@ -666,10 +676,21 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           );
           return;
         }
+        final String messageId = _incomingMessageIdOf(signal);
+        // A copy of a message already here (a retry, a mailbox's copy, the
+        // relay layer handing it over again) only has its delivery ack sent
+        // again: its file is not written into the vault once more (a second
+        // file nothing refers to, never deleted), and the timer it carries
+        // is as old as the message.
+        final bool exists = await _timelineHasMessage(
+          peerAddress: signal.sender,
+          messageId: messageId,
+        );
         Uint8List? attachmentBytes;
         StoredAttachment? stored;
         int? attachmentByteCount;
-        if (signal.attachmentData != null &&
+        if (!exists &&
+            signal.attachmentData != null &&
             signal.attachmentData!.isNotEmpty) {
           try {
             attachmentBytes = await _attachmentTransport.decode(
@@ -700,13 +721,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             return;
           }
         }
-        final String messageId = _incomingMessageIdOf(signal);
-        await _adoptDisappearTimerOf(signal, timestamp);
-        final bool exists = await _timelineHasMessage(
-          peerAddress: signal.sender,
-          messageId: messageId,
-        );
         if (!exists) {
+          // Before it is stored: it is stamped with the timer it brings.
+          await _adoptDisappearTimerOf(signal, timestamp);
           await _messageTimelineStore.append(
             signal.sender,
             _withSignalExtras(
@@ -1269,6 +1286,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
               text: text,
               sentAtMillis: sentAtMillis,
               ttl: state.disappearSecondsFor(peerAddress),
+              ttlAt: state.disappearSetAtFor(peerAddress),
             ),
             'mp': ?miniProfile,
             if (reply != null) 're': reply.toJson(),
@@ -1293,6 +1311,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         text: message.text,
         sentAtMillis: message.sentAtMillis,
         ttl: state.disappearSecondsFor(peerAddress),
+        ttlAt: state.disappearSetAtFor(peerAddress),
       ),
       'messageType': message.type.name,
       if (encoded != null) 'attachmentData': encoded.base64Data,
@@ -1432,6 +1451,38 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       messageId: lastUnreadIncoming.id,
       readAtMillis: readAtMillis ?? DateTime.now().millisecondsSinceEpoch,
     );
+    // Read on the account's other devices too, also what has not reached
+    // them yet: the friend's messages up to there go with it.
+    final int upTo = thread.indexOf(lastUnreadIncoming);
+    await _tellOwnDevicesRead(peerAddress, <String, dynamic>{
+      'type': 'message_read',
+      'msgId': lastUnreadIncoming.id,
+      _kReadRefsKey: <String>[
+        for (int i = upTo; i >= 0; i--)
+          if (thread[i].direction == ChatMessageDirection.incoming &&
+              thread[i].id.isNotEmpty)
+            thread[i].id,
+      ].take(_kMaxReadRefs).toList(growable: false),
+    });
+  }
+
+  /// Tells this account's other devices — never the friend or the members
+  /// — that the conversation [to] (a friend's address or `group:<id>`) was
+  /// read here as [payload] says: through the queue, so a device that is
+  /// off gets it when it is back ([relayIsReadCopy]).
+  Future<void> _tellOwnDevicesRead(
+    String to,
+    Map<String, dynamic> payload,
+  ) async {
+    final SignalTransport transport = ref.read(signalTransportProvider);
+    if (transport is! AccountRoutingTransport) {
+      return;
+    }
+    try {
+      await transport.tellOwnDevices(to, payload);
+    } on Object catch (error) {
+      logZenWarning('Telling another device a chat was read failed: $error');
+    }
   }
 
   /// This person read the conversation with [peerAddress] up to the
@@ -1503,20 +1554,74 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     };
   }
 
+  /// The friend's messages [ids] in the conversation with [peerAddress] are
+  /// read, and only those: they were read on another device of the account
+  /// (one that came here only now, or the ones there before a newest one
+  /// not here yet). Returns the ids of the friend's messages read by now.
+  Future<Set<String>> _markIncomingReadIds({
+    required String peerAddress,
+    required Set<String> ids,
+    required int readAtMillis,
+  }) async {
+    Set<String> read = const <String>{};
+    await _editDeliveryOf(peerAddress, () async {
+      if (!ref.mounted) {
+        return;
+      }
+      final List<ChatMessage> thread = await _messageTimelineStore.load(
+        peerAddress,
+      );
+      final List<ChatMessage> next = List<ChatMessage>.from(
+        thread,
+        growable: false,
+      );
+      bool changed = false;
+      for (int i = 0; i < next.length; i++) {
+        final ChatMessage m = next[i];
+        if (m.direction == ChatMessageDirection.incoming &&
+            m.readAtMillis == null &&
+            ids.contains(m.id)) {
+          next[i] = m.copyWith(readAtMillis: readAtMillis);
+          changed = true;
+        }
+      }
+      if (changed) {
+        await _saveTimelineChanges(peerAddress, thread, next);
+        _bumpTimelineRevision();
+      }
+      read = <String>{
+        for (final ChatMessage m in next)
+          if (m.direction == ChatMessageDirection.incoming &&
+              m.readAtMillis != null)
+            m.id,
+      };
+    });
+    return read;
+  }
+
   /// Another device of this account read the conversation with
   /// [peerAddress] up to the friend's message `msgId` and sent the friend
   /// its receipt: here it is read up to there too, its unread count drops
   /// and, once nothing in it is unread, its notification goes. Nothing is
   /// sent from here (the friend has the receipt already).
+  ///
+  /// The messages it read ([_kReadRefsKey], and `msgId`) that are not here
+  /// yet are remembered: they come in read ([_takenAsReadElsewhere]). A copy
+  /// from Zen 1.16.5 names only `msgId`.
   @override
   Future<void> _applyReadFromOtherDevice(
     String peerAddress,
     Map<String, dynamic> payload,
   ) async {
     final Object? id = payload['msgId'];
-    if (id is! String || id.trim().isEmpty) {
+    if (id is! String || id.trim().isEmpty || id.length > kMaxSignalIdChars) {
       return;
     }
+    final Set<String> refs = <String>{
+      id.trim(),
+      for (final Object? r in _readRefsOf(payload[_kReadRefsKey]))
+        if (r is String && r.isNotEmpty && r.length <= kMaxSignalIdChars) r,
+    };
     await _enqueueStateWork(() async {
       final FriendProfile? friend = state.friendByAddress(
         PeerShareCodec.normalizeAddress(peerAddress),
@@ -1525,12 +1630,44 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         return;
       }
       final String peer = friend.address;
-      final Set<String>? read = await _markIncomingReadUpTo(
+      final int now = DateTime.now().millisecondsSinceEpoch;
+      final Set<String> here = <String>{
+        for (final ChatMessage m in await _messageTimelineStore.load(peer))
+          if (m.direction == ChatMessageDirection.incoming) m.id,
+      };
+      final List<String> absent = <String>[
+        for (final String r in refs)
+          if (!here.contains(r))
+            readElsewhereKey(PeerShareCodec.normalizeAddress(peer), r),
+      ];
+      if (absent.isNotEmpty) {
+        state = state.copyWith(
+          readElsewhere: rememberReadElsewhere(
+            state.readElsewhere,
+            absent,
+            now,
+          ),
+        );
+      }
+      Set<String>? read = await _markIncomingReadUpTo(
         peerAddress: peer,
         messageId: id.trim(),
-        readAtMillis: DateTime.now().millisecondsSinceEpoch,
+        readAtMillis: now,
       );
+      // The newest one read there is not here yet: the earlier ones that
+      // are.
+      final List<String> present = refs.where(here.contains).toList();
+      if (read == null && present.isNotEmpty) {
+        read = await _markIncomingReadIds(
+          peerAddress: peer,
+          ids: present.toSet(),
+          readAtMillis: now,
+        );
+      }
       if (read == null || !ref.mounted) {
+        if (absent.isNotEmpty && ref.mounted) {
+          await _persistState();
+        }
         return;
       }
       // The friend's messages that came while this app was in the
@@ -1621,21 +1758,16 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
   /// unread count drops there too and its notification goes. Groups have
   /// no read receipts, so nothing else would say it. A Zen before 1.16.5
   /// on another device ignores it.
+  ///
+  /// It goes through the queue ([_tellOwnDevicesRead]), once per newest
+  /// message, with the members' messages up to there ([_kReadRefsKey]), so
+  /// a device that gets them later takes them in read.
   @override
   Future<void> _mirrorGroupRead(String groupId) async {
-    final AccountDeviceDirectory? dir = ref
-        .read(accountDirectoryHolderProvider)
-        .directory;
-    if (dir == null || dir.ownAccount.isEmpty) {
-      return;
-    }
-    final List<String> siblings = dir.addressesOf(dir.ownAccount);
-    if (siblings.isEmpty) {
-      return;
-    }
-    final ChatMessage? newest = (await _messageTimelineStore.load(
+    final List<ChatMessage> members = (await _messageTimelineStore.load(
       'group:$groupId',
-    )).where(_isMemberMessage).lastOrNull;
+    )).where(_isMemberMessage).toList(growable: false);
+    final ChatMessage? newest = members.lastOrNull;
     if (newest == null || _groupReadMirrored[groupId] == newest.id) {
       return;
     }
@@ -1643,24 +1775,16 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       _groupReadMirrored.remove(_groupReadMirrored.keys.first);
     }
     _groupReadMirrored[groupId] = newest.id;
-    final SignalTransport mesh = meshOf(ref.read(signalTransportProvider));
-    final Map<String, dynamic> copy = <String, dynamic>{
-      'type': kMirrorType,
-      'to': 'group:$groupId',
-      'p': <String, dynamic>{
-        'type': _kGroupReadType,
-        'groupId': groupId,
-        'msgId': groupMessageWireId(newest.id),
-        'author': newest.sender,
-      },
-    };
-    for (final String sibling in siblings) {
-      try {
-        await mesh.send(remoteAddress: sibling, payload: copy);
-      } on Object catch (error) {
-        logZenWarning('Telling another device a group was read failed: $error');
-      }
-    }
+    await _tellOwnDevicesRead('group:$groupId', <String, dynamic>{
+      'type': _kGroupReadType,
+      'groupId': groupId,
+      'msgId': groupMessageWireId(newest.id),
+      'author': newest.sender,
+      _kReadRefsKey: <Map<String, dynamic>>[
+        for (final ChatMessage m in members.reversed.take(_kMaxReadRefs))
+          <String, dynamic>{'m': groupMessageWireId(m.id), 'a': m.sender},
+      ],
+    });
   }
 
   /// Another device of this account read the group `groupId` up to the
@@ -1684,6 +1808,19 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         id.length > kMaxSignalIdChars) {
       return;
     }
+    // The members' messages read there ([_kReadRefsKey]); a copy from Zen
+    // 1.16.5 names only the newest.
+    final Set<(String, String)> refs = <(String, String)>{
+      (id, author),
+      for (final Object? r in _readRefsOf(payload[_kReadRefsKey]))
+        if (r is Map &&
+            r['m'] is String &&
+            r['a'] is String &&
+            (r['m'] as String).isNotEmpty &&
+            (r['m'] as String).length <= kMaxSignalIdChars &&
+            (r['a'] as String).isNotEmpty)
+          (r['m'] as String, r['a'] as String),
+    };
     await _enqueueStateWork(() async {
       final GroupProfile? group = state.groups[groupId];
       if (group == null || group.isInvitePending || !ref.mounted) {
@@ -1691,25 +1828,46 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       }
       final String key = 'group:$groupId';
       final List<ChatMessage> thread = await _messageTimelineStore.load(key);
-      final int index = thread.indexWhere(
+      int indexOf((String, String) r) => thread.indexWhere(
         (ChatMessage m) =>
             _isMemberMessage(m) &&
-            groupMessageWireId(m.id) == id &&
-            _sameGroupAuthor(m, author),
+            groupMessageWireId(m.id) == r.$1 &&
+            _sameGroupAuthor(m, r.$2),
       );
-      if (index < 0) {
-        // Not here (yet): the next read there says more.
-        return;
+      final int index = indexOf((id, author));
+      // What is not here yet comes in read.
+      final List<String> absent = <String>[
+        for (final (String, String) r in refs)
+          if (indexOf(r) < 0) readElsewhereKey(key, r.$1, author: r.$2),
+      ];
+      if (absent.isNotEmpty) {
+        state = state.copyWith(
+          readElsewhere: rememberReadElsewhere(
+            state.readElsewhere,
+            absent,
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+        );
       }
       // What came before it here, or was written before it (this device
-      // may have got the members' messages in another order).
-      final int upTo = thread[index].sentAtMillis;
+      // may have got the members' messages in another order); with the
+      // newest one not here yet, the ones read there that are.
+      final int upTo = index < 0 ? 0 : thread[index].sentAtMillis;
       final Set<String> read = <String>{
         for (int i = 0; i < thread.length; i++)
           if (_isMemberMessage(thread[i]) &&
+              index >= 0 &&
               (i <= index || thread[i].sentAtMillis <= upTo))
             thread[i].id,
+        for (final (String, String) r in refs)
+          if (indexOf(r) case final int i when i >= 0) thread[i].id,
       };
+      if (read.isEmpty) {
+        if (absent.isNotEmpty) {
+          await _persistState();
+        }
+        return;
+      }
       String? keyOf(QueuedSignal q) {
         final String? wire = q.signal.messageId?.trim();
         if (q.signal.type != ZenSignalType.groupMessage ||
@@ -1772,6 +1930,154 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         }
       }
     });
+  }
+
+  /// The caller's word that another device of this account answered or
+  /// declined the call ringing here ([isCallTakenElsewhere]): the ring, the
+  /// call card and the call's notification go, and nothing is missed - no
+  /// missed-call notice, no "ended" or missed line in the chat, nothing in
+  /// the inbox. Only the call on file (by its id); a call already over here
+  /// is left as it is.
+  @override
+  Future<void> _endCallTakenElsewhere(ZenSignal signal, int timestamp) async {
+    if (!_isTeardownForCurrentCall(signal)) {
+      return;
+    }
+    final bool ringingHere = _isKnownCallSignal(state.activeCall, signal);
+    if (ringingHere) {
+      await _closeCallMediaSession();
+    }
+    await _dismissCallNotification(signal.sender);
+    state =
+        _applySignal(
+          state,
+          signal,
+          timestamp,
+          appSettings: _appSettings,
+          tick: _friendshipTick,
+          openConversationAddress: _openConversationAddress,
+          openGroupId: _openGroupId,
+          dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,
+        ).copyWith(
+          backgroundAlerts: _removeCallAlertsForPeer(
+            state.backgroundAlerts,
+            signal.sender,
+          ),
+          inbox: _removeCallAlertsForPeer(state.inbox, signal.sender),
+        );
+    _syncCallRingingTimeout();
+    await _persistState();
+    await _syncRingingCallWindow();
+  }
+
+  /// [signal], a friend's or a member's message just kept here, was read on
+  /// another device of the account before it came
+  /// ([SocialHubState.readElsewhere]): it goes into the chat read. The chat
+  /// list names it, but it counts as no unread message, raises no
+  /// notification and waits for nothing in the queue. Returns whether it
+  /// was such a message.
+  @override
+  Future<bool> _takenAsReadElsewhere(ZenSignal signal, int timestamp) async {
+    if (state.readElsewhere.isEmpty) {
+      return false;
+    }
+    final String? remembered = _readElsewhereKeyOf(signal);
+    if (remembered == null) {
+      return false;
+    }
+    state = state.copyWith(
+      readElsewhere: Map<String, int>.of(state.readElsewhere)
+        ..remove(remembered),
+    );
+    final String sender = PeerShareCodec.normalizeAddress(signal.sender);
+    final String? groupId = signal.type == ZenSignalType.groupMessage
+        ? signal.groupId
+        : null;
+    if (groupId == null) {
+      await _markIncomingReadIds(
+        peerAddress: sender,
+        ids: <String>{_incomingMessageIdOf(signal)},
+        readAtMillis: timestamp,
+      );
+    }
+    final SocialHubState before = state;
+    SocialHubState next = _applySignal(
+      before,
+      signal,
+      timestamp,
+      appSettings: _appSettings,
+      tick: _friendshipTick,
+      openConversationAddress: _openConversationAddress,
+      openGroupId: _openGroupId,
+      dismissedOrRejectedGroupIds: _dismissedOrRejectedGroupIds,
+    );
+    if (groupId != null) {
+      final GroupProfile? was = before.groups[groupId];
+      final GroupProfile? now = next.groups[groupId];
+      if (was != null && now != null) {
+        next = next.copyWith(
+          groups: <String, GroupProfile>{
+            ...next.groups,
+            groupId: now.copyWith(unreadCount: was.unreadCount),
+          },
+        );
+      }
+    } else {
+      final int unread = before.friendByAddress(sender)?.unreadCount ?? 0;
+      next = next.copyWith(
+        book: next.book.edit(
+          sender,
+          (FriendProfile f) => f.copyWith(unreadCount: unread),
+        ),
+      );
+    }
+    state = next.copyWith(inbox: before.inbox);
+    await _persistState();
+    return true;
+  }
+
+  /// The key [signal] (a friend's or a member's message) is remembered by
+  /// as read on another device ([readElsewhereKey]), or `null` when it is
+  /// not. In a group the author may be another device of the same member.
+  String? _readElsewhereKeyOf(ZenSignal signal) {
+    final String? wire = signal.messageId?.trim();
+    if (signal.type == ZenSignalType.message) {
+      final String key = readElsewhereKey(
+        PeerShareCodec.normalizeAddress(signal.sender),
+        _incomingMessageIdOf(signal),
+      );
+      return state.readElsewhere.containsKey(key) ? key : null;
+    }
+    final String? groupId = signal.groupId;
+    if (signal.type != ZenSignalType.groupMessage ||
+        groupId == null ||
+        wire == null ||
+        wire.isEmpty) {
+      return null;
+    }
+    final String exact = readElsewhereKey(
+      'group:$groupId',
+      wire,
+      author: signal.sender,
+    );
+    if (state.readElsewhere.containsKey(exact)) {
+      return exact;
+    }
+    final String prefix = '${readElsewhereKey('group:$groupId', wire)}\n';
+    final ChatMessage asTheirs = ChatMessage(
+      id: wire,
+      sender: signal.sender,
+      text: '',
+      sentAtMillis: 0,
+      direction: ChatMessageDirection.incoming,
+    );
+    for (final String key in state.readElsewhere.keys) {
+      if (key.startsWith(prefix) &&
+          _sameGroupAuthor(asTheirs, key.substring(prefix.length))) {
+        return key;
+      }
+    }
+    return null;
   }
 
   @override
@@ -2093,6 +2399,17 @@ String _incomingMessageIdOf(ZenSignal signal) {
 /// a member's message ([_SocialHubMessagesMixin._mirrorGroupRead]).
 const String _kGroupReadType = 'group_read';
 
+/// What a reading told to the account's other devices covers (in a copy of
+/// `message_read` or `group_read`): the messages read up to there, newest
+/// first, at most [_kMaxReadRefs] — ids, in a group `{m: id, a: author}`.
+/// Zen 1.16.5 ignores it.
+const String _kReadRefsKey = 'r';
+const int _kMaxReadRefs = 20;
+
+/// The entries of [raw] (a [_kReadRefsKey] list), at most [_kMaxReadRefs].
+Iterable<Object?> _readRefsOf(Object? raw) =>
+    raw is List ? raw.take(_kMaxReadRefs) : const <Object?>[];
+
 /// A message from a member (or a friend), not one's own and not a note.
 bool _isMemberMessage(ChatMessage m) =>
     m.direction == ChatMessageDirection.incoming;
@@ -2223,4 +2540,41 @@ int _effectiveSentAt(ZenSignal signal, int receivedAtMillis) {
     return receivedAtMillis;
   }
   return claimed;
+}
+
+/// [bytes], or the file at [path] (a plain path or one of [vault]'s), as
+/// they leave this device: without the location, device and time data
+/// `outgoing_media.dart` removes. What has nothing to remove, a kind it
+/// does not know and a file too large to be read for it stay as they
+/// are; a file that lost something goes on as bytes in memory.
+Future<({Uint8List? bytes, String? path})> _attachmentWithoutMetadata(
+  MediaVault vault,
+  Uint8List? bytes,
+  String? path,
+) async {
+  if (bytes != null) {
+    return (bytes: await stripOutgoingMetadataSized(bytes), path: path);
+  }
+  if (path == null) {
+    return (bytes: null, path: null);
+  }
+  try {
+    final int length = await vault.length(path);
+    if (length <= 0 || length > kMaxCleanedTransferBytes) {
+      return (bytes: null, path: path);
+    }
+    final Uint8List head = await vault.readRange(path, 0, min(16, length));
+    if (!canStripMetadata(head)) {
+      return (bytes: null, path: path);
+    }
+    final Uint8List whole = await vault.read(path);
+    final Uint8List clean = await stripOutgoingMetadataSized(whole);
+    return identical(clean, whole)
+        ? (bytes: null, path: path)
+        : (bytes: clean, path: null);
+  } on Object catch (error, stackTrace) {
+    // Unreadable here: the send itself says what is wrong with it.
+    logZenError('Reading an attachment to clean failed', error, stackTrace);
+    return (bytes: null, path: path);
+  }
 }

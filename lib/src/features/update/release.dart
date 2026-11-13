@@ -42,6 +42,11 @@ const List<String> kReleaseMaintainers = <String>[
 
 const String kReleaseApp = 'zen';
 
+/// The most of an update file (`.zenupdate`, or a `release.json`) that is
+/// read, picked or opened in Zen from outside: one with every system's
+/// file is a few hundred MB.
+const int kMaxUpdateFileReadBytes = 1024 * 1024 * 1024;
+
 /// Most entries in a release's `files` (only valid ones are used).
 const int kMaxReleaseFiles = 64;
 

@@ -932,13 +932,15 @@ List<FeedPost> _announced(
 /// content is here: `post_reach.dart`), newest first. [nameOf] turns a
 /// friend's mesh address into a display name. [pyramidAddresses] are the
 /// device addresses of the pyramid's members: their accounts count as
-/// verified.
+/// verified. The likes and comments of [blockedAccounts] (the people this
+/// person blocked in the messenger) are left out, and out of the totals.
 List<FeedPost> buildFeed(
   LedgerNode node, {
   required String Function(String address) nameOf,
   ReshareCache? reshares,
   HeldPosts? held,
   Set<String> pyramidAddresses = const <String>{},
+  Set<String> blockedAccounts = const <String>{},
   int? nowMillis,
 }) {
   final Set<String> deleted = <String>{};
@@ -1064,7 +1066,9 @@ List<FeedPost> buildFeed(
   final Set<String> commentIds = <String>{};
   // What came in bundles: the author's decisions passed on in bundles
   // apply to these only (people in the circle speak for themselves).
-  final Set<String> relayedComments = <String>{};
+  // Every copy of a relayed comment is kept until the post is put together
+  // (which copy is shown must not depend on whose bundle was read first).
+  final RelayedComments relayed = RelayedComments();
   final Set<String> relayedLikes = <String>{};
   final Map<String, ThreadModeration> passedOn = <String, ThreadModeration>{};
   final Map<String, int> likeTotals = <String, int>{};
@@ -1135,7 +1139,9 @@ List<FeedPost> buildFeed(
   // the totals it claims (`nl`, `nc`) count only when [writer] is the post's
   // own author. Anyone else's bundle adds the reactions it lists and
   // nothing more: no relay can hide other people's reactions or make a post
-  // look as if it had more than this phone can count.
+  // look as if it had more than this phone can count. Nor can it take over
+  // a comment another bundle passes on by reusing its id: one copy of each
+  // comment is chosen from all of them ([RelayedComments]).
   void mergeBundles(
     Iterable<LogEntry> acts, {
     String? relayedBy,
@@ -1182,9 +1188,9 @@ List<FeedPost> buildFeed(
         if (friendNames.containsKey(c.account) || commentIds.contains(c.id)) {
           continue;
         }
-        relayedComments.add(c.id);
-        addComment(
+        relayed.add(
           post,
+          c,
           FeedComment(
             id: c.id,
             authorLabel: relayedLabel(c.name),
@@ -1195,6 +1201,7 @@ List<FeedPost> buildFeed(
             images: c.images,
             mentions: c.mentions,
           ),
+          fromAuthor: writer != null && authorOf[post] == writer,
         );
       }
     }
@@ -1212,9 +1219,6 @@ List<FeedPost> buildFeed(
   // the reactions they list (this account's own decisions about its own
   // posts come from its signed entries).
   mergeBundles(myActs);
-  for (final List<FeedComment> list in comments.values) {
-    list.sort((FeedComment a, FeedComment b) => a.millis.compareTo(b.millis));
-  }
   // The author's say over the thread: their signed entries (when
   // this device reads their acts) and what their bundles passed on.
   final Map<String, ThreadModeration> signed = <String, ThreadModeration>{};
@@ -1232,11 +1236,17 @@ List<FeedPost> buildFeed(
       p.account,
     );
     final ThreadModeration bundled = passedOn[p.id] ?? ThreadModeration.none;
+    // Left out: whoever the author blocked in the thread, and whoever this
+    // person blocked in the messenger, wherever their reaction came from.
     bool blocked(String account, {required bool relayed}) =>
         account.isNotEmpty &&
-        (own.blocks(account) || (relayed && bundled.blocks(account)));
+        (blockedAccounts.contains(account) ||
+            own.blocks(account) ||
+            (relayed && bundled.blocks(account)));
+    final Iterable<FeedLiker> liked =
+        likers[p.id]?.values ?? const <FeedLiker>[];
     final List<FeedLiker> kept = <FeedLiker>[
-      for (final FeedLiker l in likers[p.id]?.values ?? const <FeedLiker>[])
+      for (final FeedLiker l in liked)
         if (!blocked(
           l.account,
           relayed: relayedLikes.contains('${p.id}\n${l.account}'),
@@ -1252,9 +1262,18 @@ List<FeedPost> buildFeed(
       for (final FeedLiker l in kept)
         if (!l.friend) l,
     ];
+    final List<FeedComment> passed = relayed.of(
+      p.id,
+      blocked: (String account) => blocked(account, relayed: true),
+    );
+    final Set<String> relayedIds = <String>{
+      for (final FeedComment c in passed) c.id,
+    };
+    final List<FeedComment> all = <FeedComment>[...?comments[p.id], ...passed]
+      ..sort((FeedComment a, FeedComment b) => a.millis.compareTo(b.millis));
     final List<FeedComment> shown = <FeedComment>[];
-    for (final FeedComment c in comments[p.id] ?? const <FeedComment>[]) {
-      final bool relayed = relayedComments.contains(c.id);
+    for (final FeedComment c in all) {
+      final bool relayed = relayedIds.contains(c.id);
       if (blocked(c.account, relayed: relayed)) {
         continue;
       }
@@ -1271,14 +1290,27 @@ List<FeedPost> buildFeed(
     final int visible = shown
         .where((FeedComment c) => !c.hiddenByAuthor)
         .length;
+    // The author's totals counted the people this person blocked too.
+    final int likesBlocked = liked
+        .where((FeedLiker l) => blockedAccounts.contains(l.account))
+        .length;
+    final int commentsBlocked = all
+        .where((FeedComment c) => blockedAccounts.contains(c.account))
+        .length;
     result.add(
       p.withReactions(
         <String>[for (final FeedLiker l in ordered) l.name],
         likedByMe: mine.contains(p.id),
         comments: shown,
         likes: ordered,
-        likeTotal: math.max(ordered.length, likeTotals[p.id] ?? 0),
-        commentTotal: math.max(visible, commentTotals[p.id] ?? 0),
+        likeTotal: math.max(
+          ordered.length,
+          (likeTotals[p.id] ?? 0) - likesBlocked,
+        ),
+        commentTotal: math.max(
+          visible,
+          (commentTotals[p.id] ?? 0) - commentsBlocked,
+        ),
       ),
     );
   }

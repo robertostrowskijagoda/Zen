@@ -11,6 +11,8 @@ import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_guard.dart';
+import 'package:zen/src/features/media/outgoing_media.dart';
+import 'package:zen/src/features/media/platform_picture.dart';
 
 // Files and pictures dropped on Zen or pasted from the clipboard.
 //
@@ -451,6 +453,7 @@ final class OutgoingAttachment {
     this.bytes,
     this.path,
     this.gifProblem,
+    this.unchanged = false,
   });
 
   final OutgoingKind kind;
@@ -468,6 +471,12 @@ final class OutgoingAttachment {
   /// if the person agrees ([confirmGifAsFile]).
   final PickedGifStatus? gifProblem;
 
+  /// It goes exactly as it came, with whatever its author, place or device
+  /// data it holds: a kind Zen cannot clean ([canStripMetadata]), or one
+  /// too large to be read for it. The attach flow says so
+  /// ([tellFilesGoUnchanged]).
+  final bool unchanged;
+
   /// The kind of chat message it goes as.
   ChatMessageType get chatType => switch (kind) {
     OutgoingKind.photo || OutgoingKind.gif => ChatMessageType.image,
@@ -479,10 +488,18 @@ final class OutgoingAttachment {
 /// The largest picture made into a photo; a bigger one goes as a file.
 const int kMaxTransferPhotoBytes = 40 * 1024 * 1024;
 
-/// [item] made ready to send: a photo as a fresh JPEG without metadata, a
-/// GIF still animated (without metadata, see `gif_files.dart`), a film as
-/// it is, anything else as a plain file. Null when it cannot be read.
-Future<OutgoingAttachment?> prepareOutgoing(TransferItem item) async {
+/// [item] made ready to send, whatever way it was picked (camera, gallery,
+/// files, a drop, the clipboard, the keyboard): a photo as a fresh JPEG
+/// without metadata, a HEIC or AVIF photo too once the phone's own decoder
+/// read it ([decode], `platform_picture.dart`), a GIF still animated
+/// (without metadata, see `gif_files.dart`), a film and any other file
+/// without the location, device and time data Zen knows how to remove
+/// (`outgoing_media.dart`); a file it cannot clean goes as it is, marked
+/// [OutgoingAttachment.unchanged]. Null when it cannot be read.
+Future<OutgoingAttachment?> prepareOutgoing(
+  TransferItem item, {
+  PlatformPictureDecoder decode = decodeWithPlatform,
+}) async {
   final String? path = item.path;
   final Uint8List? given = item.bytes;
   final Uint8List head;
@@ -547,10 +564,20 @@ Future<OutgoingAttachment?> prepareOutgoing(TransferItem item) async {
       );
     }
     final MediaKind kind = sniffMediaKind(head);
-    if (kind == MediaKind.image && size <= kMaxTransferPhotoBytes) {
-      // An animated WebP or PNG goes as the GIF it is made into, still
-      // playing, not as a still JPEG of its first frame.
-      final Uint8List picture = await whole();
+    if ((kind == MediaKind.image || isIsoPicture(head)) &&
+        size <= kMaxTransferPhotoBytes) {
+      // A HEIC or AVIF photo (the default of iPhones and of many Android
+      // cameras) is read by the phone's own decoder first; it then goes on
+      // like any photo. An animated WebP or PNG goes as the GIF it is made
+      // into, still playing, not as a still JPEG of its first frame.
+      final Uint8List original = await whole();
+      final Uint8List picture =
+          await readablePicture(
+            original,
+            maxSide: kMaxImageSide,
+            decode: decode,
+          ) ??
+          original;
       final Uint8List moving = await gifIfAnimated(picture);
       if (looksLikeGif(moving)) {
         final PickedGif gif = preparePickedGif(moving);
@@ -574,26 +601,68 @@ Future<OutgoingAttachment?> prepareOutgoing(TransferItem item) async {
         // Not a picture this can read: it goes as a file below.
       }
     }
-    if (kind == MediaKind.video) {
+    // A film, a recording or a file: its metadata out where Zen knows the
+    // kind, kept from the path when there was nothing to remove.
+    final bool video = kind == MediaKind.video;
+    if (!canStripMetadata(head) || size > kMaxCleanedTransferBytes) {
       return OutgoingAttachment(
-        kind: OutgoingKind.video,
+        kind: video ? OutgoingKind.video : OutgoingKind.file,
         fileName: item.name,
-        mimeType: sniffMimeType(head) ?? 'video/mp4',
+        mimeType: sniffMimeType(head) ?? (video ? 'video/mp4' : null),
         bytes: given,
         path: given == null ? path : null,
+        unchanged: true,
       );
     }
+    final Uint8List original = await whole();
+    final Uint8List clean = await stripOutgoingMetadataSized(original);
+    final bool kept = identical(clean, original) && given == null;
+    return OutgoingAttachment(
+      kind: video ? OutgoingKind.video : OutgoingKind.file,
+      fileName: item.name,
+      mimeType: sniffMimeType(head) ?? (video ? 'video/mp4' : null),
+      bytes: kept ? null : clean,
+      path: kept ? path : null,
+    );
   } on FileSystemException {
     return null;
   }
-  return OutgoingAttachment(
-    kind: OutgoingKind.file,
-    fileName: item.name,
-    mimeType: sniffMimeType(head),
-    bytes: given,
-    path: given == null ? path : null,
+}
+
+/// Whether this run of the app already said that a file goes unchanged.
+bool _toldFilesGoUnchanged = false;
+
+/// Says once in a run of the app, as [attachment] goes, that a file Zen
+/// cannot clean goes exactly as it is, with what is written in it (the
+/// author, sometimes the place). Photos, films and recordings never come
+/// here: they go without that data.
+void tellFilesGoUnchanged(BuildContext context, OutgoingAttachment attachment) {
+  if (!attachment.unchanged || _toldFilesGoUnchanged || !context.mounted) {
+    return;
+  }
+  final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) {
+    return;
+  }
+  _toldFilesGoUnchanged = true;
+  messenger.showSnackBar(
+    SnackBar(
+      key: const Key('file-goes-unchanged'),
+      duration: const Duration(seconds: 8),
+      content: Text(
+        t(
+          '„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane '
+          'urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, '
+          'więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).',
+          <String, Object>{'name': attachment.fileName},
+        ),
+      ),
+    ),
   );
 }
+
+@visibleForTesting
+void debugResetToldFilesGoUnchanged() => _toldFilesGoUnchanged = false;
 
 String _stem(String name) {
   final String trimmed = name.trim();
@@ -634,6 +703,7 @@ Future<void> sendTransferItems(
     if (!context.mounted) {
       return;
     }
+    tellFilesGoUnchanged(context, attachment);
     await send(attachment);
   }
 }

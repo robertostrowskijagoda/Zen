@@ -7,12 +7,17 @@
 #
 # On every pull request to main (beside CI), once a week on main and by
 # hand (Actions -> Mutation testing -> Run workflow). The targets are split
-# over six runners, about 15 files and under half an hour each: the list
-# grows with every release, and a runner with 30 files did not end within
-# its 45 minutes, so no run of 1.16.5 said anything. A check of
-# tool/ci/test_ci_checks.py fails when a runner would get more than 20:
-# then the matrix below gets another runner. Each run picks other changes
-# (the seed is the run's number), so over time all of them are tried.
+# over eight runners, about 12 files and 25 minutes each: the list grows
+# with every release and a file takes about two minutes, so a runner with
+# 30 files did not end within its 45 minutes and no run of 1.16.5 said
+# anything; with 16 files a runner took 35. A file's changes get 90
+# seconds (--budget): files with slow tests made one runner of eight take
+# over its 45 minutes while another took 15, each with 13 files. A check of
+# tool/ci/test_ci_checks.py fails when a runner would get more than 16:
+# then the matrix below gets another runner. The summary is written file
+# by file, so a runner that is cut off still says how far it got. Each
+# run picks other changes (the seed is the run's number), so over time
+# all of them are tried.
 # Read-only token, no secret.
 name: Mutation testing
 
@@ -35,13 +40,13 @@ env:
 
 jobs:
   mutation:
-    name: Mutation testing (${{ matrix.shard }} of 6)
+    name: Mutation testing (${{ matrix.shard }} of 8)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,5 +64,5 @@ jobs:
       - name: Mutants
         run: >-
           dart run tool/mutation.dart --max 10 --seed ${{ github.run_number }}
-          --shard ${{ matrix.shard }}/6
+          --shard ${{ matrix.shard }}/8 --budget 90
           --summary "$GITHUB_STEP_SUMMARY"

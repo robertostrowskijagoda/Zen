@@ -496,10 +496,18 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     if (group.isInvitePending) {
       throw StateError(t('Najpierw dołącz do grupy.'));
     }
-    final String? path = attachmentPath?.trim().isNotEmpty == true
-        ? attachmentPath!.trim()
-        : null;
-    final Uint8List? given = bytes == null || bytes.isEmpty ? null : bytes;
+    // Whatever way it came here, it leaves without the location, device
+    // and time data Zen knows how to remove.
+    final ({Uint8List? bytes, String? path}) outgoing =
+        await _attachmentWithoutMetadata(
+          _mediaVault,
+          bytes == null || bytes.isEmpty ? null : bytes,
+          attachmentPath?.trim().isNotEmpty == true
+              ? attachmentPath!.trim()
+              : null,
+        );
+    final String? path = outgoing.path;
+    final Uint8List? given = outgoing.bytes;
     if (given == null && path == null) {
       return;
     }
@@ -1027,6 +1035,22 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
           context: 'Saving a deletion that came before its message',
         );
       case ZenSignalType.messageEdit:
+        final String goneId = group == null
+            ? wireId
+            : groupMessageLocalId(wireId, sender);
+        if (_isRememberedGone(key, goneId)) {
+          // Deleted or disappeared here: there is nothing to edit.
+          return;
+        }
+        // Memory alone would lose it to a restart before its message comes:
+        // it is not confirmed either, so its sender (and its mailboxes)
+        // bring it again, for as long as it could still apply.
+        final int? editedAt = signal.sentAtMillis;
+        if (editedAt != null &&
+            timestamp - editedAt <=
+                (kChatEditWindow + _editClockSkew).inMilliseconds) {
+          _signalWaits = true;
+        }
         _waitingEdits.removeWhere(
           (String _, ({ZenSignal edit, int at}) w) =>
               (timestamp - w.at).abs() >

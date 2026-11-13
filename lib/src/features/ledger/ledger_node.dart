@@ -16,12 +16,16 @@ import 'package:zen/src/core/ledger/ledger_store.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/contacts_backup.dart';
+import 'package:zen/src/features/ledger/ledger_fold.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/met_attestation.dart';
+import 'package:zen/src/features/neighbors/flat_door_mail.dart'
+    show yggAddressForKey;
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -105,8 +109,34 @@ const String kChatHistoryKind = 'chat_history';
 const String kLedgerPushType = 'lg_push';
 
 /// Own devices share their audience keys and friend levels:
-/// `{type, own, levels}`.
+/// `{type, own, levels, wrap?, ok?}`; `levels` carries the time of each
+/// level under [LedgerNode.levelTimesKey], and the newest change of a
+/// friend's level wins on every device. `wrap`: the account key wrapped by
+/// the account password, signed by the account key (the newest wins, see
+/// [LedgerIdentity.takeWrapping]). `ok`: the devices of the account the
+/// sender trusts, device key → `[since, sure]` (see [LedgerNode.confirmDevice];
+/// a receiver takes one trusted only on the sender's own word only when
+/// that trust is older than every cut-off it knows). Devices that do not
+/// know a field ignore it.
 const String kLedgerSiblingType = 'lg_sibling';
+
+/// How far before a device of the account was cut off a device trusted
+/// only on its own word (it proved itself while nothing was cut off, or
+/// another device vouched for it) loses that trust and must be confirmed
+/// again: whoever kept the account key on the cut-off device could have
+/// certified a new device just before.
+const Duration kOwnDeviceTrustWindow = Duration(days: 7);
+
+/// How long the device being linked or copied to (or the one this device
+/// took the account from) is expected at its address and trusted when it
+/// shows up there.
+const Duration kOwnDeviceIntroduction = Duration(days: 1);
+
+/// Most device keys one `ok` list names.
+const int _maxVouches = 64;
+
+/// Most devices of the account one device trusts on another's word.
+const int _maxTrusted = 256;
 
 /// One device of an account, as this node knows it.
 @immutable
@@ -118,6 +148,7 @@ final class AccountDevice {
     this.address,
     this.isThis = false,
     this.issued = 0,
+    this.confirmed = true,
   });
 
   final String account;
@@ -134,6 +165,34 @@ final class AccountDevice {
 
   /// When the account certified it.
   final int issued;
+
+  /// False for a device of this account that appeared after a device was
+  /// cut off and nobody confirmed yet ([LedgerNode.confirmDevice]): nothing
+  /// is synced to it and nothing it writes is taken until then.
+  final bool confirmed;
+}
+
+/// How a device of this account came to be trusted here.
+final class _Trust {
+  const _Trust(this.at, {this.sure = false});
+
+  /// When (ms).
+  final int at;
+
+  /// For sure: the person confirmed it, this device linked it or took the
+  /// account from it, or it is this device. Kept when a device is cut off,
+  /// and taken by the account's other devices on this one's word.
+  /// Otherwise it proved itself before any cut-off or another device
+  /// vouched for it, and a cut-off soon after undoes it
+  /// ([kOwnDeviceTrustWindow]).
+  final bool sure;
+
+  List<int> toJson() => <int>[at, if (sure) 1 else 0];
+
+  static _Trust? fromJson(Object? json) =>
+      json is List && json.length == 2 && json[0] is int && json[1] is int
+      ? _Trust(json[0] as int, sure: json[1] == 1)
+      : null;
 }
 
 final class _DeviceRef {
@@ -236,12 +295,12 @@ final class LedgerNode {
     this.syncInterval = const Duration(minutes: 10),
     bool startSuspended = false,
     this.createIdentity = true,
-    BridgeProbe? reachProbe,
+    NodeKeyProbe? reachProbe,
     this.localAddress,
     this.localSessionKey,
     this.greetAlso,
   }) : _clock = clock ?? HlcClock(wallClock: friendsAgreedTime),
-       _reachProbe = reachProbe ?? yggBridgeProbe,
+       _reachProbe = reachProbe ?? _noNodeKey,
        bridges = bridges ?? BridgeBook(),
        autoDownloadMedia = autoDownloadMedia ?? _always,
        _suspended = startSuspended {
@@ -318,6 +377,12 @@ final class LedgerNode {
 
   /// Private level of each friend (normalised address); default "Znajomy".
   final Map<String, FriendLevel> _levels = <String, FriendLevel>{};
+
+  /// When each level in [_levels] was set, on whichever device of the
+  /// account ([setLevel]): the newest change wins on every device. A level
+  /// without one was set before levels carried a time (counts as
+  /// [Hlc.zero]).
+  final Map<String, Hlc> _levelAt = <String, Hlc>{};
 
   /// Decrypted bodies of sealed entries, by entry id.
   final Map<String, Map<String, dynamic>> _opened =
@@ -436,6 +501,31 @@ final class LedgerNode {
   /// device this one was linked from, or the friends who helped recover
   /// the account. They answer with their certificate.
   final Set<String> _deviceSeeds = <String>{};
+
+  /// This account's devices this device trusts, by device key. Once a
+  /// device of the account was cut off, whoever kept the account key on it
+  /// could certify a new device; so from then on a device of the account
+  /// that is not trusted here gets nothing from this device and nothing
+  /// it wrote is taken ([_gated]), until the person says it is theirs
+  /// ([confirmDevice]), the device this one linked it with names it
+  /// ([expectOwnDevice]), or a trusted device of the account vouches for
+  /// it (`ok` of [kLedgerSiblingType]). Before any cut-off every device
+  /// that proves itself is trusted, as it always was.
+  final Map<String, _Trust> _trusted = <String, _Trust>{};
+
+  /// Addresses where a device of this account is expected, until when
+  /// (ms): the new device this one is linking or copying the account to,
+  /// or the device this one took the account from.
+  final Map<String, int> _introduced = <String, int>{};
+
+  /// Devices of this account whose cut-off was looked at already
+  /// ([_noteCutOffs]).
+  final Set<String> _cutSeen = <String>{};
+
+  /// Whether this account has a device that was cut off (the trust above
+  /// applies).
+  bool _gated = false;
+
   static const String _devicesKey = 'ledger/devices';
   final StreamController<void> _devicesChanged =
       StreamController<void>.broadcast();
@@ -460,8 +550,12 @@ final class LedgerNode {
   /// Whether [address] is a friend's device (or one of this account's).
   bool isFriendAddress(String address) => _isFriend(address);
 
-  /// How a friend's address is checked when they ask.
-  final BridgeProbe _reachProbe;
+  /// How a friend's address is checked when they ask: the key of the node
+  /// that answers there (the app passes the bridge's probe; without one no
+  /// check succeeds).
+  final NodeKeyProbe _reachProbe;
+
+  static Future<String?> _noNodeKey(String _) async => null;
   final Map<String, _ReachWait> _reachWaits = <String, _ReachWait>{};
   final List<int> _reachAnsweredAt = <int>[];
   List<String> _chosenBridges = const <String>[];
@@ -600,6 +694,12 @@ final class LedgerNode {
   /// Followed addresses (not friends) → account key ('' until known).
   final Map<String, String> _followed = <String, String>{};
 
+  /// Addresses that were friends once → the account they had then, the
+  /// newest last: someone blocked stops being a friend, and the wall still
+  /// has to know whose reactions to leave out.
+  final Map<String, String> _former = <String, String>{};
+  static const int _maxFormer = 2000;
+
   /// /64 network -> (minute, frames) for strangers.
   final Map<String, (int, int)> _strangerBudget = <String, (int, int)>{};
   static const int _maxStrangerNetworks = 5000;
@@ -642,6 +742,11 @@ final class LedgerNode {
   /// Account key of friend [address], once known.
   String? accountOf(String address) =>
       _accounts[PeerShareCodec.normalizeAddress(address)];
+
+  /// The account [address] had while it was a friend (removed or blocked
+  /// since), or null.
+  String? formerAccountOf(String address) =>
+      _former[PeerShareCodec.normalizeAddress(address)];
 
   /// The account whose device at [address] its owner unlinked (a lost or
   /// stolen phone), or null: nothing should go there any more.
@@ -697,6 +802,7 @@ final class LedgerNode {
       return;
     }
     _levels[normalized] = level;
+    _levelAt[normalized] = _nextLevelStamp(normalized);
     await _saveLevels();
     final Set<Audience> lost = audiencesFor(
       old,
@@ -709,6 +815,160 @@ final class LedgerNode {
       _sendKeysToAll();
     } else {
       _sendKeys(normalized);
+    }
+  }
+
+  /// The time of a level set here now for [normalized]: later than any
+  /// change of it this device knows of, whatever the clocks of the devices
+  /// that made those, so a change made after seeing another one wins.
+  Hlc _nextLevelStamp(String normalized) {
+    final Hlc now = _clock.now();
+    final Hlc? had = _levelAt[normalized];
+    if (had == null || now > had) {
+      return now;
+    }
+    return had.counter < 0xFFFF
+        ? Hlc(had.millis, had.counter + 1)
+        : Hlc(had.millis + 1, 0);
+  }
+
+  /// Key of the levels' times in [levelsForCopy], in the levels the
+  /// account's devices send each other and in the stored file: a friend's
+  /// address never looks like it, and Zen 1.16.5 skips it (no level name).
+  static const String levelTimesKey = '@at';
+
+  /// The levels of [addresses] (normalised address → level name), with the
+  /// time of each set here or on another device under [levelTimesKey]: for
+  /// a copy of the account, whose levels then come back by [takeLevels].
+  Map<String, Object> levelsForCopy(Iterable<String> addresses) {
+    final Map<String, Object> out = <String, Object>{};
+    final Map<String, int> times = <String, int>{};
+    for (final String a in addresses) {
+      final String normalized = PeerShareCodec.normalizeAddress(a);
+      out[normalized] = levelOf(normalized).name;
+      final Hlc? at = _levels.containsKey(normalized)
+          ? _levelAt[normalized]
+          : null;
+      if (at != null) {
+        times[normalized] = at.toInt();
+      }
+    }
+    if (times.isNotEmpty) {
+      out[levelTimesKey] = times;
+    }
+    return out;
+  }
+
+  /// Every level held here, with its time (as [levelsForCopy] writes them).
+  Map<String, Object> _levelsJson() => <String, Object>{
+    for (final MapEntry<String, FriendLevel> e in _levels.entries)
+      e.key: e.value.name,
+    if (_levelAt.isNotEmpty)
+      levelTimesKey: <String, int>{
+        for (final MapEntry<String, Hlc> e in _levelAt.entries)
+          if (_levels.containsKey(e.key)) e.key: e.value.toInt(),
+      },
+  };
+
+  /// Takes the levels of a copy of the account ([levelsForCopy]; a copy of
+  /// Zen 1.16.5 has no times): a friend's level here changed later than the
+  /// copy's stays, and what changes has the effects of [setLevel].
+  Future<void> takeLevels(Object? levels) async {
+    await start();
+    await _applyLevels(_mergeLevels(levels));
+  }
+
+  /// Merges [theirs] (levels as [_levelsJson] writes them, from another
+  /// device of this account or a copy) into [_levels]: per friend the
+  /// newer change wins ([_levelWins]). Only friends' levels (by the list,
+  /// or a friend this device knows the account of): a stale device must
+  /// not bring back the level of a friend removed here.
+  _LevelMerge _mergeLevels(Object? theirs) {
+    final _LevelMerge out = _LevelMerge();
+    if (theirs is! Map) {
+      return out;
+    }
+    final Object? rawTimes = theirs[levelTimesKey];
+    final Map<String, Hlc> times = <String, Hlc>{
+      if (rawTimes is Map)
+        for (final MapEntry<Object?, Object?> e in rawTimes.entries)
+          if (e.key is String && e.value is int && (e.value! as int) >= 0)
+            PeerShareCodec.normalizeAddress(e.key! as String): Hlc.fromInt(
+              e.value! as int,
+            ),
+    };
+    final Set<String> listed = friendAddresses()
+        .map(PeerShareCodec.normalizeAddress)
+        .toSet();
+    for (final MapEntry<Object?, Object?> e in theirs.entries) {
+      final Object? key = e.key;
+      final FriendLevel? level = friendLevelByName(e.value);
+      if (key is! String || key == levelTimesKey || level == null) {
+        continue;
+      }
+      final String address = PeerShareCodec.normalizeAddress(key);
+      if (!listed.contains(address) && !_accounts.containsKey(address)) {
+        continue;
+      }
+      final Hlc at = times[address] ?? Hlc.zero;
+      if (!_levelWins(address, level, at)) {
+        continue;
+      }
+      final FriendLevel old = levelOf(address);
+      _levels[address] = level;
+      if (at > Hlc.zero) {
+        _levelAt[address] = at;
+      } else {
+        _levelAt.remove(address);
+      }
+      out.changed = true;
+      out.lost.addAll(audiencesFor(old).difference(audiencesFor(level)));
+      if (level.index > old.index) {
+        out.gained = true;
+      }
+    }
+    return out;
+  }
+
+  /// Whether [level], set at [at] elsewhere, replaces this device's level
+  /// of [address]: the later change; at the same time (two levels from
+  /// before levels carried one) the lower level, so both devices settle on
+  /// the same one and neither keeps trusting more than the other.
+  bool _levelWins(String address, FriendLevel level, Hlc at) {
+    final FriendLevel? mine = _levels[address];
+    if (mine == null) {
+      // Nothing set here: anything but the default with no time.
+      return at > Hlc.zero || level != FriendLevel.friend;
+    }
+    final int byTime = at.compareTo(_levelAt[address] ?? Hlc.zero);
+    if (byTime != 0) {
+      return byTime > 0;
+    }
+    return level.index < mine.index;
+  }
+
+  /// What a level taken from elsewhere does, as [setLevel] does it here:
+  /// an audience a friend lost gets a new key on this device too (the old
+  /// one may have gone to them from here, and this device's newest key is
+  /// the one it writes with), and friends get the keys their levels give
+  /// now. [keysAdded]: own keys came with the levels (taken after them, so
+  /// no key goes out by a level about to change).
+  Future<void> _applyLevels(_LevelMerge m, {int keysAdded = 0}) async {
+    if (m.changed) {
+      await _saveLevels();
+    }
+    for (final Audience a in m.lost) {
+      keyring.rotate(a, _clock.wallMillis());
+    }
+    if (m.lost.isNotEmpty || keysAdded > 0) {
+      await _saveKeyring();
+    }
+    if (keysAdded > 0) {
+      await _open(_sealedEntries(ofAccount: account));
+    }
+    if (m.lost.isNotEmpty || m.gained || keysAdded > 0) {
+      // Friends may read what the other device wrote with its keys.
+      _sendKeysToAll();
     }
   }
 
@@ -750,6 +1010,11 @@ final class LedgerNode {
         acc == loaded.certificate.account ||
         _accounts.containsValue(acc) ||
         _followed.containsValue(acc);
+    // This account's own spaces are kept whole; others' within their bounds.
+    store
+      ..ownAccount = loaded.certificate.account
+      ..onFullChanged = () =>
+          LedgerRoomNotice.instance.update(store.fullSpaces);
     await archive.open(store, blobs);
     if (existing != null && archive.lostOwnLog(loaded.writer)) {
       // Our own log did not come back whole: entries others hold may be
@@ -772,6 +1037,8 @@ final class LedgerNode {
     await _loadDevices();
     await _loadOwnApplied();
     await _loadMetPending();
+    // Cut-offs that came while this device was closed (or with a copy).
+    _noteCutOffs();
     await identity.rememberSelfKey(disk);
     for (final String kind in kAccountSpaceKinds) {
       replicator.subscribe(accountSpace(kind, account));
@@ -836,6 +1103,12 @@ final class LedgerNode {
     _ready = true;
     // Logs whose writer started them over while this device was closed.
     _dropReadyRebases();
+    // This device's own logs as an earlier build left them; a node that
+    // starts suspended looks once it has the ledger back ([resume]): until
+    // then it writes nothing, and a look made meanwhile would be lost.
+    if (!_suspended) {
+      _scheduleOwnFolds();
+    }
     _settle();
     if (!_openedChanges.isClosed) {
       // Readable now: screens built before show what was read.
@@ -1019,6 +1292,7 @@ final class LedgerNode {
       // Suspended again (or stopped) while catching up.
       return;
     }
+    _scheduleOwnFolds();
     if (_online) {
       _listen();
       _startSyncTimer();
@@ -1138,10 +1412,18 @@ final class LedgerNode {
     for (final String address in gone) {
       lost.addAll(audiencesFor(levelOf(address)));
       _levels.remove(address);
+      _levelAt.remove(address);
       _addressDevices.remove(address);
       _unlinked.remove(address);
       _certificateKnownBy.remove(address);
       final String? acc = _accounts.remove(address);
+      if (acc != null) {
+        _former.remove(address);
+        _former[address] = acc;
+        if (_former.length > _maxFormer) {
+          _former.remove(_former.keys.first);
+        }
+      }
       if (acc != null && !_accounts.containsValue(acc)) {
         for (final String kind in kFollowedFriendSpaces) {
           replicator.unsubscribe(accountSpace(kind, acc));
@@ -1174,12 +1456,81 @@ final class LedgerNode {
     if (gate != null) {
       await gate.future;
     }
-    return author.append(
+    final LogEntry entry = await author.append(
       accountSpace(spaceKind, account),
       kind,
       body,
       blobs: blobs,
     );
+    if (kFoldedSpaceKinds.contains(spaceKind)) {
+      _scheduleFold(spaceKind);
+    }
+    return entry;
+  }
+
+  /// How long after a write into a folded space ([kFoldedSpaceKinds]) the
+  /// device looks whether to fold it: taps in a row are folded once.
+  @visibleForTesting
+  static Duration foldDelay = const Duration(seconds: 5);
+
+  /// How long this device keeps its own log from before a fold
+  /// ([kFoldOwnKeep]).
+  @visibleForTesting
+  static Duration foldOwnKeep = kFoldOwnKeep;
+
+  /// What a log may hold beyond what a fold would leave ([kFoldSlackBytes]).
+  @visibleForTesting
+  static int foldSlack = kFoldSlackBytes;
+
+  final Map<String, Timer> _foldTimers = <String, Timer>{};
+  Future<void> _folding = Future<void>.value();
+
+  void _scheduleOwnFolds() {
+    for (final String kind in kFoldedSpaceKinds) {
+      _scheduleFold(kind);
+    }
+  }
+
+  void _scheduleFold(String spaceKind) {
+    if (_foldTimers.containsKey(spaceKind) || _stopped) {
+      return;
+    }
+    _foldTimers[spaceKind] = Timer(foldDelay, () {
+      _foldTimers.remove(spaceKind);
+      if (_stopping == null && !_stopped) {
+        unawaitedLogged(
+          foldNow(spaceKind),
+          context: 'Folding the ledger failed',
+        );
+      }
+    });
+  }
+
+  /// Folds this device's own log in [spaceKind] when enough of it no
+  /// longer counts ([planFold]); returns whether it did. Every holder that
+  /// understands a fold then drops what came before it; this device keeps
+  /// it [kFoldOwnKeep] longer ([_dropToRebase]).
+  Future<bool> foldNow(String spaceKind) {
+    final Future<bool> done = _folding.then((_) async {
+      if (!_ready || _suspended || _stopped) {
+        return false;
+      }
+      final String space = accountSpace(spaceKind, account);
+      final String writer = author.writer;
+      // Planned in turn with every other write of this device, so nothing
+      // is written between what the fold read and the fold.
+      final List<LogEntry>? run = await author.appendPlanned(
+        space,
+        () => planFold(
+          store.logView(space, writer),
+          base: store.baseOf(space, writer).base,
+          slack: foldSlack,
+        ),
+      );
+      return run != null;
+    });
+    _folding = done.then((_) {}, onError: (Object _) {});
+    return done;
   }
 
   /// Entries of [spaceKind] of [ofAccount] (default: this account).
@@ -1311,11 +1662,19 @@ final class LedgerNode {
     final _DeviceRef? ref = _devices[normalized];
     if (ref == null ||
         store.directory.isRevoked(ref.account, ref.device) ||
-        (ref.account != account && !_accounts.containsValue(ref.account))) {
+        (ref.account != account && !_accounts.containsValue(ref.account)) ||
+        (ref.account == account && !_trustsOwn(ref.device))) {
       return null;
     }
     return ref;
   }
+
+  /// Whether [device] of this account may have what this device shares
+  /// with its own devices, and what it wrote is taken ([_trusted]).
+  bool _trustsOwn(String device) =>
+      !_gated ||
+      device == identity.deviceKey.id ||
+      _trusted.containsKey(device);
 
   Iterable<String> _liveDeviceAddresses() => _devices.keys.where(
     (String a) => _liveDevice(a) != null && a != _ownAddress,
@@ -1729,6 +2088,7 @@ final class LedgerNode {
           address: address == null || address.isEmpty ? null : address,
           isThis: isThis,
           issued: cert.issued,
+          confirmed: isThis || _trustsOwn(cert.device),
         ),
       );
     }
@@ -1774,6 +2134,9 @@ final class LedgerNode {
         (acc != account && !_accounts.containsValue(acc))) {
       return false;
     }
+    // A device of this account: trusted, or kept at its address (so the
+    // devices list shows where it is) and waiting for the person's yes.
+    final bool admitted = acc != account || await _admitOwn(n, device);
     // Its newest record named this address: that claim is proven now.
     final _DeviceHint? hint = _deviceHints[device];
     final _DeviceHint? claim =
@@ -1783,7 +2146,7 @@ final class LedgerNode {
         had != null &&
         had.account == acc &&
         had.device == device) {
-      return true;
+      return admitted;
     }
     _devices[n] = claim != null
         ? _DeviceRef(
@@ -1809,7 +2172,184 @@ final class LedgerNode {
     if (learnt && acc != account) {
       onPeerLearnt?.call(n, acc);
     }
+    return admitted;
+  }
+
+  /// Whether [device] of this account, proven at [normalized], is trusted
+  /// here; trusts it when nothing of the account was cut off yet (as
+  /// always), or when it is the device expected at that address (linked or
+  /// copied to from here, or the one this device took the account from).
+  Future<bool> _admitOwn(String normalized, String device) async {
+    if (_trusted.containsKey(device)) {
+      return true;
+    }
+    final int now = _clock.wallMillis();
+    final int? until = _introduced[normalized];
+    if (until != null && until >= now) {
+      _trusted[device] = _Trust(now, sure: true);
+      _introduced.remove(normalized);
+      // The account's other devices take it on this one's word at once.
+      scheduleMicrotask(() {
+        for (final String a in siblingAddresses) {
+          _sendSiblingSync(a);
+        }
+      });
+    } else if (!_gated) {
+      _trusted[device] = _Trust(now);
+    } else {
+      logZenWarning(
+        'Ledger: a new device of this account waits to be confirmed.',
+      );
+      return false;
+    }
+    await _saveDevices();
     return true;
+  }
+
+  /// The devices of this account that wait for the person to say whether
+  /// they are theirs ([AccountDevice.confirmed] false).
+  List<AccountDevice> get unconfirmedDevices => <AccountDevice>[
+    for (final AccountDevice d in ownDevices)
+      if (!d.confirmed) d,
+  ];
+
+  /// The person said [device] of this account is theirs: it gets what the
+  /// account's devices share and what it wrote is taken; the account's
+  /// other devices hear it from this one.
+  Future<void> confirmDevice(String device) async {
+    await start();
+    if (store.directory.isRevoked(account, device) ||
+        _trusted[device]?.sure == true) {
+      return;
+    }
+    _trusted[device] = _Trust(_clock.wallMillis(), sure: true);
+    await _saveDevices();
+    await _trustChanged(<String>{device});
+    for (final String a in siblingAddresses) {
+      _sendSiblingSync(a);
+    }
+  }
+
+  /// A device of this account is expected at [address] (the new device this
+  /// one is linking or copying the account to, or the one this device is
+  /// taking the account from): trusted when it proves itself there within
+  /// [kOwnDeviceIntroduction].
+  Future<void> expectOwnDevice(String address) async {
+    await start();
+    final String n = PeerShareCodec.normalizeAddress(address);
+    if (n.isEmpty || n == _ownAddress) {
+      return;
+    }
+    final int now = _clock.wallMillis();
+    _introduced
+      ..removeWhere((String _, int until) => until < now)
+      ..[n] = now + kOwnDeviceIntroduction.inMilliseconds;
+    await _saveDevices();
+  }
+
+  /// Devices of this account were trusted just now: they are greeted (and
+  /// become this device's own devices again), and what they wrote opens.
+  Future<void> _trustChanged(Set<String> devices) async {
+    _emitDevices();
+    for (final MapEntry<String, _DeviceRef> e in _devices.entries.toList()) {
+      if (e.value.account == account && devices.contains(e.value.device)) {
+        _hello(e.key, force: true);
+      }
+    }
+    await _open(_sealedEntries(ofAccount: account));
+  }
+
+  /// The devices of this account this one vouches for, with how it trusts
+  /// each ([_Trust]): itself, and every device it trusts that was not cut
+  /// off; those it trusts for sure first.
+  Map<String, Object> _vouches() {
+    final List<MapEntry<String, _Trust>> all =
+        <MapEntry<String, _Trust>>[
+          for (final MapEntry<String, _Trust> e in _trusted.entries)
+            if (!store.directory.isRevoked(account, e.key)) e,
+        ]..sort(
+          (MapEntry<String, _Trust> x, MapEntry<String, _Trust> y) =>
+              (y.value.sure ? 1 : 0) - (x.value.sure ? 1 : 0),
+        );
+    return <String, Object>{
+      for (final MapEntry<String, _Trust> e in all.take(_maxVouches))
+        e.key: e.value.toJson(),
+    };
+  }
+
+  /// Whether a device trusted on its own word at [at] (ms) is too close
+  /// to a cut-off of this account: whoever kept the key on the cut-off
+  /// device may have certified it ([kOwnDeviceTrustWindow]).
+  bool _nearCutOff(int at) {
+    for (final DeviceRevocation r in store.directory.revocations) {
+      if (r.account == account &&
+          at >= r.issued - kOwnDeviceTrustWindow.inMilliseconds) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// A trusted device of this account vouched for [items] (device key →
+  /// how it trusts it). One it trusts for sure is taken; one it trusts
+  /// only on its own word only when that trust is older than the window
+  /// before every cut-off known here, as this device would judge its own.
+  /// Taken as trust on another's word: a later cut-off can undo it.
+  Future<void> _takeVouches(Object? items) async {
+    if (items is! Map) {
+      return;
+    }
+    final Set<String> added = <String>{};
+    for (final MapEntry<Object?, Object?> e in items.entries.take(
+      _maxVouches,
+    )) {
+      final Object? d = e.key;
+      final _Trust? t = _Trust.fromJson(e.value);
+      if (d is! String ||
+          d.length > 200 ||
+          t == null ||
+          _trusted.length >= _maxTrusted ||
+          _trusted.containsKey(d) ||
+          store.directory.isRevoked(account, d) ||
+          (!t.sure && _nearCutOff(t.at))) {
+        continue;
+      }
+      _trusted[d] = _Trust(t.sure ? _clock.wallMillis() : t.at);
+      added.add(d);
+    }
+    if (added.isEmpty) {
+      return;
+    }
+    await _saveDevices();
+    await _trustChanged(added);
+  }
+
+  /// Looks at this account's cut-off devices: once one is cut off, the
+  /// trust applies ([_gated]); a device trusted only on its own word since
+  /// shortly before the cut-off ([kOwnDeviceTrustWindow]) must be
+  /// confirmed again — the cut-off device may have certified it.
+  void _noteCutOffs() {
+    bool changed = false;
+    for (final DeviceRevocation r in store.directory.revocations) {
+      if (r.account != account) {
+        continue;
+      }
+      _gated = true;
+      if (!_cutSeen.add(r.device)) {
+        continue;
+      }
+      changed = true;
+      _trusted.remove(r.device);
+      final int since = r.issued - kOwnDeviceTrustWindow.inMilliseconds;
+      _trusted.removeWhere(
+        (String device, _Trust t) =>
+            !t.sure && t.at >= since && device != identity.deviceKey.id,
+      );
+    }
+    if (changed) {
+      unawaitedLogged(_saveDevices(), context: 'Saving the account devices');
+      _emitDevices();
+    }
   }
 
   /// A device record (`{address, name}` in an account's `acts`) is only a
@@ -2000,13 +2540,17 @@ final class LedgerNode {
         if (e.value.device == device) e.key,
       if (claimed != null) claimed.address,
     };
+    // The account's devices as they are before the cut-off: the cut-off
+    // may leave one of them to be confirmed again here, and they must
+    // hear of it all the same.
+    final List<String> siblings = siblingAddresses;
     await replicator.publishRevocation(revocation);
     _devices.removeWhere((_, _DeviceRef r) => r.device == device);
     await _saveDevices();
     _emitDevices();
     // Friends who never heard of this device still get the news through
     // everyone else; the device itself is told too, so it stops.
-    for (final String a in itsAddresses) {
+    for (final String a in <String>{...siblings, ...itsAddresses}) {
       _send(a, <String, dynamic>{
         'type': LedgerMessages.revoke,
         'items': <Map<String, dynamic>>[revocation.toJson()],
@@ -2019,6 +2563,7 @@ final class LedgerNode {
       store.directory.isRevoked(account, identity.deviceKey.id);
 
   void _pruneRevoked() {
+    _noteCutOffs();
     // A friend's device its owner cut off, at the address the friend is
     // known by.
     for (final MapEntry<String, String> e in _addressDevices.entries.toList()) {
@@ -2088,6 +2633,12 @@ final class LedgerNode {
               e.key: e.value.toJson(),
           },
           'seeds': _deviceSeeds.toList(),
+          'ok': <String, Object>{
+            for (final MapEntry<String, _Trust> e in _trusted.entries)
+              e.key: e.value.toJson(),
+          },
+          if (_introduced.isNotEmpty) 'intro': _introduced,
+          'cut': _cutSeen.toList(),
         }),
       ),
     ),
@@ -2095,6 +2646,33 @@ final class LedgerNode {
 
   Future<void> _loadDevices() async {
     final Uint8List? raw = await readOrSetAsideOn(disk, _devicesKey);
+    bool trustSaved = false;
+    try {
+      await _readDevices(raw, () => trustSaved = true);
+    } finally {
+      _trusted[identity.deviceKey.id] = const _Trust(0, sure: true);
+      if (!trustSaved) {
+        // Saved before devices were trusted one by one (or never): the
+        // devices of this account that proved themselves here are trusted
+        // as they were, and earlier cut-offs change nothing of that.
+        for (final _DeviceRef r in _devices.values) {
+          if (r.account == account) {
+            _trusted.putIfAbsent(r.device, () => const _Trust(0));
+          }
+        }
+        for (final DeviceRevocation r in store.directory.revocations) {
+          if (r.account == account) {
+            _cutSeen.add(r.device);
+          }
+        }
+      }
+      _gated = store.directory.revocations.any(
+        (DeviceRevocation r) => r.account == account,
+      );
+    }
+  }
+
+  Future<void> _readDevices(Uint8List? raw, void Function() trustSaved) async {
     if (raw == null) {
       return;
     }
@@ -2102,6 +2680,28 @@ final class LedgerNode {
       final Object? json = jsonDecode(utf8.decode(raw));
       if (json is! Map) {
         return;
+      }
+      final Object? ok = json['ok'];
+      if (ok is Map) {
+        trustSaved();
+        ok.forEach((Object? k, Object? v) {
+          final _Trust? t = _Trust.fromJson(v);
+          if (k is String && t != null) {
+            _trusted[k] = t;
+          }
+        });
+      }
+      final Object? intro = json['intro'];
+      if (intro is Map) {
+        intro.forEach((Object? k, Object? v) {
+          if (k is String && v is int) {
+            _introduced[k] = v;
+          }
+        });
+      }
+      final Object? cut = json['cut'];
+      if (cut is List) {
+        _cutSeen.addAll(cut.whereType<String>());
       }
       final Object? devices = json['devices'];
       if (devices is Map) {
@@ -2227,12 +2827,13 @@ final class LedgerNode {
     return result;
   }
 
-  /// Saves [snapshot] (friends and groups) sealed for this account's own
-  /// devices, unless it equals the newest one; then starts this device's
+  /// Saves [whole] (friends and groups) sealed for this account's own
+  /// devices, made to fit ([fitContacts]), unless it equals the newest one;
+  /// then starts this device's
   /// private log over when it holds too much that no longer counts
   /// ([kPrivateLogSlackBytes]). Returns whether anything was written. A
   /// failure is logged and reported ([ContactsBackupNotice]).
-  Future<bool> publishContacts(Map<String, dynamic> snapshot) async {
+  Future<bool> publishContacts(Map<String, dynamic> whole) async {
     await start();
     final Uint8List? key = identity.selfKey;
     if (key == null || _suspended) {
@@ -2240,6 +2841,12 @@ final class LedgerNode {
     }
     return _privateWrite(() async {
       try {
+        // One friend or group too big for a part is trimmed (or left out),
+        // never the reason the whole backup is not saved.
+        final ({Map<String, dynamic> snapshot, int trimmed}) fit = fitContacts(
+          whole,
+        );
+        final Map<String, dynamic> snapshot = fit.snapshot;
         final Map<String, dynamic>? latest = latestContacts();
         final bool same =
             latest != null && jsonEncode(latest) == jsonEncode(snapshot);
@@ -2250,7 +2857,7 @@ final class LedgerNode {
         if (over) {
           await _startPrivateOver(snapshot, key);
         }
-        ContactsBackupNotice.instance.saved();
+        ContactsBackupNotice.instance.savedTrimmed(fit.trimmed);
         return !same || over;
       } on Object catch (error) {
         ContactsBackupNotice.instance.fail(
@@ -2479,7 +3086,15 @@ final class LedgerNode {
         if (e.seq < seq) e.id,
     ];
     if (store.pruneBefore(space, writer, seq) > 0) {
+      // What a fold carried is still read as it was.
+      final Set<String> carried = <String>{
+        for (final LogEntry e in store.logView(space, writer))
+          if (e.seq < seq) e.id,
+      };
       for (final String id in ids) {
+        if (carried.contains(id)) {
+          continue;
+        }
         _opened.remove(id);
         _partHashes.remove(id);
         if (_assembled?.$1 == id) {
@@ -2535,6 +3150,22 @@ final class LedgerNode {
     if (seq == null || _suspended || !_ready) {
       return;
     }
+    final List<LogEntry> start = store.entriesAfter(
+      space,
+      writer,
+      seq - 1,
+      limit: 1,
+    );
+    if (start.isNotEmpty &&
+        start.first.kind == kLedgerFoldKind &&
+        start.first.account == account &&
+        store.clock.wallMillis() - start.first.hlc.millis <
+            foldOwnKeep.inMilliseconds) {
+      // This account's own log is kept whole a while after a fold, for
+      // friends on builds that do not understand one ([kFoldOwnKeep]);
+      // the periodic round looks again.
+      return;
+    }
     for (final LogEntry e in store.entriesAfter(space, writer, 0)) {
       if (e.seq >= seq) {
         break;
@@ -2554,46 +3185,76 @@ final class LedgerNode {
     if (!_isSibling(to)) {
       return;
     }
+    final PasswordWrappedSeed? wrapped = identity.wrapped;
     _send(to, <String, dynamic>{
       'type': kLedgerSiblingType,
       if (answer) 'ack': true,
       'own': keyring.toJson()['own'],
-      'levels': <String, String>{
-        for (final MapEntry<String, FriendLevel> e in _levels.entries)
-          e.key: e.value.name,
-      },
+      // With the time of each ([levelTimesKey]): the newest change wins.
+      'levels': _levelsJson(),
+      // The account password's wrapping, once the account key signed it:
+      // the password then protects the key on every device.
+      if (wrapped != null && wrapped.signature != null)
+        'wrap': wrapped.toJson(),
+      'ok': _vouches(),
     });
+  }
+
+  /// Fires when this device took the account password's wrapping from
+  /// another device of the account ([LedgerIdentity.takeWrapping]).
+  Stream<void> get keyChanged => _keyChanged.stream;
+  final StreamController<void> _keyChanged = StreamController<void>.broadcast();
+
+  /// Tells the account's other devices about the account password set or
+  /// changed here (they take its wrapping, the newest wins).
+  Future<void> shareWrapping() async {
+    await start();
+    for (final String a in siblingAddresses) {
+      _sendSiblingSync(a);
+    }
+    if (!_keyChanged.isClosed) {
+      _keyChanged.add(null);
+    }
+  }
+
+  /// The person said "not now" to protecting the account key here
+  /// ([LedgerIdentity.offersKeyGuard]).
+  Future<void> dismissKeyGuard() async {
+    await start();
+    await identity.dismissKeyGuard(disk);
+    if (!_keyChanged.isClosed) {
+      _keyChanged.add(null);
+    }
   }
 
   Future<void> _onSiblingSync(String from, Map<String, dynamic> m) async {
     if (!_isSibling(from)) {
       return;
     }
+    // The levels first: the keys that came with them (a key the other
+    // device made when it took a friend down) go out to friends only by
+    // the levels as they are now.
+    final _LevelMerge levels = _mergeLevels(m['levels']);
+    final int added = keyring.mergeOwn(m['own']);
+    await _applyLevels(levels, keysAdded: added);
+    await _takeVouches(m['ok']);
+    final PasswordWrappedSeed? wrapped = PasswordWrappedSeed.fromJson(
+      m['wrap'],
+    );
+    if (wrapped != null && await identity.takeWrapping(disk, wrapped)) {
+      logZenWarning(
+        'Ledger: the account password set on another device protects the '
+        'account key here too.',
+      );
+      // Passed on: a device that cannot reach the one it was set on gets
+      // it from here.
+      await shareWrapping();
+    }
     // Ours may have reached them before they could prove who we are (and
-    // been dropped): answer once with our own, never an answer to an answer.
+    // been dropped): answer once with our own, as merged now, never an
+    // answer to an answer.
     if (m['ack'] != true) {
       _sendSiblingSync(from, answer: true);
-    }
-    final int added = keyring.mergeOwn(m['own']);
-    bool levels = false;
-    final Object? theirs = m['levels'];
-    if (theirs is Map) {
-      theirs.forEach((Object? k, Object? v) {
-        final FriendLevel? level = friendLevelByName(v);
-        if (k is String && level != null && !_levels.containsKey(k)) {
-          _levels[k] = level;
-          levels = true;
-        }
-      });
-    }
-    if (added > 0) {
-      await _saveKeyring();
-      await _open(_sealedEntries(ofAccount: account));
-      // Friends may read what the other device wrote with these.
-      _sendKeysToAll();
-    }
-    if (levels) {
-      await _saveLevels();
     }
   }
 
@@ -3436,6 +4097,14 @@ final class LedgerNode {
               e.space == accountSpace('own', account))) {
         continue;
       }
+      // Written by a device of this account nobody confirmed (it appeared
+      // after a cut-off): kept unread until it is ([_trustChanged]). What a
+      // cut-off device wrote before its cut-off stays as it was.
+      if (e.account == account &&
+          !_trustsOwn(e.device) &&
+          !store.directory.isRevoked(account, e.device)) {
+        continue;
+      }
       final Uint8List? selfKey = identity.selfKey;
       final Map<String, dynamic>? plain = e.body['kid'] == kSelfKeyId
           ? (e.account == account && selfKey != null
@@ -3494,6 +4163,15 @@ final class LedgerNode {
               _levels[k] = level;
             }
           });
+          // Times of the levels (none in a file of Zen 1.16.5).
+          final Object? times = json[levelTimesKey];
+          if (times is Map) {
+            times.forEach((Object? k, Object? v) {
+              if (k is String && v is int && v > 0 && _levels.containsKey(k)) {
+                _levelAt[k] = Hlc.fromInt(v);
+              }
+            });
+          }
         }
       } on FormatException {
         logZenWarning('Friend levels are damaged.');
@@ -3508,14 +4186,7 @@ final class LedgerNode {
 
   Future<void> _saveLevels() => disk.write(
     _levelsKey,
-    Uint8List.fromList(
-      utf8.encode(
-        jsonEncode(<String, String>{
-          for (final MapEntry<String, FriendLevel> e in _levels.entries)
-            e.key: e.value.name,
-        }),
-      ),
-    ),
+    Uint8List.fromList(utf8.encode(jsonEncode(_levelsJson()))),
   );
 
   void _shareBridges(String friend) {
@@ -3641,12 +4312,22 @@ final class LedgerNode {
       return; // nobody gets to use us as a port scanner
     }
     _reachAnsweredAt.add(now);
-    // The probe itself refuses anything but a public address.
-    final int? latency = await _reachProbe(uri);
+    bool ok = false;
+    if (reachCheckAllowed(uri)) {
+      // Only the asking device's own node counts: a node that merely
+      // speaks the mesh protocol at that address may be anyone's (a
+      // device on the asker's Wi-Fi that played its router, say).
+      final String? key = (await _reachProbe(uri))?.toLowerCase();
+      final Uint8List? raw = key == null ? null : nodeKeyBytes(key);
+      ok =
+          raw != null &&
+          yggAddressForKey(raw) == PeerShareCodec.normalizeAddress(from) &&
+          pinnedNodeKeys(uri).every((String pinned) => pinned == key);
+    }
     _send(from, <String, dynamic>{
       'type': kLedgerReachOkType,
       'id': id,
-      'ok': latency != null,
+      'ok': ok,
     });
   }
 
@@ -3679,8 +4360,9 @@ final class LedgerNode {
     ).join();
   }
 
-  /// A separate key just for the bridge, so an announcement never reveals
-  /// whose computer it is.
+  /// A separate key just for the bridge, so the signature ties the
+  /// announcement to no account. Its address pins the node key (BridgeHost),
+  /// which anyone who connects there sees in the TLS handshake anyway.
   Future<LedgerKeyPair> _bridgeKey() async {
     final Uint8List? raw = await readOrSetAsideOn(disk, _bridgeKeyKey);
     if (raw != null && raw.length == 32) {
@@ -3732,6 +4414,7 @@ final class LedgerNode {
         into(_accounts, json['a']);
         into(_addressDevices, json['d']);
         into(_unlinked, json['x']);
+        into(_former, json['f']);
       }
     } on FormatException {
       logZenWarning('The ledger list of friend accounts is damaged.');
@@ -3762,8 +4445,9 @@ final class LedgerNode {
     Uint8List.fromList(utf8.encode(jsonEncode(_followed))),
   );
 
-  /// Friends' accounts by address (`a`), the device proven at each (`d`)
-  /// and the addresses whose device was cut off (`x`).
+  /// Friends' accounts by address (`a`), the device proven at each (`d`),
+  /// the addresses whose device was cut off (`x`) and the accounts of
+  /// former friends (`f`, from 1.17.0; older builds ignore it).
   Future<void> _savePeers() => disk.write(
     _peersKey,
     Uint8List.fromList(
@@ -3772,6 +4456,7 @@ final class LedgerNode {
           'a': _accounts,
           'd': _addressDevices,
           'x': _unlinked,
+          if (_former.isNotEmpty) 'f': _former,
         }),
       ),
     ),
@@ -3798,9 +4483,15 @@ final class LedgerNode {
       timer.cancel();
     }
     _rebaseTimers.clear();
+    for (final Timer timer in _foldTimers.values) {
+      timer.cancel();
+    }
+    _foldTimers.clear();
+    await _folding;
     await _storeChanged?.cancel();
     await _devicesChanged.close();
     await _contactsChanged.close();
+    await _keyChanged.close();
     await _peerGreeted.close();
     await _ownEntries.close();
     await _frames?.cancel();
@@ -3823,6 +4514,17 @@ final class _ReachWait {
   final Set<String> answered = <String>{};
   final Completer<ReachResult> done = Completer<ReachResult>();
   int noes = 0;
+}
+
+/// What merging levels from elsewhere changed here.
+final class _LevelMerge {
+  bool changed = false;
+
+  /// A friend went up a level.
+  bool gained = false;
+
+  /// Audiences some friend can no longer read.
+  final Set<Audience> lost = <Audience>{};
 }
 
 /// This phone's clock, pulled back to its friends' when it runs more than

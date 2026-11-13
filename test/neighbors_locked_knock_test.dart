@@ -11,6 +11,7 @@ import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/neighbors/locked_knocks.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -465,6 +466,8 @@ void main() {
           recipientPublicKey: capability.inboxPublicKey,
         ),
         notices: notices,
+        // The "Sąsiedzi" switch on, as the app writes it by default.
+        noticeKit: const LockedNoticeKit(),
         doorFrames: doors.stream,
         knocks: kit.knockWatch(),
         mailboxPollInterval: Duration.zero,

@@ -164,6 +164,203 @@ void main() {
       },
     );
 
+    test('a friend\'s message is put off, not refused: the relay layer '
+        'hears it was not kept, and its next copy is kept once the friends '
+        'read back', () async {
+      final _BrokenStore store = _BrokenStore(
+        MemorySocialSnapshotStore(
+          SocialHubState.empty().copyWith(
+            book: FriendshipBook.restore(
+              profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+            ),
+            groups: <String, GroupProfile>{
+              'g1': GroupProfile(
+                id: 'g1',
+                name: 'Klub',
+                createdById: ada,
+                createdAtMillis: 1,
+                memberAddresses: <String>[ada],
+              ),
+            },
+          ),
+        ),
+      );
+      final ProviderContainer container = buildContainer(
+        store: store,
+        autoHydrate: true,
+      );
+      final SocialHubController hub = container.read(
+        socialHubControllerProvider.notifier,
+      );
+      await hub.whenHydrated;
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        container.read(socialHubControllerProvider).snapshotUnreadable,
+        isTrue,
+      );
+      final ZenSignal message = ZenSignal(
+        type: ZenSignalType.message,
+        sender: ada,
+        messageId: 'm-1',
+        content: 'hej',
+      );
+      final ZenSignal inGroup = ZenSignal(
+        type: ZenSignalType.groupMessage,
+        sender: ada,
+        groupId: 'g1',
+        messageId: 'gm-1',
+        content: 'w grupie',
+      );
+      expect(await hub.receiveSignal(message, receivedAtMillis: 10), isFalse);
+      expect(await hub.receiveSignal(inGroup, receivedAtMillis: 11), isFalse);
+      expect(await timelines.load(ada), isEmpty);
+
+      // The storage recovers; coming back to the app reads it again.
+      store.broken = false;
+      for (final (AppVisibilityState visibility, int generation)
+          in <(AppVisibilityState, int)>[
+            (AppVisibilityState.background, 2),
+            (AppVisibilityState.foregroundFocused, 3),
+          ]) {
+        await hub.setLifecycle(
+          LifecycleSnapshot(
+            visibility: visibility,
+            generation: generation,
+            capturedAtMillis: 0,
+          ),
+        );
+      }
+      expect(
+        container.read(socialHubControllerProvider).snapshotUnreadable,
+        isFalse,
+      );
+      expect(await hub.receiveSignal(message, receivedAtMillis: 20), isTrue);
+      expect(await hub.receiveSignal(inGroup, receivedAtMillis: 21), isTrue);
+      expect(
+        (await timelines.load(ada)).map((ChatMessage m) => m.text),
+        contains('hej'),
+      );
+      expect(
+        (await timelines.load('group:g1')).map((ChatMessage m) => m.text),
+        contains('w grupie'),
+      );
+      // A copy of what is on file is settled too.
+      expect(await hub.receiveSignal(message, receivedAtMillis: 30), isTrue);
+      // A refusal that stands is settled: someone unknown writing.
+      expect(
+        await hub.receiveSignal(
+          ZenSignal(
+            type: ZenSignalType.message,
+            sender: zed,
+            messageId: 'z-1',
+            content: 'kim jestem',
+          ),
+          receivedAtMillis: 31,
+        ),
+        isTrue,
+      );
+      expect(await timelines.load(zed), isEmpty);
+    });
+
+    test('a message from someone invited from here that overtook their "yes" '
+        'is put off, and kept once they are a friend', () async {
+      final ProviderContainer container = buildContainer(
+        seed: SocialHubState.empty().copyWith(
+          book: FriendshipBook.restore(
+            profiles: <String, FriendProfile>{
+              bob: FriendProfile(
+                address: bob,
+                displayName: 'Bob',
+                status: FriendRelationshipStatus.pendingOutgoing,
+              ),
+            },
+          ),
+        ),
+      );
+      final SocialHubController hub = container.read(
+        socialHubControllerProvider.notifier,
+      );
+      final ZenSignal message = ZenSignal(
+        type: ZenSignalType.message,
+        sender: bob,
+        messageId: 'b-1',
+        content: 'Już jesteśmy znajomymi',
+      );
+      expect(await hub.receiveSignal(message, receivedAtMillis: 10), isFalse);
+      expect(await timelines.load(bob), isEmpty);
+      expect(
+        await hub.receiveSignal(
+          ZenSignal(type: ZenSignalType.friendAccept, sender: bob),
+          receivedAtMillis: 11,
+        ),
+        isTrue,
+      );
+      expect(
+        container
+            .read(socialHubControllerProvider)
+            .friendByAddress(bob)
+            ?.status,
+        FriendRelationshipStatus.accepted,
+      );
+      expect(await hub.receiveSignal(message, receivedAtMillis: 12), isTrue);
+      expect(
+        (await timelines.load(bob)).map((ChatMessage m) => m.text),
+        contains('Już jesteśmy znajomymi'),
+      );
+      // Someone nobody invited, writing as to a friend: refused for good.
+      expect(
+        await hub.receiveSignal(
+          ZenSignal(
+            type: ZenSignalType.message,
+            sender: cyd,
+            messageId: 'c-1',
+            content: 'hej',
+          ),
+          receivedAtMillis: 13,
+        ),
+        isTrue,
+      );
+      expect(await timelines.load(cyd), isEmpty);
+    });
+
+    test('a hub that goes away before a message\'s turn has not kept it', () {
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+          socialSnapshotStoreProvider.overrideWithValue(
+            MemorySocialSnapshotStore(),
+          ),
+          messageTimelineStoreProvider.overrideWithValue(
+            MemoryMessageTimelineStore(),
+          ),
+          attachmentTransferStoreProvider.overrideWithValue(
+            MemoryAttachmentTransferStore(),
+          ),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              book: FriendshipBook.restore(
+                profiles: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
+              ),
+            ),
+          ),
+        ],
+      );
+      final Future<bool> kept = container
+          .read(socialHubControllerProvider.notifier)
+          .receiveSignal(
+            ZenSignal(
+              type: ZenSignalType.message,
+              sender: ada,
+              messageId: 'm-2',
+              content: 'za późno',
+            ),
+            receivedAtMillis: 10,
+          );
+      container.dispose();
+      return expectLater(kept, completion(isFalse));
+    });
+
     test('a failed re-read after a good one changes nothing', () async {
       final _BrokenStore store = _BrokenStore(
         MemorySocialSnapshotStore(

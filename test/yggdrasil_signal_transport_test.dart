@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/runtime/runtime_signal_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 
 void main() {
   test('send encodes payload through the runtime codec', () async {
@@ -264,6 +265,50 @@ void main() {
     expect(waiter.closed, isTrue);
   });
 
+  test("a locked phone's node holds the phone for no signal before it is "
+      "read; the app's for every one", () async {
+    final _HoldCount holds = _HoldCount();
+    ZenWake.platform = holds;
+    addTearDown(() {
+      ZenWake.resetForTest();
+      ZenWake.platform = const TimerWakePlatform();
+    });
+    Future<int> holdsFor({required bool holdOnArrival}) async {
+      ZenWake.resetForTest();
+      holds.signal = 0;
+      final _FakeSignalWaiter waiter = _FakeSignalWaiter();
+      final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
+        bridge: _FakeNativeSignalBridge(),
+        nodeHandle: 7,
+        compressor: const _PassthroughSignalCompressor(),
+        openWaiter: () async => waiter,
+        fallbackPollInterval: const Duration(hours: 1),
+        holdOnArrival: holdOnArrival,
+      );
+      final List<SignalTransportFrame> frames = <SignalTransportFrame>[];
+      final StreamSubscription<SignalTransportFrame> subscription = transport
+          .frames
+          .listen(frames.add);
+      await transport.start();
+      await waiter.untilWaiting();
+      // Anyone who knows the address: a stranger's frame.
+      waiter.deliver(<String, dynamic>{
+        'available': true,
+        'from': 'stranger.ygg',
+        'payload': '{"type":"ping"}',
+      });
+      await waiter.untilWaiting();
+      await transport.stop();
+      await subscription.cancel();
+      expect(frames.single.from, 'stranger.ygg');
+      return holds.signal;
+    }
+
+    expect(await holdsFor(holdOnArrival: true), 1);
+    // The locked receiver holds it once it knows who sent the frame.
+    expect(await holdsFor(holdOnArrival: false), 0);
+  });
+
   test('stop does not wait for a pending wait', () async {
     final _FakeSignalWaiter waiter = _FakeSignalWaiter();
     final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
@@ -372,6 +417,37 @@ void main() {
 }
 
 /// A waiter driven by the test: each wait stays pending until [deliver].
+/// Counts the holds signals take ([ZenWake.signalArrived]).
+final class _HoldCount implements ZenWakePlatform {
+  int signal = 0;
+
+  @override
+  WakeTimer after(
+    String name,
+    Duration delay,
+    FutureOr<void> Function() fire, {
+    required Duration hold,
+    required bool exact,
+    bool whileIdle = true,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> hold(String tag, Duration duration) async {
+    if (tag == 'signal') {
+      signal += 1;
+    }
+  }
+
+  @override
+  Future<void> release(String tag, {Duration after = Duration.zero}) async {}
+
+  @override
+  Future<void> holdForCall(bool on) async {}
+
+  @override
+  Stream<void> get appGone => const Stream<void>.empty();
+}
+
 final class _FakeSignalWaiter implements SignalWaiter {
   final Completer<void> _closed = Completer<void>();
   final List<Duration> timeouts = <Duration>[];

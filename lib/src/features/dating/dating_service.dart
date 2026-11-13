@@ -18,6 +18,7 @@ import 'package:zen/src/features/relay/relay_engine.dart' show kSendOnceKey;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 abstract final class DatingTypes {
@@ -98,8 +99,23 @@ const Duration kDatingProfileLife = Duration(days: 16);
 /// Routes and seen lanterns are kept this long.
 const Duration kDatingRouteLife = Duration(days: 30);
 
-/// Independent reports of a minor (from different dating keys) that hide a
-/// dating profile on a phone which never reported it itself.
+/// "Idę na randkę": the watcher counts the deadline on its own clock from
+/// the time left that the dater's phone sent, so clocks set apart do not
+/// ring early. A word that waited in a mailbox would push that deadline
+/// back by the wait; it is never later than the dater's own deadline plus
+/// this much, which also is how far apart the two clocks may be before the
+/// watcher's alarm comes early.
+const Duration kDatingSafeClockMargin = Duration(minutes: 30);
+
+/// The longest time left a watcher takes from a dater's word (the screen
+/// offers 12 hours, and each "+1 h" adds one).
+const Duration kDatingSafeLongest = Duration(days: 2);
+
+/// Reports of a minor that switch a dating profile off on a phone which never
+/// reported it itself: from this many of the person's own friends (different
+/// accounts, each by the one dating key their phone told this one). A dating
+/// key costs nothing, so reports from keys nobody here can put a person to
+/// count only as a warning, from this many keys ([DatingService.minorWarning]).
 const int kDatingMinorQuorum = 2;
 
 /// Reports of a minor a phone carries in the profiles it sends, at most (the
@@ -230,6 +246,9 @@ final class DatingService extends ChangeNotifier {
     this.raiseAlarm,
     this.isBanned,
     this.isHiddenByMe,
+    this.blocked,
+    this.onBlock,
+    this.onBlockedKey,
     this.pyramidKey,
     this.canPay,
     this.pay,
@@ -268,6 +287,25 @@ final class DatingService extends ChangeNotifier {
   /// Dating keys this person hid after reporting them: left out of
   /// the lists until they choose to see them anyway ([hiddenProfiles]).
   final bool Function(String datingKey)? isHiddenByMe;
+
+  /// The people this person blocked, in any feature ([BlockedPeople]):
+  /// their profiles are never shown here, and this person's profile is
+  /// never given to them — they are on the hide list with their circle,
+  /// and every dating key known to be theirs is refused.
+  final BlockedPeople Function()? blocked;
+
+  /// "Zablokuj" on a dating profile: the person is blocked everywhere —
+  /// by the address its owner is known by ([accountOf]), or by the key
+  /// while nobody here knows whose it is.
+  final Future<void> Function(String datingKey, String? address, String name)?
+  onBlock;
+
+  /// A dating key turned out to be a blocked person's: their phone (or
+  /// another device of theirs) told it from the address, or a key blocked
+  /// on its own turned out to be that address's. The block then covers the
+  /// key on every device of the account, and a key block becomes a block
+  /// of that person.
+  final void Function(String datingKey, String address)? onBlockedKey;
 
   /// This person's pyramid key, when they are a member (sent along with an
   /// introduction, so the pair can thank the matchmaker).
@@ -537,43 +575,156 @@ final class DatingService extends ChangeNotifier {
       )
       .toList();
 
-  List<SeenProfile> get matches =>
-      <SeenProfile>[
-        for (final String k in _matches.keys)
-          if (_profiles[k] != null && !_hiddenByMe(k) && !isMinorOff(k))
-            _profiles[k]!,
-      ]..sort(
-        (SeenProfile a, SeenProfile b) => (_matches[b.profile.key] ?? 0)
-            .compareTo(_matches[a.profile.key] ?? 0),
-      );
+  /// The matches that may reach this person ([_shown]), newest first. A
+  /// match whose profile is switched off stays stored (with its chat), so it
+  /// comes back when that ends (a report withdrawn, a ban lifted).
+  List<SeenProfile> get matches {
+    final BlockedPeople people = _people();
+    return <SeenProfile>[
+      for (final String k in _matches.keys)
+        if (_profiles[k] != null && _shown(k, people)) _profiles[k]!,
+    ]..sort(
+      (SeenProfile a, SeenProfile b) => (_matches[b.profile.key] ?? 0)
+          .compareTo(_matches[a.profile.key] ?? 0),
+    );
+  }
 
   bool _hiddenByMe(String key) => isHiddenByMe?.call(key) ?? false;
 
-  /// Whether the dating profile [key] is switched off on this phone because
-  /// of a report of a minor: this person reported it, or at least
-  /// [kDatingMinorQuorum] other dating keys did (independent reports, from
-  /// the profiles of the people around). A pyramid decision comes through
-  /// [isBanned]. It cannot be shown again.
-  bool isMinorOff(String key) {
-    if (_minorSelf.containsKey(key)) {
+  /// The people blocked here, as they are now.
+  BlockedPeople _people() => blocked?.call() ?? BlockedPeople.nobody;
+
+  /// Keys already told to [onBlockedKey] (memory only).
+  final Set<String> _toldBlockedKeys = <String>{};
+
+  /// Whether the dating key [key] is a blocked person's: a key blocked by
+  /// person (on any device of the account), a key blocked on this phone
+  /// whose block was not lifted since, or the key of a blocked person's
+  /// address — the one their phone told this one, or one they asked with
+  /// from one step away.
+  bool _blockedKey(String key, [BlockedPeople? people]) {
+    final BlockedPeople b = people ?? _people();
+    final bool? byPerson = b.datingKey(key);
+    if (byPerson ?? false) {
       return true;
     }
+    if (byPerson == null && _blocked.contains(key)) {
+      return true;
+    }
+    if (b.isEmpty) {
+      return false;
+    }
+    final String? owner = accountOf(key);
+    if (owner != null && b.address(owner)) {
+      _tellBlockedKey(key, owner);
+      return true;
+    }
+    for (final String a in b.addresses) {
+      if (_friendKeys[a] == key ||
+          (_friendOtherKeys[a]?.contains(key) ?? false)) {
+        _tellBlockedKey(key, a);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _tellBlockedKey(String key, String address) {
+    final void Function(String, String)? tell = onBlockedKey;
+    if (tell == null || _toldBlockedKeys.length > 5000) {
+      return;
+    }
+    if (_toldBlockedKeys.add('$key|$address')) {
+      tell(key, address);
+    }
+  }
+
+  /// Everyone this phone hides the profile from: the hide list
+  /// ([hiddenAddresses]) and every address of a blocked person.
+  Set<String> _hiddenFrom([BlockedPeople? people]) => <String>{
+    ...hiddenAddresses(),
+    ...(people ?? _people()).addresses,
+  };
+
+  /// Of [_hiddenFrom], those hidden from together with their circle: the
+  /// circles chosen ([hiddenCircles]) and every blocked person.
+  Set<String> _hiddenCirclesAll([BlockedPeople? people]) => <String>{
+    ...hiddenCircles(),
+    ...(people ?? _people()).addresses,
+  };
+
+  /// The one rule for whether the profile [key] may reach this person — in
+  /// the lists, with messages, notifications and counters, and in what this
+  /// person can send about it: not blocked (here or anywhere in the app),
+  /// not switched off by the pyramid or by a report of a minor, not hidden
+  /// after a report.
+  bool _shown(String key, [BlockedPeople? people]) =>
+      !_blockedKey(key, people) &&
+      !(isBanned?.call(key) ?? false) &&
+      !isMinorOff(key) &&
+      !_hiddenByMe(key);
+
+  /// A match with [key] that may reach this person ([_shown]).
+  bool _openMatch(String key) => _matches.containsKey(key) && _shown(key);
+
+  /// Whether the dating profile [key] is switched off on this phone because
+  /// of a report of a minor: this person reported it (at once), or at least
+  /// [kDatingMinorQuorum] of their friends did. A friend counts by the
+  /// account behind the key that reported: the key their own phone told this
+  /// one ([accountOf]), one key per friend, so one person with many keys is
+  /// one reporter, and a stranger's keys are nobody here. It ends when the
+  /// report is withdrawn (by this person, or in the reporters' next
+  /// answers) or a reporter is no longer a friend. A pyramid decision comes
+  /// through [isBanned].
+  bool isMinorOff(String key) =>
+      _minorSelf.containsKey(key) || _minorFriends(key) >= kDatingMinorQuorum;
+
+  /// The friends (accounts) whose dating key reported [key] as a minor.
+  int _minorFriends(String key) {
     final Map<String, int>? by = _minorSeen[key];
-    return by != null && by.length >= kDatingMinorQuorum;
+    if (by == null || by.isEmpty) {
+      return 0;
+    }
+    return <String>{
+      for (final String reporter in by.keys)
+        if (_friendReporter(reporter)) accountOf(reporter)!,
+    }.length;
+  }
+
+  /// Whether the profile [key] was reported as a minor by others, without
+  /// that switching it off here: by a friend, or by [kDatingMinorQuorum]
+  /// dating keys this phone cannot put people to (which may all be one
+  /// person). The profile is shown with a warning; this person decides,
+  /// and their own report ([reportMinor]) hides it at once.
+  bool minorWarning(String key) {
+    if (isMinorOff(key)) {
+      return false;
+    }
+    final Map<String, int>? by = _minorSeen[key];
+    return by != null &&
+        (by.length >= kDatingMinorQuorum || _minorFriends(key) > 0);
   }
 
   /// Whether this person reported the profile [key] as a minor.
   bool reportedMinor(String key) => _minorSelf.containsKey(key);
 
+  /// Profiles this person reported as a minor, still on this phone: each
+  /// report can be withdrawn ([withdrawMinor]).
+  List<SeenProfile> get reportedMinors {
+    final BlockedPeople people = _people();
+    return <SeenProfile>[
+      for (final String k in _minorSelf.keys)
+        if (_profiles[k] != null && !_blockedKey(k, people)) _profiles[k]!,
+    ];
+  }
+
   Iterable<SeenProfile> _visible() {
     final int t = _now();
+    final BlockedPeople people = _people();
     return (_profiles.values
         .where(
           (SeenProfile s) =>
-              !_blocked.contains(s.profile.key) &&
-              !(isBanned?.call(s.profile.key) ?? false) &&
-              !isMinorOff(s.profile.key) &&
-              !_hiddenByMe(s.profile.key) &&
+              _shown(s.profile.key, people) &&
               t - s.at < kDatingProfileLife.inMilliseconds,
         )
         .toList()
@@ -582,17 +733,22 @@ final class DatingService extends ChangeNotifier {
 
   /// Profiles this person hid after reporting them and has not blocked:
   /// each can be shown anyway.
-  List<SeenProfile> get hiddenProfiles => <SeenProfile>[
-    for (final SeenProfile s in _profiles.values)
-      if (_hiddenByMe(s.profile.key) &&
-          !_blocked.contains(s.profile.key) &&
-          !isMinorOff(s.profile.key) &&
-          !(isBanned?.call(s.profile.key) ?? false))
-        s,
-  ]..sort((SeenProfile a, SeenProfile b) => b.at.compareTo(a.at));
+  List<SeenProfile> get hiddenProfiles {
+    final BlockedPeople people = _people();
+    return <SeenProfile>[
+      for (final SeenProfile s in _profiles.values)
+        if (_hiddenByMe(s.profile.key) &&
+            !_blockedKey(s.profile.key, people) &&
+            !isMinorOff(s.profile.key) &&
+            !(isBanned?.call(s.profile.key) ?? false))
+          s,
+    ]..sort((SeenProfile a, SeenProfile b) => b.at.compareTo(a.at));
+  }
 
   SeenProfile? profile(String key) => _profiles[key];
-  bool isMatch(String key) => _matches.containsKey(key);
+
+  /// Whether [key] is a match that may reach this person ([_shown]).
+  bool isMatch(String key) => _openMatch(key);
   bool? decision(String key) => _decisions[key];
 
   List<DatingLine> chat(String key) =>
@@ -607,13 +763,18 @@ final class DatingService extends ChangeNotifier {
         ..sort((OpinionAsk a, OpinionAsk b) => b.at.compareTo(a.at));
 
   /// Dates I watch for friends, and my own.
-  List<SafeDate> get safeDates =>
-      _safe.values.where((SafeDate s) => !s.isOver).toList()
-        ..sort((SafeDate a, SafeDate b) => a.until.compareTo(b.until));
+  List<SafeDate> get safeDates {
+    final int t = _now();
+    return _safe.values
+        .where((SafeDate s) => !s.isOver && !s.isStale(t))
+        .toList()
+      ..sort((SafeDate a, SafeDate b) => a.until.compareTo(b.until));
+  }
 
   SafeDate? get mySafeDate {
+    final int t = _now();
     for (final SafeDate s in _safe.values) {
-      if (s.mine && !s.isOver) {
+      if (s.mine && !s.isOver && !s.isStale(t)) {
         return s;
       }
     }
@@ -631,7 +792,8 @@ final class DatingService extends ChangeNotifier {
   /// profile never names its account — and a key two addresses claim links
   /// to neither. Used to show the pyramid court's verdicts on that person,
   /// as their profile would: the owner cannot take them off a profile that
-  /// is linked.
+  /// is linked. Also used to count a friend's report of a minor as one
+  /// person's ([isMinorOff]).
   String? accountOf(String datingKey) {
     String? found;
     for (final MapEntry<String, String> e in _friendKeys.entries) {
@@ -949,7 +1111,8 @@ final class DatingService extends ChangeNotifier {
           !_matches.containsKey(k),
     );
     _safe.removeWhere(
-      (String _, SafeDate s) => s.isOver && t - s.okAt! > 2 * 24 * 3600 * 1000,
+      (String _, SafeDate s) =>
+          (s.isOver && t - s.okAt! > 2 * 24 * 3600 * 1000) || s.isStale(t),
     );
     _lanterns.removeWhere((String id, _OwnLantern _) => !_own.containsKey(id));
     _answers.removeWhere(
@@ -1080,8 +1243,11 @@ final class DatingService extends ChangeNotifier {
   Future<void> saveMine(void Function(MyDating me) change) async {
     change(me);
     await _save();
+    final BlockedPeople people = _people();
     for (final String a in hiddenAddresses()) {
-      if (!_friendKeys.containsKey(a) && (host.isFriend(a) || _isPeer(a))) {
+      if (!_friendKeys.containsKey(a) &&
+          (host.isFriend(a) || _isPeer(a)) &&
+          !people.address(a)) {
         await _sendKey(a, want: true);
       }
     }
@@ -1184,8 +1350,9 @@ final class DatingService extends ChangeNotifier {
         'l': lantern.toJson(),
       });
     }
+    final BlockedPeople people = _people();
     for (final String g in gateContacts?.call().map(_n) ?? const <String>[]) {
-      if (!friends.contains(g)) {
+      if (!friends.contains(g) && !people.address(g)) {
         await _send(g, <String, dynamic>{
           'type': DatingTypes.lantern,
           'id': id,
@@ -1226,7 +1393,13 @@ final class DatingService extends ChangeNotifier {
     final int before = _keySent.length;
     _keySent.removeWhere((String a, int _) => !to.contains(a));
     bool changed = before != _keySent.length;
+    final BlockedPeople people = _people();
     for (final String a in to) {
+      if (people.address(a)) {
+        // Nothing goes to someone blocked; their phone tells its key to the
+        // people of its groups anyway, and that is taken.
+        continue;
+      }
       final int? last = _keySent[a];
       if (last != null && t - last < kDatingPublishEvery.inMilliseconds) {
         continue;
@@ -1255,6 +1428,18 @@ final class DatingService extends ChangeNotifier {
       final String gone = _friendKeys.keys.first;
       _friendKeys.remove(gone);
       _friendOtherKeys.remove(gone);
+    }
+    final BlockedPeople people = _people();
+    if (people.address(from)) {
+      // A blocked person's key: refused from now on, on every device of
+      // the account; nothing of this phone's goes back.
+      _tellBlockedKey(k, from);
+      await _save();
+      return;
+    }
+    if (people.datingKey(k) ?? false) {
+      // A key blocked on its own: now it is known whose it is.
+      _tellBlockedKey(k, from);
     }
     final int? last = _keySent[from];
     if (p['w'] == true &&
@@ -1347,7 +1532,11 @@ final class DatingService extends ChangeNotifier {
     final SeenProfile? s = _profiles[key];
     final LedgerKeyPair? signer = _profileSigner;
     final String? mine = myKey;
-    if (s == null || _identity == null || signer == null || mine == null) {
+    if (s == null ||
+        _identity == null ||
+        signer == null ||
+        mine == null ||
+        (yes && !_shown(key))) {
       return;
     }
     _decisions[key] = yes;
@@ -1380,6 +1569,9 @@ final class DatingService extends ChangeNotifier {
     await _checkMatch(key);
   }
 
+  /// A match is made once both said "Tak". It is made (and kept) for a
+  /// profile that may not reach this person now ([_shown]) too, so it comes
+  /// back when that ends, but nothing is announced for it.
   Future<void> _checkMatch(String key) async {
     final Map<String, String>? got = _likesIn[key];
     final SeenProfile? s = _profiles[key];
@@ -1413,6 +1605,9 @@ final class DatingService extends ChangeNotifier {
     );
     _matches[key] = _now();
     await _save();
+    if (!_shown(key)) {
+      return;
+    }
     final String name = s.profile.name;
     final bool friends = friendsOnly(key);
     await host.notify(
@@ -1435,7 +1630,7 @@ final class DatingService extends ChangeNotifier {
 
   Future<bool> sendMessage(String key, String text) async {
     final Uint8List? pair = unb64(_pairKeys[key]);
-    if (!_matches.containsKey(key) || pair == null || text.trim().isEmpty) {
+    if (!_openMatch(key) || pair == null || text.trim().isEmpty) {
       return false;
     }
     final String t = text.trim().length > 2000
@@ -1457,18 +1652,32 @@ final class DatingService extends ChangeNotifier {
     });
   }
 
-  /// Reports the dating profile [key] as a minor: it is switched
-  /// off on this phone at once (gone from the lists and the matches, never
-  /// shown again), and the report travels in the profiles this phone sends. A
-  /// phone that gets reports from [kDatingMinorQuorum] different dating keys
-  /// switches the profile off too. The chat is kept (as evidence), unreadable
-  /// in the lists.
+  /// Reports the dating profile [key] as a minor: it is switched off on this
+  /// phone at once (gone from the lists and the matches; its messages are
+  /// kept as evidence, unannounced), and the report travels in the profiles
+  /// this phone sends. A phone where [kDatingMinorQuorum] friends of its
+  /// person reported the profile switches it off too; elsewhere it is shown
+  /// with a warning ([minorWarning]).
+  ///
+  /// The other side is told nothing: what reaches them looks exactly like a
+  /// "Nie" or a block, so they cannot tell that, or by whom, they were
+  /// reported.
   Future<void> reportMinor(String key) async {
     if (key.isEmpty || key.length > 100 || key == myKey) {
       return;
     }
     _minorSelf[key] = _now();
-    _matches.remove(key);
+    await _save();
+  }
+
+  /// Withdraws this person's report of [key] as a minor: shown here again
+  /// (with the match and its chat, if any), and the report is left out of
+  /// the profiles this phone sends, which withdraws it on the phones that
+  /// counted it. A report to the pyramid is not withdrawn by this.
+  Future<void> withdrawMinor(String key) async {
+    if (_minorSelf.remove(key) == null) {
+      return;
+    }
     await _save();
   }
 
@@ -1489,15 +1698,31 @@ final class DatingService extends ChangeNotifier {
   }
 
   /// Reports of a minor found in the answer sent by [sender] (a dating
-  /// key): counted once per reporting key. Returns whether anything new was
-  /// learnt.
+  /// key): counted once per reporting key. An answer carries all of its
+  /// sender's current reports (none: no `mr`), so a report missing from a
+  /// list shorter than [_minorCarried] was withdrawn (or grew too old) and
+  /// no longer counts. Returns whether anything changed.
   bool _noteMinorReports(String sender, Object? reported) {
-    if (reported is! List || sender == myKey || _blocked.contains(sender)) {
+    if ((reported != null && reported is! List) ||
+        sender == myKey ||
+        _blockedKey(sender)) {
       return false;
     }
+    final List<Object?> list = reported is List ? reported : const <Object?>[];
     bool changed = false;
+    if (list.length < _minorCarried) {
+      for (final MapEntry<String, Map<String, int>> e in _minorSeen.entries) {
+        if (!list.contains(e.key) && e.value.remove(sender) != null) {
+          changed = true;
+        }
+      }
+      _minorSeen.removeWhere((String _, Map<String, int> by) => by.isEmpty);
+    }
     final int t = _now();
-    for (final Object? k in reported.take(_minorCarried)) {
+    // When the store is full, a friend's report still gets in, in place of
+    // one from keys nobody here knows: free keys must not crowd it out.
+    final bool friend = _friendReporter(sender);
+    for (final Object? k in list.take(_minorCarried)) {
       if (k is! String ||
           k.isEmpty ||
           k.length > 100 ||
@@ -1508,7 +1733,17 @@ final class DatingService extends ChangeNotifier {
       }
       final Map<String, int>? known = _minorSeen[k];
       if (known == null && _minorSeen.length >= _minorKeysMax) {
-        continue;
+        final String? spare = friend
+            ? _minorSeen.keys
+                  .where(
+                    (String r) => !_minorSeen[r]!.keys.any(_friendReporter),
+                  )
+                  .firstOrNull
+            : null;
+        if (spare == null) {
+          continue;
+        }
+        _minorSeen.remove(spare);
       }
       final Map<String, int> by = known ?? (_minorSeen[k] = <String, int>{});
       if (by.containsKey(sender)) {
@@ -1516,12 +1751,25 @@ final class DatingService extends ChangeNotifier {
         continue;
       }
       if (by.length >= _minorReportersMax) {
-        continue;
+        final String? spare = friend
+            ? by.keys.where((String r) => !_friendReporter(r)).firstOrNull
+            : null;
+        if (spare == null) {
+          continue;
+        }
+        by.remove(spare);
       }
       by[sender] = t;
       changed = true;
     }
     return changed;
+  }
+
+  /// Whether the dating key [key] is a friend's, as their own phone told
+  /// this one ([accountOf]).
+  bool _friendReporter(String key) {
+    final String? account = accountOf(key);
+    return account != null && host.isFriend(account);
   }
 
   void _pruneMinorReports(int t) {
@@ -1532,12 +1780,21 @@ final class DatingService extends ChangeNotifier {
     _minorSeen.removeWhere((String _, Map<String, int> by) => by.isEmpty);
   }
 
+  /// "Zablokuj": the profile [key] is blocked here at once (its match and
+  /// chat go) and the person behind it everywhere in the app ([onBlock]):
+  /// by the address its owner is known by, or by the key until that is
+  /// known.
   Future<void> block(String key) async {
     _blocked.add(key);
     _matches.remove(key);
     _chats.remove(key);
     _pairKeys.remove(key);
     await _save();
+    await onBlock?.call(
+      key,
+      accountOf(key),
+      _profiles[key]?.profile.name ?? '',
+    );
   }
 
   /// Removes the profile [key] from this phone ("Usuń z mojego urządzenia"
@@ -1568,6 +1825,7 @@ final class DatingService extends ChangeNotifier {
     }
     final SeenProfile? s = _profiles[end.key];
     return s != null &&
+        _shown(s.profile.key) &&
         s.profile.key != myKey &&
         decodeHybridPublicKey(s.profile.pq) != null &&
         _routes.containsKey(s.replyTo);
@@ -1819,7 +2077,7 @@ final class DatingService extends ChangeNotifier {
   /// introduced them — never the person themselves.
   List<String> opinionFriends(String key) {
     final SeenProfile? s = _profiles[key];
-    if (s == null) {
+    if (s == null || !_shown(key)) {
       return const <String>[];
     }
     final String? self = s.distance == 1 ? s.friend : null;
@@ -1972,7 +2230,7 @@ final class DatingService extends ChangeNotifier {
 
   /// Whether [datingKey] is the (known) dating key of someone this person
   /// hides from.
-  bool _hiddenKey(String datingKey) => hiddenAddresses().any(
+  bool _hiddenKey(String datingKey) => _hiddenFrom().any(
     (String a) =>
         _friendKeys[a] == datingKey ||
         (_friendOtherKeys[a]?.contains(datingKey) ?? false),
@@ -1986,7 +2244,7 @@ final class DatingService extends ChangeNotifier {
   /// with the pair's own key, never an address.
   Future<bool> shareMutualFriends(String key) async {
     final Uint8List? pair = unb64(_pairKeys[key]);
-    if (!_matches.containsKey(key) || pair == null) {
+    if (!_openMatch(key) || pair == null) {
       return false;
     }
     _mutualMine[key] = _now();
@@ -2031,7 +2289,7 @@ final class DatingService extends ChangeNotifier {
     final SeenProfile? s = _profiles[key];
     final String? pyr = s?.introPyr;
     return s != null &&
-        isMatch(key) &&
+        _openMatch(key) &&
         s.introBy != null &&
         pyr != null &&
         pay != null &&
@@ -2089,10 +2347,13 @@ final class DatingService extends ChangeNotifier {
     return d;
   }
 
+  // `until` is on this phone's clock; `left` lets the watcher count the
+  // deadline on its own ([_onSafe]). A 1.16.5 watcher reads only `until`.
   Future<void> _sendSafe(SafeDate d) => _send(d.friend, <String, dynamic>{
     'type': DatingTypes.safe,
     'id': d.id,
     'until': d.until,
+    'left': d.until - _now(),
     'note': d.note,
     if (d.lat != null) 'lat': d.lat,
     if (d.lon != null) 'lon': d.lon,
@@ -2213,6 +2474,26 @@ final class DatingService extends ChangeNotifier {
     await _sendSafe(d);
   }
 
+  /// "Zakończ" on a watched date, once its deadline has passed: the
+  /// watcher knows the person is safe (or the phone is gone and someone
+  /// else looks for them). The last place goes from this phone at once;
+  /// later words about the same date are ignored. Before the deadline the
+  /// person relies on the watcher and has not been told, so it is refused.
+  Future<bool> endWatching(String id) async {
+    final SafeDate? d = _safe[id];
+    final int t = _now();
+    if (d == null || d.mine || d.isOver || t < d.until) {
+      return false;
+    }
+    d
+      ..okAt = t
+      ..lat = null
+      ..lon = null
+      ..locatedAt = null;
+    await _save();
+    return true;
+  }
+
   /// "Wszystko OK".
   Future<void> safeOk() async {
     final SafeDate? d = mySafeDate;
@@ -2276,8 +2557,11 @@ final class DatingService extends ChangeNotifier {
     final int now = _now();
     final List<SafeDate> remind = <SafeDate>[];
     final List<SafeDate> alarm = <SafeDate>[];
+    // A date nobody confirmed goes, with its last place, days after its
+    // alarm ([SafeDate.isStale]).
+    final bool stale = _safe.values.any((SafeDate d) => d.isStale(now));
     for (final SafeDate d in _safe.values) {
-      if (d.isOver || now < d.until) {
+      if (d.isOver || now < d.until || d.isStale(now)) {
         continue;
       }
       if (d.remindedAt == null) {
@@ -2293,6 +2577,9 @@ final class DatingService extends ChangeNotifier {
       }
     }
     if (remind.isEmpty && alarm.isEmpty) {
+      if (stale) {
+        await _save();
+      }
       return;
     }
     // Written down first, so the other side (app or background service)
@@ -2362,10 +2649,13 @@ final class DatingService extends ChangeNotifier {
         final String from = _n(frame.from);
         // Friends send anything; people across an opened gate only lanterns
         // and what travels back (and their key); the people of one's groups
-        // only their key.
+        // only their key. Someone blocked only their key (so it is known
+        // to be theirs and refused).
+        final bool blockedSender = _people().address(from);
         final bool allowed =
-            host.isFriend(from) ||
-            (DatingTypes.viaGate.contains(type) && _isGate(from)) ||
+            (!blockedSender &&
+                (host.isFriend(from) ||
+                    (DatingTypes.viaGate.contains(type) && _isGate(from)))) ||
             (type == DatingTypes.key && (_isPeer(from) || _isGate(from)));
         if (allowed) {
           await _handle(type, from, frame.payload);
@@ -2647,8 +2937,9 @@ final class DatingService extends ChangeNotifier {
       final Set<String> friends = host.friends().map(_n).toSet();
       final Set<String> gates =
           gateContacts?.call().map(_n).toSet() ?? <String>{};
+      final BlockedPeople people = _people();
       for (final String f in <String>{...friends, ...gates}) {
-        if (f == from) {
+        if (f == from || people.address(f)) {
           continue;
         }
         final bool acrossGate = gate || !friends.contains(f);
@@ -2817,19 +3108,20 @@ final class DatingService extends ChangeNotifier {
     bool vouched = true;
     if (d >= 2 && origin != null) {
       vouched = origin == '-'
-          ? hiddenAddresses().isEmpty
+          ? _hiddenFrom().isEmpty
           : ephemeral != null &&
                 origin == datingOriginTag(senderKey, ephemeral);
     }
     final int reach = datingReachOf(d, gate: gate);
+    final BlockedPeople people = _people();
     final bool open =
         active &&
         theirKey &&
         vouched &&
         (lantern.intro || reach <= me.wants.hops) &&
-        !(d == 1 && !lantern.intro && hiddenAddresses().contains(from)) &&
-        !hiddenCircles().contains(from) &&
-        !_blocked.contains(senderKey) &&
+        !(d == 1 && !lantern.intro && _hiddenFrom(people).contains(from)) &&
+        !_hiddenCirclesAll(people).contains(from) &&
+        !_blockedKey(senderKey, people) &&
         !(isBanned?.call(senderKey) ?? false) &&
         !isMinorOff(senderKey) &&
         !_hiddenKey(senderKey);
@@ -2961,7 +3253,7 @@ final class DatingService extends ChangeNotifier {
     Map<dynamic, dynamic>? intro,
   }) async {
     if (profile.key == myKey ||
-        _blocked.contains(profile.key) ||
+        _blockedKey(profile.key) ||
         isMinorOff(profile.key)) {
       return false;
     }
@@ -3205,7 +3497,7 @@ final class DatingService extends ChangeNotifier {
     final bool proven =
         answered['open'] == true &&
         active &&
-        !_blocked.contains(senderKey) &&
+        !_blockedKey(senderKey) &&
         !(isBanned?.call(senderKey) ?? false) &&
         !isMinorOff(senderKey) &&
         !_hiddenKey(senderKey) &&
@@ -3502,7 +3794,7 @@ final class DatingService extends ChangeNotifier {
     }
     final String sender = base64Url.encode(opened.$1);
     final Map<String, dynamic> msg = opened.$2;
-    if (_blocked.contains(sender)) {
+    if (_blockedKey(sender)) {
       return;
     }
     // Answers to the sender go back the way this came. (An introduction's
@@ -3612,6 +3904,11 @@ final class DatingService extends ChangeNotifier {
       ),
     );
     await _save();
+    // A match switched off or hidden here keeps its chat (as evidence, and
+    // for when that ends) but announces nothing.
+    if (!_shown(sender)) {
+      return;
+    }
     await host.notify(
       RuntimeSystemNotification(
         id: 'date-msg-$lineId',
@@ -3658,6 +3955,27 @@ final class DatingService extends ChangeNotifier {
     );
   }
 
+  /// A watched date's deadline on this phone's clock, from the dater's
+  /// [until] (on the dater's clock) and the time [left] the dater's phone
+  /// counted when it sent the word. Counted from the arrival, the two
+  /// clocks need not agree; a word that waited in a mailbox would count
+  /// from too late, so the deadline is never later than [until] plus
+  /// [kDatingSafeClockMargin]. A word without [left] (a 1.16.5 phone)
+  /// keeps its own clock's [until], as before.
+  int _watchedDeadline(int until, Object? left) {
+    final int arrived = _now();
+    final int longest = kDatingSafeLongest.inMilliseconds;
+    final int latest = arrived + longest;
+    if (left is! int) {
+      return min(until, latest);
+    }
+    final int counted = arrived + left.clamp(-longest, longest);
+    return min(
+      counted,
+      min(until + kDatingSafeClockMargin.inMilliseconds, latest),
+    );
+  }
+
   Future<void> _onSafe(String from, Map<String, dynamic> p) async {
     final Object? id = p['id'];
     final Object? until = p['until'];
@@ -3667,26 +3985,40 @@ final class DatingService extends ChangeNotifier {
     final Object? lat = p['lat'];
     final Object? lon = p['lon'];
     final SafeDate? had = _safe[id];
-    if (had != null && (had.mine || had.friend != from)) {
+    // A date that is over (confirmed, or ended here by hand) takes no new
+    // place.
+    if (had != null && (had.mine || had.friend != from || had.isOver)) {
       return;
     }
     final Object? note = p['note'];
+    final int deadline = _watchedDeadline(until, p['left']);
     final SafeDate d =
         had ??
         SafeDate(
           id: id,
           friend: from,
-          until: until,
+          until: deadline,
+          sentUntil: until,
           mine: false,
           note: note is String
               ? (note.length > 200 ? note.substring(0, 200) : note)
               : '',
         );
-    if (had != null && until > had.until) {
+    if (had == null && d.isStale(_now())) {
+      return;
+    }
+    final int known = had?.sentUntil ?? had?.until ?? until;
+    if (had != null && until > known) {
+      // An extension.
       d
-        ..until = until
+        ..until = deadline
+        ..sentUntil = until
         ..remindedAt = null
         ..alarmedAt = null;
+    } else if (had != null && until == known && deadline < d.until) {
+      // The same deadline again, in a word that came quicker than the one
+      // before: it tells this phone's deadline more exactly.
+      d.until = deadline;
     }
     if (lat is num && lon is num) {
       d

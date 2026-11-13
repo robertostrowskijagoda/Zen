@@ -83,6 +83,106 @@ void main() {
     expect(await b.textsFrom(a), <String>['Raz tylko']);
   });
 
+  test('while the stored friends cannot be read a message is not '
+      'confirmed: it comes again and is kept once they can be', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    // B's app starts on a busy phone: its friends do not read back.
+    b.friendListUnreadable = true;
+    await w.restartApp(b);
+    expect(b.state.snapshotUnreadable, isTrue);
+    await w.send(a, b, 'Nie zgub mnie');
+    await w.advance(const Duration(minutes: 5));
+    expect(await b.textsFrom(a), isEmpty);
+    expect(
+      await a.deliveryOf(b, 'Nie zgub mnie'),
+      isNot(ChatMessageDeliveryState.delivered),
+      reason: 'B could not keep it: it must not show as delivered',
+    );
+
+    // The next start reads them; the message comes again and is kept.
+    b.friendListUnreadable = false;
+    await w.restartApp(b);
+    expect(b.state.snapshotUnreadable, isFalse);
+    await w.until(
+      () async => (await b.textsFrom(a)).contains('Nie zgub mnie'),
+      within: const Duration(hours: 2),
+      reason: 'the message coming again',
+    );
+    await w.until(
+      () async =>
+          await a.deliveryOf(b, 'Nie zgub mnie') ==
+          ChatMessageDeliveryState.delivered,
+      within: const Duration(minutes: 30),
+      reason: 'the message showing delivered',
+    );
+    expect(await b.textsFrom(a), <String>['Nie zgub mnie']);
+  });
+
+  test('a group message too: not confirmed while the groups cannot be '
+      'read, kept once they can be', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    final FriendsPhone c = w['C'];
+    final String id = await w.createGroup(a, 'Klub', <FriendsPhone>[b, c]);
+    b.friendListUnreadable = true;
+    await w.restartApp(b);
+    await w.sendGroup(a, id, 'Do wszystkich');
+    await w.advance(const Duration(minutes: 5));
+    expect(await w.groupTexts(c, id), contains('Do wszystkich'));
+    expect(await w.groupTexts(b, id), isNot(contains('Do wszystkich')));
+
+    b.friendListUnreadable = false;
+    await w.restartApp(b);
+    await w.until(
+      () async => (await w.groupTexts(b, id)).contains('Do wszystkich'),
+      within: const Duration(hours: 2),
+      reason: 'the group message coming again',
+    );
+  });
+
+  test('an edit that comes before its message is not confirmed: a restart '
+      'before the message comes does not lose it', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    // B's app does not keep A's message for now (its write fails), so the
+    // edit that follows finds nothing to edit.
+    bool failing = true;
+    b.appKeeps = (SignalTransportFrame frame) =>
+        !(failing && _isMessageFrom(frame, a));
+    await w.send(a, b, 'Spotkanie o 17');
+    final String messageId = (await a.thread(
+      b,
+    )).firstWhere((ChatMessage m) => m.text == 'Spotkanie o 17').id;
+    // A's edit, as its app sends it (on the world's clock).
+    await a.container
+        .read(signalTransportProvider)
+        .send(
+          remoteAddress: b.address,
+          payload: <String, dynamic>{
+            'type': 'msg_edit',
+            'msgId': messageId,
+            'text': 'Spotkanie o 18',
+            'at': w.now,
+          },
+        );
+    await w.settle();
+    expect(await b.textsFrom(a), isEmpty);
+    // B's app starts again before the message comes: what waited in its
+    // memory is gone.
+    await w.restartApp(b);
+    failing = false;
+    await w.until(
+      () async => (await b.textsFrom(a)).contains('Spotkanie o 18'),
+      within: const Duration(hours: 2),
+      reason: 'the edit reaching B after the restart',
+    );
+    expect(await b.textsFrom(a), <String>['Spotkanie o 18']);
+  });
+
   test('an app that never answers for one message holds back nothing '
       'else: another friend\'s message is kept and confirmed', () async {
     final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);

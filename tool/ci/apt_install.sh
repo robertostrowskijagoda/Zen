@@ -14,8 +14,17 @@
 # `apt-get update` ends well even when it reached no archive, and the
 # install after it then waits for every package in turn (the Linux build's
 # list did not end within its job's 45 minutes). So what the update says
-# is read too: an archive it could not name is a failed try, and nothing
-# is installed in that try.
+# is read too, and an update that failed is a failed try, with nothing
+# installed in it. It failed when
+#   - a name could not be resolved (anywhere), or
+#   - an archive of Ubuntu or Debian (a host under ubuntu.com or debian.org,
+#     the runner's mirror included) could not be connected to, timed out, or
+#     answered 5xx: an "Err:" line, or a "Failed to fetch" warning, with
+#     that reason on it or on the line after it.
+# Nothing else counts: an "Ign:" of an optional index, an "Err:" with a 404
+# or a bad signature, and any failure of a third-party repository the
+# runner image carries (Microsoft's, Google's) leave a healthy update
+# healthy, because the install does not need them.
 #
 # For the test (tool/ci/test_ci_checks.py): APT_INSTALL_RESOLV_CONF names
 # another file than /etc/resolv.conf, APT_INSTALL_PAUSE another pause.
@@ -40,12 +49,21 @@ as_root() {
 said=$(mktemp)
 trap 'rm -f "$said"' EXIT
 
+# The reasons that mean a host cannot be reached (case does not matter).
+unreachable='could not connect|connection (timed out|failed|refused|reset)|unable to connect|network is unreachable|cannot initiate the connection|[[:space:]]5[0-9][0-9][[:space:]]+(internal server error|bad gateway|service unavailable|gateway time-?out|server error)'
+# A failure line naming an archive of the distribution.
+archive_failure='^(Err:[0-9]+|[WE]: Failed to fetch) https?://[^/ ]*(ubuntu\.com|debian\.org)(:[0-9]+)?/'
+
+update_failed() {
+  grep -Eq 'Temporary failure resolving|Could not resolve' "$said" ||
+    grep -E -A1 "$archive_failure" "$said" | grep -Eiq "$unreachable"
+}
+
 update() {
   as_root apt-get update > "$said" 2>&1
   status=$?
   cat "$said"
-  [ "$status" -eq 0 ] &&
-    ! grep -Eq 'Temporary failure resolving|Could not resolve' "$said"
+  [ "$status" -eq 0 ] && ! update_failed
 }
 
 update_and_install() {

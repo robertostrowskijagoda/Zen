@@ -162,7 +162,7 @@ func TestLiveReachOfReceiveOnlyNodes(t *testing.T) {
 // public pool as a phone does (its picks first, the rest in reserve).
 func liveNode(t *testing.T, peers int) *bridgeNode {
 	t.Helper()
-	keeper := newPhonePeerKeeper(phonePeerCandidates(publicPeerPool), phonePeerTarget(peers))
+	keeper := newPhonePeerKeeper(phonePeerCandidates(publicPeerPool, nil), phonePeerTarget(peers))
 	cfg := config.GenerateConfig()
 	yggCore, err := core.New(cfg.Certificate, withPeerEvents(newBridgeLogger(io.Discard), keeper))
 	if err != nil {

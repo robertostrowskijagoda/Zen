@@ -92,6 +92,9 @@ type bridgeNode struct {
 	transitHoldMu   sync.Mutex
 	transitStop     chan struct{}
 	transitStopOnce sync.Once
+	// A locked phone's budget for strangers' signals (stranger_signals.go);
+	// nil on every other node.
+	strangerSignals *strangerSignalBudget
 	// The node's key, held while it runs, and when the app last called on
 	// the node (node_identity.go); nil in tests that build a node by hand.
 	identity *nodeIdentityClaim
@@ -303,3 +306,6 @@ func debugf(format string, args ...any) {
 //     "Łączę...");
 //   - desktopPublicPeers(): a desktop connects to every configured peer, so
 //     it gets a spread-out subset instead of the whole pool.
+//
+// Both in the node's own order (peerOrderSeed), so that not every device
+// shows itself to the same few operators.

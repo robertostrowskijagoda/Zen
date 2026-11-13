@@ -1,11 +1,12 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/file_picking.dart';
+import 'package:zen/src/features/account/key_file.dart';
 import 'package:zen/src/features/account/presentation/account_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/runtime/opened_files.dart';
@@ -75,7 +76,10 @@ class _OpenedFileBridgeState extends ConsumerState<OpenedFileBridge> {
       case ZenOpenedFileKind.accountBackup:
         await AccountBackupRestoreScreen.open(context, path: path);
       case ZenOpenedFileKind.keyFile:
-        final Uint8List bytes = await File(path).readAsBytes();
+        final Uint8List bytes = await readPickedFile(
+          path,
+          maxBytes: kMaxKeyFileReadBytes,
+        );
         if (!mounted) {
           return;
         }

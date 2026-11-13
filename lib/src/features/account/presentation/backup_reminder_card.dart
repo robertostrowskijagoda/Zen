@@ -50,8 +50,8 @@ class BackupReminderCard extends ConsumerWidget {
                     ),
               text: t(
                 'Z kopią i hasłem konta wrócisz do znajomych, grup i '
-                'rozmów na nowym telefonie. Bez niej zostaje tylko krąg '
-                'odzyskiwania.',
+                'rozmów na nowym telefonie. Bez niej zostaje tylko pomoc '
+                'bliskich znajomych.',
               ),
             ),
             Wrap(

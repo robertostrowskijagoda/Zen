@@ -138,7 +138,7 @@ void main() {
       await fund(l, 'A1', 1000),
     ], now: start);
     final PyramidRecord x = await order(start, 'A1', 'B1', 300, 1);
-    expect(PyrLedger.problem(x, st, l.compute(st), start), isNull);
+    expect(l.problem(x, st, start), isNull);
     expect(l.merge(await signed(x, four)), isTrue);
     expect(PyrLedger.isFinal(l.ops[x.id]!, st), isFalse);
     expect(l.compute(st).balanceOf(w.id('B1')), 0);
@@ -152,7 +152,7 @@ void main() {
     expect(v.seqOf(w.id('A1')), 1);
     // The same order again is not signed again as new: its number is
     // taken.
-    expect(PyrLedger.problem(x, st, v, start), 'zły numer kolejny');
+    expect(l.problem(x, st, start), 'zły numer kolejny');
   });
 
   test('two orders for one number: the treasurer who signed both is caught, '
@@ -190,10 +190,7 @@ void main() {
     ], now: start);
     // A1 "pays" B1 a negative amount: it would take from B1.
     final PyramidRecord negative = await order(start, 'A1', 'B1', -700, 1);
-    expect(
-      PyrLedger.problem(negative, st, l.compute(st), start),
-      'zły przelew',
-    );
+    expect(l.problem(negative, st, start), 'zły przelew');
     // A1 signs an order from B1's account.
     final PyramidRecord notTheirs = await w.rec(
       PyrT.transfer,
@@ -229,7 +226,7 @@ void main() {
     );
     // The numbers stay free for real orders.
     final PyramidRecord real = await order(start + 2, 'B1', 'A1', 100, 1);
-    expect(PyrLedger.problem(real, st, v, start + 2), isNull);
+    expect(l.problem(real, st, start + 2), isNull);
     l.merge(await signed(real, five));
     v = l.compute(st);
     expect(v.balanceOf(w.id('B1')), 900);
@@ -280,9 +277,8 @@ void main() {
     final PyramidState st = w.fold(<PyramidRecord>[
       await fund(l, 'A1', 1000),
     ], now: start);
-    final PyrLedgerView v = l.compute(st);
     Future<String?> why(PyramidRecord op, {int now = start}) async =>
-        PyrLedger.problem(op, st, v, now);
+        l.problem(op, st, now);
 
     expect(
       await why(await order(start, 'A1', 'B1', 300, 2)),
@@ -379,10 +375,9 @@ void main() {
     expect(after.treasurers, contains(z.id));
     expect(after.treasurersAt(start), isNot(contains(z.id)));
     expect(
-      PyrLedger.problem(
+      l.problem(
         await order(start + h, 'A1', 'B1', 10, 1),
         after,
-        l.compute(after),
         start + 3 * h,
       ),
       'zlecenie sprzed zmiany skarbników',
@@ -406,18 +401,11 @@ void main() {
     expect(st.params.xferLimit, 5);
     for (int i = 1; i <= 5; i++) {
       final PyramidRecord x = await order(start + i, 'A1', 'B1', 10, i);
-      expect(
-        PyrLedger.problem(x, st, l.compute(st), start + 10),
-        isNull,
-        reason: 'order $i',
-      );
+      expect(l.problem(x, st, start + 10), isNull, reason: 'order $i');
       l.merge(await signed(x, five));
     }
     final PyramidRecord sixth = await order(start + 6, 'A1', 'B1', 10, 6);
-    expect(
-      PyrLedger.problem(sixth, st, l.compute(st), start + 10),
-      'limit przelewów na dzień',
-    );
+    expect(l.problem(sixth, st, start + 10), 'limit przelewów na dzień');
     // A day later: again.
     final PyramidRecord tomorrow = await order(
       start + day + 10,
@@ -426,15 +414,12 @@ void main() {
       10,
       6,
     );
-    expect(
-      PyrLedger.problem(tomorrow, st, l.compute(st), start + day + 10),
-      isNull,
-    );
+    expect(l.problem(tomorrow, st, start + day + 10), isNull);
     // Dated back into an empty day, it still meets what this treasurer
     // signed today by its own clock.
     final PyramidRecord back = await order(start - h, 'A1', 'B1', 10, 6);
     expect(
-      PyrLedger.problem(back, st, l.compute(st), start + day, signedToday: 5),
+      l.problem(back, st, start + day, signedToday: 5),
       'limit przelewów na dzień',
     );
     // Outside the hard bounds the number is clamped.
@@ -517,24 +502,20 @@ void main() {
     // The payer cannot take it back before the time; B1 cannot accept
     // after it.
     final PyramidRecord early = await settle(start + h, 'A1', x.id, false);
-    expect(PyrLedger.problem(early, st, v, start + h), contains('po terminie'));
+    expect(l.problem(early, st, start + h), contains('po terminie'));
     final PyramidRecord lateOk = await settle(start + 6 * h, 'B1', x.id, true);
-    expect(
-      PyrLedger.problem(lateOk, st, v, start + 6 * h),
-      'za późno na przyjęcie',
-    );
+    expect(l.problem(lateOk, st, start + 6 * h), 'za późno na przyjęcie');
     final PyramidRecord refund = await settle(start + 6 * h, 'A1', x.id, false);
-    expect(PyrLedger.problem(refund, st, v, start + 6 * h), isNull);
+    expect(l.problem(refund, st, start + 6 * h), isNull);
     l.merge(await signed(refund, five));
     v = l.compute(st);
     expect(v.escrows[x.id]!.settled, isFalse);
     expect(v.balanceOf(w.id('A1')), 2000);
     // Settled once: nothing more to settle.
     expect(
-      PyrLedger.problem(
+      l.problem(
         await settle(start + 4 * h, 'B1', x.id, true),
         st,
-        v,
         start + 4 * h,
       ),
       'nie ma czego rozliczyć',

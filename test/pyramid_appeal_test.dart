@@ -187,6 +187,10 @@ void main() {
         ),
         findsOneWidget,
       );
+      // The friend's word, named: this phone cannot check it.
+      expect(find.byKey(Key('pyr-verdict-by-${v.id}')), findsOneWidget);
+      expect(find.textContaining(x.friend.name), findsOneWidget);
+      expect(find.byKey(const Key('pyr-verdict-outside')), findsOneWidget);
       await tester.pumpWidget(profile('200::good'));
       expect(find.byKey(const Key('pyr-verdict-badge')), findsNothing);
 

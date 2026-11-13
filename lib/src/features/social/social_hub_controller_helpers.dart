@@ -1682,6 +1682,7 @@ Map<String, dynamic> _buildOutgoingTextPayload({
   required String text,
   required int sentAtMillis,
   int ttl = 0,
+  int ttlAt = 0,
 }) {
   return <String, dynamic>{
     'type': 'message',
@@ -1690,8 +1691,10 @@ Map<String, dynamic> _buildOutgoingTextPayload({
     'createdAt': DateTime.fromMillisecondsSinceEpoch(
       sentAtMillis,
     ).toUtc().toIso8601String(),
-    // Disappearing messages: the sender's timer.
+    // Disappearing messages: the sender's timer, and when it was set (so
+    // an older setting arriving late does not undo a newer one).
     if (ttl > 0) 'ttl': ttl,
+    if (ttlAt > 0) kDisappearSetAtKey: ttlAt,
   };
 }
 
@@ -2313,12 +2316,64 @@ Map<String, int> _groupInviteDeparturesOf(ZenSignal signal) {
 }
 
 /// Who left [group] and when, for the members' list sent to someone who
-/// just joined ([kGroupLeftKey]).
+/// just joined ([kGroupLeftKey]), and who of the members was added by name
+/// and when ([kGroupAddsKey]; the newcomer's own time among them, which
+/// its leave is stamped after).
 Map<String, dynamic> _groupDeparturesPayload(GroupProfile group) =>
     <String, dynamic>{
       if (group.departedAt.isNotEmpty)
         kGroupLeftKey: Map<String, int>.of(group.departedAt),
+      if (group.addedAt.isNotEmpty)
+        kGroupAddsKey: <String, int>{
+          for (final MapEntry<String, int> e in group.addedAt.entries)
+            if (groupHasMember(group, e.key)) e.key: e.value,
+        },
     };
+
+/// Who was added by name and when, as a `group_invite` tells it
+/// ([kGroupAddsKey]).
+Map<String, int> _groupInviteAddsOf(ZenSignal signal) {
+  final Object? adds = signal.chatExtras?[kGroupAddsKey];
+  if (adds is! Map) {
+    return const <String, int>{};
+  }
+  return <String, int>{
+    for (final MapEntry<dynamic, dynamic> e in adds.entries.take(
+      kMaxGroupMemberCount,
+    ))
+      if (e.key is String && (e.key as String).isNotEmpty && e.value is int)
+        e.key as String: e.value as int,
+  };
+}
+
+/// How far back an addition by name counts as one other members may not
+/// have heard of yet: as long as a member-list update can be on its way
+/// (mailboxes keep mail 14 days).
+const Duration kGroupAddRecentFor = Duration(days: 15);
+
+/// The most additions one update tells of besides its own
+/// ([kGroupAddsKey]); the newest.
+const int kMaxGroupAddsTold = 64;
+
+/// The members of [group] added by name lately ([kGroupAddRecentFor]) and
+/// when, newest first, at most [kMaxGroupAddsTold]: what an update tells
+/// besides the one it makes, so whoever knows of more can tell the
+/// newcomer (`_tellOfAddsMissed`).
+Map<String, int> _recentGroupAdds(GroupProfile group, int nowMillis) {
+  final int since = nowMillis - kGroupAddRecentFor.inMilliseconds;
+  final List<MapEntry<String, int>> recent =
+      <MapEntry<String, int>>[
+        for (final MapEntry<String, int> e in group.addedAt.entries)
+          if (e.value >= since && groupHasMember(group, e.key)) e,
+      ]..sort(
+        (MapEntry<String, int> a, MapEntry<String, int> b) =>
+            b.value.compareTo(a.value),
+      );
+  return <String, int>{
+    for (final MapEntry<String, int> e in recent.take(kMaxGroupAddsTold))
+      e.key: e.value,
+  };
+}
 
 /// Whether [a] and [b] say the same of a group's members: the same list,
 /// the same leaves and additions on record.
@@ -2341,6 +2396,9 @@ GroupProfile _groupAfterLeave(GroupProfile group, String leaver, int at) {
   }
   bool stays(String m) => !PeerShareCodec.addressesEqual(m, leaver);
   return group.copyWith(
+    // A creator who left has no say over the group any more, also once
+    // someone adds them again as a member ([_groupAfterInvite]).
+    createdById: stays(group.createdById) ? null : '',
     memberAddresses: group.memberAddresses.where(stays).toList(),
     pendingInviteAddresses: group.pendingInviteAddresses.where(stays).toList(),
     pendingInviteIds: <String, String>{
@@ -2412,6 +2470,7 @@ GroupProfile? _groupAfterInvite(
   Map<String, int> departed = group.departedAt;
   Map<String, int> added = group.addedAt;
   List<String> members = group.memberAddresses;
+  String creator = group.createdById;
   if (takeDepartures) {
     _groupInviteDeparturesOf(signal).forEach((String address, int raw) {
       final int? at = _groupStampOf(raw);
@@ -2427,6 +2486,9 @@ GroupProfile? _groupAfterInvite(
       members = members
           .where((String m) => !PeerShareCodec.addressesEqual(m, address))
           .toList();
+      if (PeerShareCodec.addressesEqual(address, creator)) {
+        creator = '';
+      }
     });
   }
   final List<String> taken = <String>[];
@@ -2442,19 +2504,59 @@ GroupProfile? _groupAfterInvite(
       if (at != null) {
         added = _withGroupStamp(added, newcomer, at);
       }
+      if (left != null && PeerShareCodec.addressesEqual(newcomer, creator)) {
+        // The creator left and comes back as a member like any other: the
+        // say they gave up does not come back with them.
+        creator = '';
+      }
     }
   }
   final List<String> incoming = normalizedGroupMembers(<String>[
     signal.sender,
     ...?signal.memberAddresses,
   ]);
+  // Additions by name its sender tells of, with their times
+  // ([kGroupAddsKey]): from the inviter, of everyone; from a member, of
+  // others added at about the time the newcomer was (its list a step
+  // behind). Each is what the sender could have made one by one, and none
+  // is taken over a later leave.
+  final List<String> stamped = <String>[];
+  _groupInviteAddsOf(signal).forEach((String address, int raw) {
+    final int? at = _groupStampOf(raw);
+    if (at == null ||
+        !incoming.any(
+          (String a) => PeerShareCodec.addressesEqual(a, address),
+        )) {
+      return;
+    }
+    final int? left = _groupStampFor(departed, address);
+    if (left != null && at <= left) {
+      return;
+    }
+    if (isSelf(address) ||
+        groupHasMember(group, address) ||
+        taken.any((String a) => PeerShareCodec.addressesEqual(a, address))) {
+      // Only the inviter's word on when someone already here came counts
+      // (its own time, which this device's leave is stamped after).
+      if (fromCreator && left == null) {
+        added = _withGroupStamp(added, address, at);
+      }
+      return;
+    }
+    stamped.add(address);
+    departed = _withoutGroupStamp(departed, address);
+    added = _withGroupStamp(added, address, at);
+    if (left != null && PeerShareCodec.addressesEqual(address, creator)) {
+      creator = '';
+    }
+  });
+  taken.addAll(stamped);
   final List<String> unknown = <String>[
     for (final String address in incoming)
       if (!groupHasMember(group, address) &&
           !isSelf(address) &&
           _groupStampFor(departed, address) == null &&
-          (newcomer == null ||
-              !PeerShareCodec.addressesEqual(address, newcomer)))
+          !taken.any((String a) => PeerShareCodec.addressesEqual(a, address)))
         address,
   ];
   // This device in the sender's list is no stranger to anyone.
@@ -2463,6 +2565,7 @@ GroupProfile? _groupAfterInvite(
     taken.addAll(unknown);
   }
   return group.copyWith(
+    createdById: creator,
     memberAddresses: cappedGroupMembers(
       normalizedGroupMembers(<String>[...members, ...taken]),
     ),

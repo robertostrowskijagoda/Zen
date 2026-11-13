@@ -95,6 +95,15 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
     final MiniProfileTag? mini = tag == null
         ? null
         : MiniProfileTag(name: sanitizePeerName(tag.name), avatar: tag.avatar);
+    if (mini == null &&
+        state.friendByAddress(signal.sender)?.status ==
+            FriendRelationshipStatus.pendingOutgoing) {
+      // Written as to a friend by someone invited from here: their "yes"
+      // is on its way and this message overtook it. Not refused: it comes
+      // again, and is kept once they are a friend.
+      _signalWaits = true;
+      return true;
+    }
     final bool textOnly =
         (signal.attachmentData?.isEmpty ?? true) &&
         !signal.isPlaceholder &&

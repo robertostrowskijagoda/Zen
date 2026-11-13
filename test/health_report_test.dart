@@ -171,6 +171,33 @@ void main() {
       expect(b.level, HealthLevel.warn);
     });
 
+    test('exact alarms not allowed: the battery line says that allowing '
+        'them saves battery, without making it a problem', () {
+      HealthItem battery({required bool exact, bool awake = true}) =>
+          buildHealthReport(
+            _healthy(
+              granted: <ZenPermission, bool>{
+                ZenPermission.notifications: true,
+                ZenPermission.battery: awake,
+                ZenPermission.exactAlarms: exact,
+              },
+            ),
+          ).item('battery')!;
+      final HealthItem denied = battery(exact: false);
+      expect(denied.level, HealthLevel.ok);
+      expect(denied.detail, contains('Dokładne alarmy'));
+      expect(denied.detail, contains('pomaga baterii'));
+      expect(battery(exact: true).detail, isNot(contains('Dokładne alarmy')));
+      final HealthItem both = battery(exact: false, awake: false);
+      expect(both.level, HealthLevel.warn);
+      expect(both.detail, contains('Dokładne alarmy'));
+      // Before Android 12 there is no such permission: nothing said.
+      expect(
+        buildHealthReport(_healthy()).item('battery')!.detail,
+        isNot(contains('Dokładne alarmy')),
+      );
+    });
+
     test('the background service not running is a warning', () {
       final HealthReport r = buildHealthReport(_healthy(background: false));
       expect(r.item('background')!.level, HealthLevel.warn);

@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:record/record.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/media/outgoing_media.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 
 typedef VoiceMessageRecorderFactory = VoiceMessageRecorder Function();
@@ -100,6 +102,7 @@ final class PlatformVoiceMessageRecorder implements VoiceMessageRecorder {
       if (!await file.exists()) {
         return null;
       }
+      await _withoutMetadata(file);
       final MediaVault? vault = _vault;
       if (vault == null) {
         return RecordedVoiceClip(path: path, durationMs: durationMs);
@@ -131,6 +134,21 @@ final class PlatformVoiceMessageRecorder implements VoiceMessageRecorder {
       return;
     }
     await _deleteQuietly(File(fallbackPath));
+  }
+
+  /// The recorders write when the recording was made (the times of the
+  /// MP4 boxes) and, on Android, the system's version (`moov/meta`): the
+  /// recording loses them before it is kept or sent.
+  static Future<void> _withoutMetadata(File file) async {
+    try {
+      final Uint8List plain = await file.readAsBytes();
+      final Uint8List clean = await stripOutgoingMetadataSized(plain);
+      if (!identical(clean, plain)) {
+        await file.writeAsBytes(clean, flush: true);
+      }
+    } on FileSystemException {
+      // Sent as it is; the send checks it once more.
+    }
   }
 
   Future<void> _disposeRecorder() async {

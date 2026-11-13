@@ -124,12 +124,14 @@ final class WakeAlarmTiming {
   );
 }
 
-/// The grid the beat's wakes keep to where its alarms can be on time
-/// ([WakeAlarmTiming]): the nearby token changes on every 10-minute
-/// boundary of the wall clock (kNearbySlot; an exact alarm in
-/// ZenNearbyBridge.kt), and the locked phones of friends, whose clocks go
-/// by the network's time, wake on the same boundaries, so a presence round
-/// reaches a friend's phone while it is awake for its own.
+/// The grid the beat's wakes keep to on Android ([WakeAlarmTiming]): the
+/// nearby token changes on every 10-minute boundary of the wall clock
+/// (kNearbySlot; an exact alarm in ZenNearbyBridge.kt), and the locked
+/// phones of friends, whose clocks go by the network's time, wake on the
+/// same boundaries (on time where exact alarms are allowed, at the end of
+/// an inexact alarm's window where not), so a presence round reaches a
+/// friend's phone while it is awake for its own. The grid is on epoch
+/// time: time zones and daylight saving time do not move it.
 const Duration kWakeGrid = Duration(minutes: 10);
 
 /// How long after a [kWakeGrid] boundary the token's alarm comes
@@ -595,14 +597,19 @@ final class WakeBeat {
 
   /// What runs on a wake at [at]: what is due by then, and what is due a
   /// little later (within its slack) when it would otherwise take a wake
-  /// of its own, i.e. when no other wake comes before it is due.
+  /// of its own, i.e. when no other wake comes before it is due. Where the
+  /// wakes keep to the grid (Android), work whose period is a whole number
+  /// of [kWakeGrid]s rides along early only on a wake on the grid: on any
+  /// other (the update check's, a poll's of the first hour) it would leave
+  /// the grid for a period or two, and the friends' phones wake on it.
   List<_BeatWork> _dueBy(int at) {
     final List<_BeatWork> due = <_BeatWork>[];
     final List<_BeatWork> early = <_BeatWork>[];
+    final bool offGrid = ZenWake.alarmTiming() != null && !_nearGrid(at);
     for (final _BeatWork w in _works) {
       if (w.dueAt <= at) {
         due.add(w);
-      } else if (w.dueAt - w.slackMs <= at) {
+      } else if (w.dueAt - w.slackMs <= at && !(offGrid && _gridPeriod(w))) {
         early.add(w);
       }
     }
@@ -699,9 +706,13 @@ final class WakeBeat {
   ///   the nearby token's change when the phone is shown nearby (an inexact
   ///   alarm asked a moment before the token's exact one goes off with it,
   ///   so the two share one wake), else on an exact alarm where those are
-  ///   allowed and the work must run in Doze. A wake off the grid is asked
-  ///   for as early as its works allow, which brings it onto the grid within
-  ///   two periods, and keeps it there.
+  ///   allowed and the work must run in Doze, else (exact alarms not
+  ///   allowed: Android 14's default) on an inexact alarm whose window ends
+  ///   on the boundary, so friends' phones without exact alarms wake on the
+  ///   same boundaries as those with them, unless something else woke them
+  ///   a little before. A wake off the grid is asked for as early as its
+  ///   works allow, which brings it onto the grid within two periods, and
+  ///   keeps it there.
   /// * Otherwise, where an inexact alarm comes as late as its window lets
   ///   it, it is asked for sooner, so the window ends when the work is due:
   ///   a 10-minute round would come after 17 or 18 minutes.
@@ -723,9 +734,14 @@ final class WakeBeat {
     bool exact = false;
     int? rotationAt;
     int? gridAt;
-    if (timing != null && due.any(_gridPeriod)) {
-      final bool punctual = timing.rotation || timing.exactAllowed;
-      final int? grid = punctual && _onGridPeriods(at, due)
+    if (timing != null && !whileIdle && !due.any(_gridPeriod)) {
+      // Only work that may wait for Doze's own window (the update check):
+      // it may wait for the next wake on the grid as well, and shares it
+      // instead of waking the phone between two of them.
+      gridAt = _nextGridWake(at);
+      askAt = _inexactAskAt(gridAt, now, timing);
+    } else if (timing != null && due.any(_gridPeriod)) {
+      final int? grid = _onGridPeriods(at, due)
           ? _gridWake(at, due, now)
           : null;
       if (grid != null && timing.rotation && _onGrid(grid)) {
@@ -735,10 +751,15 @@ final class WakeBeat {
         askAt = gridAt = grid;
         exact = true;
       } else {
-        final int ms = at - now;
-        if (timing.lateWindows && ms > kInexactWindowFrom.inMilliseconds) {
-          askAt = now + (ms / kInexactWindowStretch).ceil();
-        }
+        // No exact alarm: the wake still aims at the grid (or, off it, at
+        // the moment the works are due), and is asked for so early that
+        // Android's window for it ends there.
+        // A wake due a few seconds before one on the grid waits for it.
+        final int next = _nextGridWake(at);
+        gridAt =
+            grid ??
+            (next - at <= kInexactWindowFrom.inMilliseconds ? next : null);
+        askAt = _inexactAskAt(gridAt ?? at, now, timing);
       }
     }
     final List<_BeatWork> planned = List<_BeatWork>.of(due);
@@ -752,6 +773,26 @@ final class WakeBeat {
     );
   }
 
+  /// When an inexact alarm is asked for so that it comes by [target]: where
+  /// it may come as late as its window lets it ([WakeAlarmTiming.lateWindows]:
+  /// 3/4 of its delay, from [kInexactWindowFrom] on), so much sooner that the
+  /// window ends at [target]; elsewhere at [target]. Android never delivers
+  /// it before the time asked for, so the wake comes within the window's
+  /// last 3/7 of the wait, at its end unless something else wakes the phone
+  /// first.
+  static int _inexactAskAt(int target, int now, WakeAlarmTiming timing) {
+    final int ms = target - now;
+    final int sooner = (ms / kInexactWindowStretch).ceil();
+    if (!timing.lateWindows || sooner < kInexactWindowFrom.inMilliseconds) {
+      // No window that could end there: so short a delay gets none and
+      // would come seconds early (and the wake on the grid after it would
+      // be a second one); the target itself comes on time, or at most a
+      // few seconds late.
+      return target;
+    }
+    return now + sooner;
+  }
+
   /// How long after the token's alarm a wake planned to go off with it
   /// keeps the phone awake, should it come first: the token's alarm then
   /// comes during the same wake.
@@ -761,6 +802,21 @@ final class WakeBeat {
   /// token's change after a [kWakeGrid] boundary).
   static bool _onGrid(int at) =>
       (at - _gridOffsetMs) % kWakeGrid.inMilliseconds == 0;
+
+  /// The first wake on the grid at or after [at].
+  static int _nextGridWake(int at) {
+    final int grid = kWakeGrid.inMilliseconds;
+    final int off = (at - _gridOffsetMs) % grid;
+    return off == 0 ? at : at + grid - off;
+  }
+
+  /// Whether [at] is within [kInexactWindowFrom] of a wake on the grid (the
+  /// moment a wake on the grid reads the clock, a moment after the alarm).
+  static bool _nearGrid(int at) {
+    final int grid = kWakeGrid.inMilliseconds;
+    final int off = (at - _gridOffsetMs) % grid;
+    return math.min(off, grid - off) <= kInexactWindowFrom.inMilliseconds;
+  }
 
   /// Where a wake on the grid lies after its boundary (negative: before
   /// it).
@@ -844,22 +900,48 @@ final class WakeBeat {
         ),
       );
     }
-    final List<_BeatWork> dueNow = _dueBy(now);
+    // A wake towards the grid that comes well before it (an inexact alarm
+    // Android delivered early, inside its window, with something else that
+    // woke the phone) runs only what is due by now: run early, the rest
+    // would leave the grid, where the friends' phones wake, for a period or
+    // two, and every ping of it would wake them. It keeps to the grid on a
+    // wake asked for anew, which costs no wake of its own: the phone would
+    // have woken for it at the window's end anyway.
+    final bool early =
+        from != null && now < from - kWakeGridLead.inMilliseconds;
+    final List<_BeatWork> dueNow = early
+        ? <_BeatWork>[
+            for (final _BeatWork w in _works)
+              if (w.dueAt <= now) w,
+          ]
+        : _dueBy(now);
     final bool asPlanned = from != null && now >= from;
     // In the order they were added, as always.
     final List<_BeatWork> works = <_BeatWork>[
       for (final _BeatWork w in _works)
         if (dueNow.contains(w) ||
-            (planned.contains(w) && (asPlanned || w.dueAt - w.slackMs <= now)))
+            (!early &&
+                planned.contains(w) &&
+                (asPlanned || w.dueAt - w.slackMs <= now)))
           w,
     ];
+    // A wake that came when it was asked for (a moment late: the alarm
+    // reaches Dart after it went off) counts from that moment for work on
+    // the grid: from the moment Dart reads the clock, the work would come
+    // due a moment after the next wake on the grid, and not ride it.
+    final int since =
+        from != null &&
+            asPlanned &&
+            now - from < kInexactWindowFrom.inMilliseconds
+        ? from
+        : now;
     _firing = true;
     try {
       for (final _BeatWork w in works) {
         if (w._cancelled) {
           continue;
         }
-        w.dueAt = now + w.every.inMilliseconds;
+        w.dueAt = (_gridPeriod(w) ? since : now) + w.every.inMilliseconds;
         running.add(
           Future<void>.sync(w.tick)
               .catchError((Object error, StackTrace st) {

@@ -30,6 +30,7 @@ import 'package:zen/src/features/pyramid/pyramid_court.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/social/presentation/block_person_dialog.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -376,6 +377,27 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                               ),
                             ),
                         ],
+                        // Own reports of a minor: hidden here, each can be
+                        // withdrawn (no photo is shown).
+                        if (dating.reportedMinors.isNotEmpty) ...<Widget>[
+                          ZenSection(t('Zgłoszone jako niepełnoletnie')),
+                          for (final SeenProfile s in dating.reportedMinors)
+                            _PersonRow(
+                              key: Key('dating-minor-${s.profile.key}'),
+                              photo: null,
+                              title: s.profile.name,
+                              subtitle: t(
+                                'Ukryte u Ciebie. Jeśli to pomyłka, cofnij '
+                                'zgłoszenie.',
+                              ),
+                              trailing: TextButton(
+                                onPressed: () => unawaited(
+                                  dating.withdrawMinor(s.profile.key),
+                                ),
+                                child: Text(t('Cofnij')),
+                              ),
+                            ),
+                        ],
                         if (dating.liked.isNotEmpty) ...<Widget>[
                           ZenSection(t('Czekasz na odpowiedź')),
                           for (final SeenProfile s in dating.liked)
@@ -421,6 +443,7 @@ class _PersonRow extends StatelessWidget {
     this.subtitleColor,
     this.trailing,
     this.onTap,
+    super.key,
   });
 
   final String? photo;
@@ -557,6 +580,24 @@ class DatingQuote extends StatelessWidget {
   }
 }
 
+/// Others reported the person as a minor, which did not switch the profile
+/// off here ([DatingService.minorWarning]): who reported is never said.
+class DatingMinorWarning extends StatelessWidget {
+  const DatingMinorWarning({super.key});
+
+  @override
+  Widget build(BuildContext context) => ZenInfo(
+    key: const Key('dating-minor-warning'),
+    icon: Icons.child_care_rounded,
+    tone: ZenColors.of(context).warning,
+    text: t(
+      'Ktoś zgłosił, że ta osoba może być niepełnoletnia. Zgłoszenia od osób '
+      'spoza Twoich znajomych mogą pochodzić od jednej osoby, więc profil nie '
+      'jest ukryty. Jeśli też tak uważasz, zgłoś to — zniknie u Ciebie od razu.',
+    ),
+  );
+}
+
 /// "Nowe": the profiles to decide on, as a stack of cards.
 class _NewProfiles extends ConsumerWidget {
   const _NewProfiles({required this.dating});
@@ -634,8 +675,9 @@ List<PyrVerdictView> datingVerdicts(
   return ref.read(pyramidServiceProvider).verdictsAt(account);
 }
 
-/// Before a „Tak” to someone with a verdict of the pyramid's court: the
-/// verdicts, and a choice. True at once when there is none.
+/// Before a „Tak” to someone with a verdict of the pyramid's court, or whom
+/// others reported as a minor: the verdicts and the warning, and a choice.
+/// True at once when there is neither.
 Future<bool> confirmDatingYes(
   BuildContext context,
   WidgetRef ref,
@@ -643,10 +685,12 @@ Future<bool> confirmDatingYes(
   SeenProfile s,
 ) async {
   final String? account = dating.accountOf(s.profile.key);
-  if (account == null || datingVerdicts(ref, dating, s).isEmpty) {
+  final bool verdicts =
+      account != null && datingVerdicts(ref, dating, s).isNotEmpty;
+  final bool minor = dating.minorWarning(s.profile.key);
+  if (!verdicts && !minor) {
     return true;
   }
-  final PyramidService pyr = ref.read(pyramidServiceProvider);
   final bool? ok = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
@@ -659,14 +703,21 @@ Future<bool> confirmDatingYes(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Text(
-                t(
-                  'Sąd piramidy wydał wyrok w sprawie tej osoby. Przeczytaj '
-                  'go, zanim zdecydujesz.',
+              if (minor) const DatingMinorWarning(),
+              if (minor && verdicts) const SizedBox(height: 10),
+              if (verdicts) ...<Widget>[
+                Text(
+                  t(
+                    'Sąd piramidy wydał wyrok w sprawie tej osoby. Przeczytaj '
+                    'go, zanim zdecydujesz.',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              PyrVerdictList(pyr: pyr, address: account),
+                const SizedBox(height: 10),
+                PyrVerdictList(
+                  pyr: ref.read(pyramidServiceProvider),
+                  address: account,
+                ),
+              ],
             ],
           ),
         ),
@@ -1224,6 +1275,11 @@ class DatingProfileScreen extends ConsumerWidget {
                     return;
                   }
                   if (v == 'block') {
+                    // The person everywhere, not only this profile: said
+                    // first.
+                    if (!await confirmBlockPerson(context, p.name)) {
+                      return;
+                    }
                     await dating.block(p.key);
                     if (context.mounted) {
                       Navigator.of(context).pop();
@@ -1319,6 +1375,10 @@ class DatingProfileScreen extends ConsumerWidget {
                         ? datingWay(s)
                         : '${datingWay(s)} · ${datingMutual(s)}',
                   ),
+                  if (dating.minorWarning(p.key)) ...<Widget>[
+                    const SizedBox(height: 6),
+                    const DatingMinorWarning(),
+                  ],
                   // The pyramid court's verdicts, when the account is known
                   // anyway (as on the person's profile).
                   if (dating.accountOf(p.key) != null &&
@@ -1556,7 +1616,11 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
       listenable: dating,
       builder: (BuildContext context, Widget? _) {
         final SeenProfile? s = dating.profile(widget.profileKey);
-        final List<DatingLine> lines = dating.chat(widget.profileKey);
+        // A match switched off or hidden here (opened from an older
+        // notification, say) shows nothing of its chat.
+        final List<DatingLine> lines = dating.isMatch(widget.profileKey)
+            ? dating.chat(widget.profileKey)
+            : const <DatingLine>[];
         final ZenColors zen = ZenColors.of(context);
         final Color tone = datingTone(zen);
         final Color onTone = ZenColors.foregroundFor(tone);
@@ -1603,6 +1667,10 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                           'znajomych.',
                         ),
                       ),
+                      if (dating.minorWarning(widget.profileKey)) ...<Widget>[
+                        const SizedBox(height: 8),
+                        const DatingMinorWarning(),
+                      ],
                       DatingSafeMutual(
                         dating: dating,
                         profileKey: widget.profileKey,
@@ -1897,6 +1965,18 @@ class _FriendCorner extends ConsumerWidget {
                         icon: const Icon(Icons.map_rounded),
                         onPressed: () => unawaited(openMap(d.lat!, d.lon!)),
                       ),
+                    // Once the deadline has passed the watcher may end it
+                    // by hand: a date nobody confirms would wait days.
+                    if (d.remindedAt != null)
+                      IconButton(
+                        key: Key('dating-safe-end-${d.id}'),
+                        tooltip: t('Zakończ'),
+                        color: cardTone,
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => unawaited(
+                          _endWatching(context, dating, d.id, name(d.friend)),
+                        ),
+                      ),
                   ],
                 ),
               );
@@ -1974,6 +2054,41 @@ Future<void> _askLocation(
       ),
     ),
   );
+}
+
+Future<void> _endWatching(
+  BuildContext context,
+  DatingService dating,
+  String id,
+  String name,
+) async {
+  final bool? ok = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      scrollable: true,
+      title: Text(t('Zakończyć czuwanie?')),
+      content: Text(
+        t(
+          'Zrób to, gdy wiesz już, że {name} jest bezpieczny(-a). Ostatnie '
+          'położenie zniknie z tego telefonu.',
+          {'name': name},
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(t('Anuluj')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(t('Zakończ')),
+        ),
+      ],
+    ),
+  );
+  if (ok == true) {
+    await dating.endWatching(id);
+  }
 }
 
 String _clock(int millis) {

@@ -16,6 +16,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -46,6 +47,9 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'profileSentVersion',
     'callAcceptToken',
     'disappear',
+    'disappearAt',
+    'readElsewhere',
+    'outgoingInvites',
     'notifyPrivacy',
     'mutedUntil',
     'groupNotifyAll',
@@ -55,6 +59,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
     'groups',
     'friendships',
     'friendshipClock',
+    'blocks',
     // Read only: what 1.15 test builds kept before [FriendshipBook]
     // records (taken into them).
     'removedFriends',
@@ -243,13 +248,18 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         <String, PeerPublicProfile>{};
     int profileSentVersion = 0;
     final Map<String, int> disappearingTimers = <String, int>{};
+    final Map<String, int> disappearTimersSetAt = <String, int>{};
     final Map<String, int> disappearedMessages = <String, int>{};
+    final Map<String, int> readElsewhere = <String, int>{};
+    final Map<String, OutgoingInvite> outgoingInvites =
+        <String, OutgoingInvite>{};
     final Map<String, NotificationPrivacy> notificationPrivacy =
         <String, NotificationPrivacy>{};
     final Map<String, int> mutedUntil = <String, int>{};
     final Map<String, bool> groupNotifyAll = <String, bool>{};
     final Map<String, String> peerAppVersions = <String, String>{};
     final Map<String, FriendshipRecord> records = <String, FriendshipRecord>{};
+    Map<String, BlockRecord> blocks = const <String, BlockRecord>{};
     Hlc clock = Hlc.zero;
     final int extensionCount = reader.readUint32();
     for (int i = 0; i < extensionCount; i++) {
@@ -367,11 +377,45 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
+      // When each timer was set (absent before 1.17.0).
+      final Object? timersSetAt = decoded['disappearAt'];
+      if (timersSetAt is Map) {
+        for (final MapEntry<dynamic, dynamic> e in timersSetAt.entries) {
+          if (e.key is String && e.value is int && (e.value as int) > 0) {
+            disappearTimersSetAt[e.key as String] = e.value as int;
+          }
+        }
+      }
       final Object? gone = decoded['disappeared'];
       if (gone is Map) {
         for (final MapEntry<dynamic, dynamic> e in gone.entries) {
           if (e.key is String && e.value is int) {
             disappearedMessages[e.key as String] = e.value as int;
+          }
+        }
+      }
+      // Messages read on another device before they came here (absent
+      // before 1.17.0).
+      final Object? readThere = decoded['readElsewhere'];
+      if (readThere is Map) {
+        for (final MapEntry<dynamic, dynamic> e in readThere.entries.take(
+          kMaxReadElsewhere,
+        )) {
+          if (e.key is String && e.value is int) {
+            readElsewhere[e.key as String] = e.value as int;
+          }
+        }
+      }
+      // Whether each invitation sent from here reached the other side
+      // (absent before 1.17.0).
+      final Object? invites = decoded['outgoingInvites'];
+      if (invites is Map) {
+        for (final MapEntry<dynamic, dynamic> e in invites.entries.take(
+          kMaxOutgoingInvites,
+        )) {
+          final OutgoingInvite? invite = OutgoingInvite.fromJson(e.value);
+          if (e.key is String && invite != null) {
+            outgoingInvites[e.key as String] = invite;
           }
         }
       }
@@ -426,6 +470,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         backgroundAlerts = _withInboxMessages(backgroundAlerts, inboxMessages);
       }
       records.addAll(friendshipRecordsFromJson(decoded['friendships']));
+      // Blocks by person (from 1.17.0; older builds ignore them).
+      blocks = blockRecordsFromJson(decoded['blocks']);
       final Object? clockValue = decoded['friendshipClock'];
       if (clockValue is int && clockValue > 0) {
         clock = Hlc.fromInt(clockValue);
@@ -485,6 +531,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         records: records,
         clock: clock,
       ),
+      blocks: BlockBook.restore(blocks),
       groups: groups,
       inbox: inbox,
       pendingSignalCount: pendingSignalCount,
@@ -496,7 +543,10 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: peerProfiles,
       profileSentVersion: profileSentVersion,
       disappearingTimers: disappearingTimers,
+      disappearTimersSetAt: disappearTimersSetAt,
       disappearedMessages: disappearedMessages,
+      readElsewhere: readElsewhere,
+      outgoingInvites: outgoingInvites,
       notificationPrivacy: notificationPrivacy,
       mutedUntil: mutedUntil,
       groupNotifyAll: groupNotifyAll,
@@ -690,7 +740,17 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         // hands it (see `CallSession.acceptToken`).
         'callAcceptToken': ?activeCall?.acceptToken,
         'disappear': state.disappearingTimers,
+        if (state.disappearTimersSetAt.isNotEmpty)
+          'disappearAt': state.disappearTimersSetAt,
         'disappeared': state.disappearedMessages,
+        if (state.readElsewhere.isNotEmpty)
+          'readElsewhere': state.readElsewhere,
+        if (state.outgoingInvites.isNotEmpty)
+          'outgoingInvites': <String, dynamic>{
+            for (final MapEntry<String, OutgoingInvite> e
+                in state.outgoingInvites.entries)
+              e.key: e.value.toJson(),
+          },
         'notifyPrivacy': <String, String>{
           for (final MapEntry<String, NotificationPrivacy> e
               in state.notificationPrivacy.entries)
@@ -741,6 +801,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           'friendships': friendshipRecordsToJson(state.book.records),
         if (state.book.clock != Hlc.zero)
           'friendshipClock': state.book.clock.toInt(),
+        if (!state.blocks.isEmpty)
+          'blocks': blockRecordsToJson(state.blocks.records),
       }),
     );
 
@@ -807,6 +869,7 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       lifecycle: state.lifecycle,
       // Immutable: shared as it is.
       book: state.book,
+      blocks: state.blocks,
       groups: Map<String, GroupProfile>.from(state.groups),
       inbox: List<InboxEntry>.from(state.inbox, growable: false),
       pendingSignalCount: state.pendingSignalCount,
@@ -821,7 +884,10 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: Map<String, PeerPublicProfile>.from(state.peerProfiles),
       profileSentVersion: state.profileSentVersion,
       disappearingTimers: Map<String, int>.from(state.disappearingTimers),
+      disappearTimersSetAt: Map<String, int>.from(state.disappearTimersSetAt),
       disappearedMessages: Map<String, int>.from(state.disappearedMessages),
+      readElsewhere: Map<String, int>.from(state.readElsewhere),
+      outgoingInvites: Map<String, OutgoingInvite>.from(state.outgoingInvites),
       notificationPrivacy: Map<String, NotificationPrivacy>.from(
         state.notificationPrivacy,
       ),

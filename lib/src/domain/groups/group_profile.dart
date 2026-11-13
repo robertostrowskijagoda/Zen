@@ -15,6 +15,15 @@ const String kGroupAddedKey = 'added';
 /// clocks): the newcomer never heard those leaves.
 const String kGroupLeftKey = 'left';
 
+/// The key of a `group_invite` that tells who was added by name and when
+/// (address to time, by the adders' clocks, see [GroupProfile.addedAt]): in
+/// an update, the additions its sender knew of besides the one it makes
+/// (a member who knows of others tells the newcomer of them); in the
+/// members' list for someone who just joined, and in what a member tells a
+/// newcomer of others added meanwhile, the additions among its addresses.
+/// Zen 1.16.5 ignores it.
+const String kGroupAddsKey = 'adds';
+
 @immutable
 final class GroupProfile {
   const GroupProfile({

@@ -50,6 +50,11 @@ typedef CallMediaErrorListener = void Function(String? callId, Object error);
 /// a fast connection.
 const int kCallVideoMaxBitrate = 1800000;
 
+/// How often the other side's picture is checked while a call's media are
+/// connected and no frame of it reached the screen yet
+/// ([RemotePictureWatch]).
+const Duration kRemotePictureLookInterval = Duration(seconds: 2);
+
 abstract class CallMediaSessionController extends ChangeNotifier {
   RTCVideoRenderer? get localRenderer;
   RTCVideoRenderer? get remoteRenderer;
@@ -67,6 +72,13 @@ abstract class CallMediaSessionController extends ChangeNotifier {
   /// was lost or overwritten (the first call after Zen started, now and
   /// then) no longer leaves it on "Łączenie…" without its buttons.
   bool get isConnected => false;
+
+  /// Whether the controls of [activeCallId] (microphone, loudspeaker,
+  /// camera) can act on its media now: they are set up and the first offer
+  /// or answer went out, so a change no longer races that setup. On an
+  /// outgoing call that is a moment after the ringing starts, before the
+  /// other side answers; on an incoming one a moment after accepting.
+  bool get controlsReady => false;
 
   /// Whether the call's sound is on a headset now (a car's Bluetooth,
   /// earphones): out loud, hands free, so "Głośnik" shows on.
@@ -514,6 +526,14 @@ final class WebRtcCallMediaSessionController
           RTCPeerConnectionState.RTCPeerConnectionStateConnected;
 
   @override
+  bool get controlsReady =>
+      !_disposed &&
+      _activeCallId != null &&
+      _peerConnection != null &&
+      _localStream != null &&
+      (_lastSentOfferDescription != null || _lastSentAnswerDescription != null);
+
+  @override
   bool get remoteScreenSharing => _remoteScreenSharing;
 
   @override
@@ -900,6 +920,33 @@ final class WebRtcCallMediaSessionController
   CallInviteKind? _pendingRenegotiationKind;
   String? _lastBoundRemoteVideoTrackId;
 
+  /// The other side's camera tracks that WebRTC has announced here (their
+  /// `onTrack` or `onAddStream`): the only ones [_remoteRenderer] is bound
+  /// to. flutter_webrtc on Android also reports each track earlier, with
+  /// the plan-B `onAddTrack`, sent from inside the same native callback
+  /// before that callback registers the track and before `onAddStream`
+  /// registers its stream; a renderer bound then is bound to nothing,
+  /// silently, whenever Dart answers faster than the native thread goes
+  /// on. The decoder then counts every frame and the screen stays black
+  /// for the whole call.
+  final Set<String> _announcedRemoteTracks = <String>{};
+
+  /// A frame of the bound remote track reached the screen (the renderer's
+  /// first-frame event since it was last bound to a new track).
+  bool _remotePictureShown = false;
+  Timer? _pictureWatchTimer;
+  RemotePictureWatch? _pictureWatch;
+
+  /// "Call video now: …" went into the technical log for this call.
+  bool _videoPathLogged = false;
+
+  /// The other side's last description listed VP8 among its video codecs.
+  bool _remoteListsVp8 = false;
+
+  /// The offer of the negotiation under way (ours or theirs, as applied),
+  /// for what each side sends once its answer is set.
+  String? _offerSdpForCodecs;
+
   /// Synchronizes [_remoteRenderer] with the remote stream that contains active video.
   ///
   /// In flutter_webrtc, RTCVideoRenderer binds to video tracks at the native
@@ -937,7 +984,13 @@ final class WebRtcCallMediaSessionController
   /// existing MediaStream without resetting srcObject will not attach the native
   /// video sink, leaving the remote video invisible. Rebinding srcObject forces
   /// the platform renderer to register the new video track.
-  void _syncRemoteRenderer() {
+  ///
+  /// Only a track WebRTC has announced ([_announcedRemoteTracks]) is bound,
+  /// and by its id ([_bindRemoteCamera]). [rebind] binds it again even when
+  /// it is the one bound already: each announcement may come with a new
+  /// native track object (a renegotiation keeps the id), and binding the
+  /// same object twice changes nothing on the platform.
+  void _syncRemoteRenderer({bool rebind = false}) {
     if (_disposed ||
         !_renderersInitialized ||
         _remoteRenderer.textureId == null) {
@@ -962,23 +1015,173 @@ final class WebRtcCallMediaSessionController
         _remoteStream!.getVideoTracks().isNotEmpty) {
       target = _remoteStream;
     }
-    final String? currentVideoTrackId =
-        target != null && target.getVideoTracks().isNotEmpty
-        ? target.getVideoTracks().first.id
-        : null;
+    final List<MediaStreamTrack> videoTracks =
+        target?.getVideoTracks() ?? const <MediaStreamTrack>[];
+    String? currentVideoTrackId;
+    for (final MediaStreamTrack track in videoTracks) {
+      if (_announcedRemoteTracks.contains(track.id)) {
+        currentVideoTrackId = track.id;
+        break;
+      }
+    }
 
     if (currentVideoTrackId != null &&
-        (!identical(_remoteRenderer.srcObject, target) ||
+        (rebind ||
+            !identical(_remoteRenderer.srcObject, target) ||
             currentVideoTrackId != _lastBoundRemoteVideoTrackId)) {
-      _lastBoundRemoteVideoTrackId = currentVideoTrackId;
-      _safeSetRendererSrcObject(_remoteRenderer, target);
+      _bindRemoteCamera(target!, currentVideoTrackId);
       _notify();
-    } else if (currentVideoTrackId == null &&
-        _remoteRenderer.srcObject != null) {
+    } else if (videoTracks.isEmpty && _remoteRenderer.srcObject != null) {
       _lastBoundRemoteVideoTrackId = null;
       _safeSetRendererSrcObject(_remoteRenderer, null);
       _notify();
     }
+  }
+
+  /// Binds [_remoteRenderer] to the other side's camera track [trackId]
+  /// (of [stream]). By the track, not by the stream: the platform then
+  /// takes the track object WebRTC registered before it announced the
+  /// track, instead of looking the stream up in a list that may not have
+  /// it yet.
+  void _bindRemoteCamera(MediaStream stream, String trackId) {
+    if (_disposed ||
+        !_renderersInitialized ||
+        _remoteRenderer.textureId == null) {
+      return;
+    }
+    final bool newTrack = trackId != _lastBoundRemoteVideoTrackId;
+    _lastBoundRemoteVideoTrackId = trackId;
+    if (newTrack) {
+      _remotePictureShown = false;
+    }
+    unawaitedLogged(
+      _remoteRenderer.setSrcObject(stream: stream, trackId: trackId),
+      context: 'Binding the remote video failed',
+    );
+    if (newTrack && isConnected) {
+      // A new picture of a running call (their camera on again): watched
+      // like the first one.
+      _watchRemotePicture();
+    }
+  }
+
+  /// The safety net under the remote picture: from the moment the media
+  /// connect, a look at the statistics every
+  /// [kRemotePictureLookInterval]; while frames of the bound track are
+  /// decoded and none reached the screen, the renderer is bound again
+  /// ([RemotePictureWatch]). The first look that shows video also writes
+  /// what goes out and comes in ("Call video now: …").
+  void _watchRemotePicture() {
+    _pictureWatchTimer?.cancel();
+    _pictureWatchTimer = null;
+    final RTCPeerConnection? connection = _peerConnection;
+    final String? callId = _activeCallId;
+    if (connection == null || callId == null || _disposed) {
+      _pictureWatch = null;
+      return;
+    }
+    final RemotePictureWatch watch = RemotePictureWatch();
+    _pictureWatch = watch;
+    bool current() =>
+        !_disposed &&
+        identical(_peerConnection, connection) &&
+        _activeCallId == callId &&
+        identical(_pictureWatch, watch);
+    bool looking = false;
+    Future<void> look() async {
+      if (!current()) {
+        return;
+      }
+      if (looking) {
+        return;
+      }
+      looking = true;
+      try {
+        final List<StatsReport> reports = await connection.getStats();
+        if (!current()) {
+          return;
+        }
+        if (!_videoPathLogged) {
+          final CallVideoPath path = callVideoPath(
+            reports,
+            receivedTrackId: _lastBoundRemoteVideoTrackId,
+          );
+          if (path.sends != null || path.receives != null) {
+            _videoPathLogged = true;
+            logZenMessage('Call video now: ${describeCallVideoPath(path)}');
+            final String? sends = path.sends;
+            if (sends != null &&
+                sends != '?' &&
+                sends.toUpperCase() != 'VP8' &&
+                _remoteListsVp8) {
+              logZenWarning(
+                'Call video: this side sends $sends, not VP8, although '
+                'both sides have VP8',
+              );
+            }
+          }
+        }
+        final String? trackId = _lastBoundRemoteVideoTrackId;
+        final RemotePictureStep step = watch.look(
+          shown: _remotePictureShown,
+          bound: trackId != null && _remoteRenderer.srcObject != null,
+          decoded: remoteVideoFramesDecoded(reports, trackId: trackId),
+        );
+        switch (step) {
+          case RemotePictureStep.wait:
+            return;
+          case RemotePictureStep.done:
+            if (_videoPathLogged || watch.looks > watch.maxLooks) {
+              _pictureWatchTimer?.cancel();
+              _pictureWatchTimer = null;
+            }
+            return;
+          case RemotePictureStep.rebind:
+            logZenWarning(
+              'Call video: their frames are decoded but none reached the '
+              'screen; the renderer is bound to their track again '
+              '(${watch.rebinds}. time)',
+            );
+            await _rebindRemoteCamera();
+        }
+      } finally {
+        looking = false;
+      }
+    }
+
+    unawaitedLogged(look(), context: 'Watching the remote picture failed');
+    _pictureWatchTimer = Timer.periodic(kRemotePictureLookInterval, (_) {
+      if (!current() || watch.looks > watch.maxLooks) {
+        _pictureWatchTimer?.cancel();
+        return;
+      }
+      unawaitedLogged(look(), context: 'Watching the remote picture failed');
+    });
+  }
+
+  /// The bound remote track, unbound and bound again: the platform
+  /// renderer starts over on it (and reports its first frame anew).
+  Future<void> _rebindRemoteCamera() async {
+    final MediaStream? stream = _remoteRenderer.srcObject;
+    final String? trackId = _lastBoundRemoteVideoTrackId;
+    if (stream == null ||
+        trackId == null ||
+        _disposed ||
+        !_renderersInitialized ||
+        _remoteRenderer.textureId == null) {
+      return;
+    }
+    _remotePictureShown = false;
+    try {
+      await _remoteRenderer.setSrcObject(stream: null);
+      if (_disposed || _lastBoundRemoteVideoTrackId != trackId) {
+        return;
+      }
+      await _remoteRenderer.setSrcObject(stream: stream, trackId: trackId);
+    } on Object catch (error) {
+      logZenWarning('Binding the remote video again failed: $error');
+    }
+    _notify();
   }
 
   /// [notifyListeners] after [dispose] throws, and teardown is asynchronous:
@@ -1100,6 +1303,8 @@ final class WebRtcCallMediaSessionController
           'description': _lastSentOfferDescription,
         },
       );
+      // The controls work from here on, while it still rings.
+      _notify();
     } catch (error) {
       _emitError(error);
       await close();
@@ -1223,32 +1428,51 @@ final class WebRtcCallMediaSessionController
     if (connection == null) {
       return;
     }
-    // The callee re-sends its answer until the call connects, so repeats are
-    // expected. An answer only applies to an outstanding local offer; setting
-    // a second one throws, and the error path hangs the call up.
+    // The callee re-sends its answer until the call connects, and the same
+    // answer comes directly, from the mailbox and through the account's
+    // other devices: repeats are expected. An answer only applies to an
+    // outstanding local offer; setting a second one throws, and the error
+    // path hangs the call up. Taken at once, so a copy that comes while
+    // the first is still being applied is a repeat too.
     if (!_awaitingRemoteAnswer) {
+      logZenMessage('Call answer: a copy of the one applied, left alone');
       return;
     }
+    _awaitingRemoteAnswer = false;
     try {
       // Keys before the answer lands, so no frame comes in without them.
       await _acceptE2eeAnswer(description[kMediaE2eeField]);
       await _setRemoteDescriptionPinned(description);
-      _awaitingRemoteAnswer = false;
+      logZenMessage('Call answer applied');
       _syncRemoteRenderer();
       _notify();
       if (isConnected) {
         // An answer to a camera or screen offer: what it changed.
         _scheduleCallStats('answer');
       }
-      final CallInviteKind? pending = _pendingRenegotiationKind;
-      _pendingRenegotiationKind = null;
-      if (pending != null) {
-        await _sendRenegotiationOffer(pending);
-      }
+      await _flushPendingRenegotiation();
     } catch (error) {
+      if (identical(_peerConnection, connection)) {
+        // Not applied: a later copy may still be.
+        _awaitingRemoteAnswer = true;
+      }
       _emitError(error);
       rethrow;
     }
+  }
+
+  /// Sends the offer a camera or screen change left waiting
+  /// ([_renegotiateWhenStable]) once nothing stands in its way any more.
+  Future<void> _flushPendingRenegotiation() async {
+    final CallInviteKind? pending = _pendingRenegotiationKind;
+    if (pending == null ||
+        _awaitingRemoteAnswer ||
+        !isConnected ||
+        _peerConnection == null) {
+      return;
+    }
+    _pendingRenegotiationKind = null;
+    await _sendRenegotiationOffer(pending);
   }
 
   @override
@@ -1779,8 +2003,14 @@ final class WebRtcCallMediaSessionController
     }
   }
 
+  /// The offer for a camera or screen change: at once in a connected call;
+  /// while the first offer still waits for its answer, or before the media
+  /// connected (the camera switched while it rings, or right after
+  /// accepting), once the answer is applied and the media are connected
+  /// ([_flushPendingRenegotiation]). An offer of the callee that reached
+  /// the caller before its answer would be taken for a new call there.
   Future<void> _renegotiateWhenStable(CallInviteKind kind) async {
-    if (_awaitingRemoteAnswer) {
+    if (_awaitingRemoteAnswer || !isConnected) {
       _pendingRenegotiationKind = kind;
       return;
     }
@@ -1818,6 +2048,11 @@ final class WebRtcCallMediaSessionController
     _localCandidateIp = null;
     _lastConnectionState = null;
     _lastRemoteOfferSdp = null;
+    _announcedRemoteTracks.clear();
+    _remotePictureShown = false;
+    _videoPathLogged = false;
+    _remoteListsVp8 = false;
+    _offerSdpForCodecs = null;
     if (captureVideo || kind == CallInviteKind.video) {
       await _ensureRenderers();
     }
@@ -1922,6 +2157,9 @@ final class WebRtcCallMediaSessionController
       if (track.kind == 'video' || _remoteStream == null) {
         _remoteStream = stream;
       }
+      // Not bound from here: this report comes before the platform has
+      // registered the track ([_announcedRemoteTracks]); its `onTrack`
+      // follows and binds it.
       _syncRemoteRenderer();
       _notify();
     };
@@ -1944,6 +2182,9 @@ final class WebRtcCallMediaSessionController
           await _bindRemoteScreen(track);
           return;
         }
+        // Registered by the platform before it announced the track: from
+        // now on the renderer can be bound to it.
+        _announcedRemoteTracks.add(track.id ?? '');
       }
       track.onMute = () {
         _syncRemoteRenderer();
@@ -2021,13 +2262,16 @@ final class WebRtcCallMediaSessionController
         }
       }
 
-      _syncRemoteRenderer();
+      // Bound again even when it is the track bound already: a
+      // renegotiation announces it anew with a new native object.
+      _syncRemoteRenderer(rebind: track.kind == 'video');
       if (track.kind == 'video') {
         final MediaStream? shown = _remoteRenderer.srcObject;
         logZenMessage(
           'Call video: remote track handed to the renderer: '
           '${_renderersInitialized && _remoteRenderer.textureId != null ? 'renderer ready' : 'NO renderer'}, '
-          '${shown == null ? 'NO stream bound' : '${shown.getVideoTracks().length} video track(s) bound'}',
+          '${shown == null ? 'NO stream bound' : '${shown.getVideoTracks().length} video track(s) bound'}, '
+          '${_lastBoundRemoteVideoTrackId == track.id ? 'bound by its track' : 'NOT bound to it'}',
         );
       }
       _notify();
@@ -2042,7 +2286,13 @@ final class WebRtcCallMediaSessionController
       if (stream.getVideoTracks().isNotEmpty || _remoteStream == null) {
         _remoteStream = stream;
       }
-      _syncRemoteRenderer();
+      // The platform has the stream now, and its tracks.
+      for (final MediaStreamTrack track in stream.getVideoTracks()) {
+        if (track.id != _remoteScreenTrackId) {
+          _announcedRemoteTracks.add(track.id ?? '');
+        }
+      }
+      _syncRemoteRenderer(rebind: stream.getVideoTracks().isNotEmpty);
       _notify();
     };
     connection.onRemoveStream = (MediaStream stream) {
@@ -2079,6 +2329,12 @@ final class WebRtcCallMediaSessionController
             CallMediaSessionLifecycle.active,
           );
           _scheduleCallStats('connected');
+          _watchRemotePicture();
+          // A camera switched while it rang, or right after accepting.
+          unawaitedLogged(
+            _flushPendingRenegotiation(),
+            context: 'Sending the waiting call offer failed',
+          );
           return;
         case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
           _disconnectGraceTimer?.cancel();
@@ -2245,8 +2501,10 @@ final class WebRtcCallMediaSessionController
       // The last step of a picture: a frame the platform drew. With these
       // two lines missing from the log while the statistics count frames
       // decoded, the picture is lost between the decoder and the screen.
-      _remoteRenderer.onFirstFrameRendered = () =>
-          logZenMessage('Call video: first remote frame on the screen');
+      _remoteRenderer.onFirstFrameRendered = () {
+        _remotePictureShown = true;
+        logZenMessage('Call video: first remote frame on the screen');
+      };
       _remoteRenderer.onResize = () => logZenMessage(
         'Call video: remote picture '
         '${_remoteRenderer.videoWidth}x${_remoteRenderer.videoHeight}',
@@ -2470,7 +2728,7 @@ final class WebRtcCallMediaSessionController
     await _e2ee?.attachAll(connection);
     // VP8 first: see call_video_codecs.dart.
     desc = await setCallLocalDescription(connection, desc);
-    _logNegotiatedVideoCodec(desc, 'our');
+    _logNegotiatedVideoCodec(desc, ours: true);
     logZenMessage(
       'Call SDP local ${desc.type}: ${describeCallSdp(desc.sdp ?? '')}',
     );
@@ -2480,19 +2738,42 @@ final class WebRtcCallMediaSessionController
     return desc;
   }
 
-  /// The video codec an answer settles (its first video codec: both sides
-  /// send with it), in the technical log; [whose] answer it is.
+  /// The video codec each side sends once an answer settles it
+  /// ([negotiatedVideoCodecs]), in the technical log: an offer is kept for
+  /// its answer, an answer ([ours] or theirs) is set against the offer it
+  /// answers.
   void _logNegotiatedVideoCodec(
-    RTCSessionDescription description,
-    String whose,
-  ) {
+    RTCSessionDescription description, {
+    required bool ours,
+  }) {
+    final String sdp = description.sdp ?? '';
+    if (description.type == 'offer') {
+      _offerSdpForCodecs = sdp;
+      return;
+    }
     if (description.type != 'answer') {
       return;
     }
-    final String? codec = firstVideoCodecInSdp(description.sdp ?? '');
-    if (codec != null) {
-      logZenMessage('Call video codec: $codec both ways ($whose answer)');
+    final String whose = ours ? 'our' : 'their';
+    final String? offer = _offerSdpForCodecs;
+    if (offer == null) {
+      final String? codec = firstVideoCodecInSdp(sdp);
+      if (codec != null) {
+        logZenMessage('Call video codec: $whose answer lists $codec first');
+      }
+      return;
     }
+    final ({String? offererSends, String? answererSends}) codecs =
+        negotiatedVideoCodecs(offer: offer, answer: sdp);
+    final String? weSend = ours ? codecs.answererSends : codecs.offererSends;
+    final String? theySend = ours ? codecs.offererSends : codecs.answererSends;
+    if (weSend == null && theySend == null) {
+      return;
+    }
+    logZenMessage(
+      'Call video codec: this side sends ${weSend ?? 'none'}, the other '
+      'side ${theySend ?? 'none'} ($whose answer)',
+    );
   }
 
   /// Makes every video sender start again with a key frame (its encoding
@@ -2704,10 +2985,13 @@ final class WebRtcCallMediaSessionController
       _screenMid ??= screenSlot.mid;
       _remoteScreenStreamId = screenSlot.streamId ?? _remoteScreenStreamId;
     }
+    // VP8 first whatever the other side listed first: this side sends the
+    // first of its codecs (see call_video_codecs.dart).
+    final String applied = preferVp8InRemoteSdp(original.sdp ?? '');
     // Never the peer's original SDP: its candidates carry LAN/public
     // addresses, and ICE could then route the media around the mesh.
     await applyRemoteSdpViaLocalRelay(
-      sdp: original.sdp ?? '',
+      sdp: applied,
       type: original.type ?? 'offer',
       relayPort: _relayPort ?? 0,
       apply: (String value, String kind) =>
@@ -2719,7 +3003,13 @@ final class WebRtcCallMediaSessionController
       'Call SDP remote ${original.type}: '
       '${describeCallSdp(original.sdp ?? '')}',
     );
-    _logNegotiatedVideoCodec(original, 'their');
+    _remoteListsVp8 = videoCodecsInSdp(
+      applied,
+    ).any((String codec) => codec.toUpperCase() == 'VP8');
+    _logNegotiatedVideoCodec(
+      RTCSessionDescription(applied, original.type),
+      ours: false,
+    );
     await _e2ee?.attachAll(connection);
     _remoteDescriptionSet = true;
     await _waitForRelayMetadata();
@@ -2797,6 +3087,10 @@ final class WebRtcCallMediaSessionController
     }
     _statsTimers.clear();
     _statsTaken = 0;
+    _pictureWatchTimer?.cancel();
+    _pictureWatchTimer = null;
+    _pictureWatch = null;
+    _announcedRemoteTracks.clear();
     final MediaE2eeChannel? e2ee = _e2ee;
     _e2ee = null;
     _e2eeAnswer = null;

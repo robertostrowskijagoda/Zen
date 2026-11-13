@@ -46,10 +46,11 @@ import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/ledger/contacts_backup.dart'
-    show contactsItemWithStamps;
+    show contactsItemWithStamps, contactsMemberNames;
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/media/outgoing_media.dart';
 import 'package:zen/src/features/profile/profile_card.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
@@ -60,13 +61,18 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart'
-    show kGroupJoinedAck, kMaxGroupMessageChars, kMaxSignalIdChars;
+    show
+        isCallTakenElsewhere,
+        kGroupJoinedAck,
+        kMaxGroupMessageChars,
+        kMaxSignalIdChars;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/mentions.dart';
@@ -396,6 +402,13 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// the state in memory is the user's own and a failed re-read changes
   /// nothing.
   bool _snapshotLoaded = false;
+
+  /// Set while one signal is taken in (`receiveSignal`, one at a time) when
+  /// it was neither kept nor refused for good, only put off: it is to come
+  /// again (the friend list could not be read, an edit whose message is not
+  /// here yet). Its sender is then not told it arrived, and its next copy
+  /// is taken in like the first.
+  bool _signalWaits = false;
 
   /// Logged once per run: saving is paused over an unreadable snapshot.
   bool _loggedPausedSave = false;
@@ -956,6 +969,10 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   /// The active call was answered while Zen was not on the screen.
   bool _callAnsweredOffScreen = false;
+
+  /// The call whose "Głośnik" was switched before it connected: routed once
+  /// more when it does.
+  String? _speakerChosenBeforeConnectFor;
   final Map<String, int> _openedAt = <String, int>{};
 
   /// [hub] as saved: each friend's presence with its latest confirmation
@@ -1189,6 +1206,47 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required String peerAddress,
     required String messageId,
   });
+
+  /// The account behind [address] as the ledger tells it (a friend, a
+  /// friend's other device, a device that proved itself), never this
+  /// account's own; null when unknown.
+  String? _blockAccountOf(String address) {
+    final AccountDeviceDirectory? dir = ref
+        .read(accountDirectoryHolderProvider)
+        .directory;
+    final String? account = dir?.accountOf(address);
+    return account == null || account.isEmpty || account == dir!.ownAccount
+        ? null
+        : account;
+  }
+
+  /// Whether [address] is a blocked person's although its own entry is not
+  /// blocked: another device of a blocked account, or an address a block
+  /// made elsewhere (Dating, "W pobliżu", followers) names. A friend's own
+  /// entry decides for itself.
+  bool _blockedPersonAt(String address) {
+    final FriendProfile? own = state.friendByAddress(address);
+    if (own?.status == FriendRelationshipStatus.accepted ||
+        own?.status == FriendRelationshipStatus.blocked) {
+      return false;
+    }
+    if (state.blocks.blocksAddress(address)) {
+      return true;
+    }
+    final String? account = _blockAccountOf(address);
+    if (account == null) {
+      return false;
+    }
+    if (state.blocks.blocksAccount(account)) {
+      return true;
+    }
+    for (final FriendProfile f in state.blockedFriends) {
+      if (_blockAccountOf(f.address) == account) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   /// Whether [address] is this device or another device of this account.
   bool _isOwnDeviceAddress(String address) {
@@ -1777,6 +1835,25 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Tells this account's other devices that the group [groupId] was read
   /// here (`social_hub_controller_messages.dart`).
   Future<void> _mirrorGroupRead(String groupId);
+
+  /// A message just kept here that another device of this account read
+  /// before it came: taken in read (`social_hub_controller_messages.dart`).
+  Future<bool> _takenAsReadElsewhere(ZenSignal signal, int timestamp);
+
+  /// Sends the invitation to [peerAddress] again
+  /// (`social_hub_controller_social.dart`).
+  Future<void> resendFriendRequest({required String peerAddress});
+
+  /// Whether the invitation to [address] reached them, or was given up
+  /// (`social_hub_controller_social.dart`).
+  Future<void> _applyFriendInviteReport(
+    String address, {
+    required bool delivered,
+  });
+
+  /// A call ringing here that another device of this account answered or
+  /// declined: it stops without a word (`social_hub_controller_messages.dart`).
+  Future<void> _endCallTakenElsewhere(ZenSignal signal, int timestamp);
 
   Future<void> _sendCallSignal({
     required String remoteAddress,

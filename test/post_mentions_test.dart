@@ -36,6 +36,9 @@ final class _Phone {
   bool inFront = false;
   NotificationPrivacy global = NotificationPrivacy.senderAndContent;
   final Map<String, NotificationPrivacy> own = <String, NotificationPrivacy>{};
+
+  /// The accounts this person blocked.
+  final Set<String> blocked = <String>{};
   late final PostMentionService service = _service();
 
   LedgerNode get node => mesh[name];
@@ -59,6 +62,8 @@ final class _Phone {
       privacyOf: (String address) => own[address] ?? global,
       privacy: () => global,
       friendOfFriend: (String address) => listed[address],
+      blocked: ({required String account, required String address}) =>
+          blocked.contains(account),
     )..start();
     addTearDown(s.dispose);
     return s;
@@ -420,6 +425,24 @@ void main() {
       final _Phone again = _Phone(mesh, 'ada')..service.start();
       expect(await _danMentions(mesh, again, post, 99), isFalse);
       expect(again.inbox, isEmpty);
+    });
+
+    test('someone blocked mentions nobody: nothing is told; unblocked, the '
+        'next mention is', () async {
+      final LedgerMesh mesh = await world();
+      final _Phone ada = _Phone(mesh, 'ada');
+      ada.service.start();
+      final LogEntry post = await mesh['ada'].publish(
+        kPostKind,
+        newPostBody('Mój post'),
+      );
+      ada.blocked.add(mesh['dan'].account);
+      expect(await _danMentions(mesh, ada, post, 0), isFalse);
+      expect(ada.inbox, isEmpty);
+      expect(ada.shown, isEmpty);
+      ada.blocked.clear();
+      expect(await _danMentions(mesh, ada, post, 1), isTrue);
+      expect(ada.inbox.single.body, '@Ada 1');
     });
 
     test('mentions by people who are not friends are limited under one '

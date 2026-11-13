@@ -96,10 +96,15 @@ final class UpdateNoticeState {
   /// The newest release newer than this build that a check found.
   final String? newestVersion;
 
-  /// The version the notification was shown for.
+  /// The version the notification was shown for. Like [dismissedVersion]
+  /// it holds back the notice of every version up to it, so it is kept only
+  /// for a version the release's signed sums vouch for
+  /// (`githubReleaseSigned`, github_update_service.dart), and forgotten
+  /// once those sums are gone (`forgetWithdrawnUpdateVersions`).
   final String? notifiedVersion;
 
-  /// The version whose banner the person closed.
+  /// The version whose banner the person closed (kept as
+  /// [notifiedVersion]).
   final String? dismissedVersion;
 
   /// When a check last failed (nothing answered, or only with an error),
@@ -182,6 +187,25 @@ final class UpdateNoticeState {
       newestVersion: over(newestVersion) ? null : newestVersion,
       notifiedVersion: over(notifiedVersion) ? null : notifiedVersion,
       dismissedVersion: over(dismissedVersion) ? null : dismissedVersion,
+      failedAtMillis: failedAtMillis,
+      error: error,
+      retryAtMillis: retryAtMillis,
+      failures: failures,
+    );
+  }
+
+  /// The announced or closed [versions] turned out not to be releases
+  /// (withdrawn, or never published): forgotten, so they hold back nothing.
+  UpdateNoticeState forgetting(Set<String> versions) {
+    return UpdateNoticeState(
+      checkedAtMillis: checkedAtMillis,
+      newestVersion: newestVersion,
+      notifiedVersion: versions.contains(notifiedVersion)
+          ? null
+          : notifiedVersion,
+      dismissedVersion: versions.contains(dismissedVersion)
+          ? null
+          : dismissedVersion,
       failedAtMillis: failedAtMillis,
       error: error,
       retryAtMillis: retryAtMillis,
@@ -394,7 +418,10 @@ RuntimeSystemNotification updateAvailableNotification(
 /// not at all when its banner was already closed. A newer version is
 /// shown again, in the place of the one before ([kUpdateNoticeSlot]): a
 /// notice or a closed banner of 1.13.1 never holds back 1.14.0. Returns
-/// whether it was shown now.
+/// whether it was shown now. Since what it keeps holds back every version
+/// up to [version], callers pass only a version that what the app trusts
+/// vouches for: its signed sums (`githubReleaseSigned`), or a release the
+/// maintainers signed that came from friends.
 Future<bool> announceUpdateOnce({
   required UpdateNoticeStore store,
   required RuntimeSystemNotificationService notices,

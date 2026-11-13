@@ -9,6 +9,8 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// [bytes] as people read it (KB / MB).
 String circleBackupSize(int bytes) {
@@ -20,8 +22,9 @@ String circleBackupSize(int bytes) {
 
 /// "Kopia u znajomych" in "Konto i odzyskiwanie": when friends (or the
 /// circle) last confirmed a copy and how big it is, that nobody can keep
-/// it while there is no friend, whether conversation text goes in, the
-/// restore after a recovery, and the copies this device keeps for others.
+/// it while there is no friend, whether the passwords and conversation text
+/// go in, the restore after a recovery, and the copies this device keeps
+/// for others.
 class CircleBackupCard extends ConsumerWidget {
   const CircleBackupCard({super.key});
 
@@ -32,6 +35,11 @@ class CircleBackupCard extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final ZenColors zen = ZenColors.of(context);
+    final bool passwords = ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings s) => s.passwordsInCircleBackup,
+      ),
+    );
     return AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[
         service.status,
@@ -96,14 +104,52 @@ class CircleBackupCard extends ConsumerWidget {
               ],
               const SizedBox(height: 8),
               ZenInfo(
+                key: const Key('circle-backup-contents'),
                 icon: Icons.lock_outline_rounded,
-                text: t(
-                  'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, którzy '
-                  'są Twoimi skrzynkami, i bliscy znajomi) oraz osoby '
-                  'z kręgu odzyskiwania, jeśli go masz: profil, znajomych, '
-                  'grupy, ustawienia, piramidę, hasła, notatki, a także '
-                  'teksty rozmów. Nie mogą jej odczytać. Po odzyskaniu konta '
-                  'Zen sam ją pobierze.',
+                text: passwords
+                    ? t(
+                        'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, '
+                        'którzy są Twoimi skrzynkami, i bliscy znajomi): profil, '
+                        'znajomych, grupy, ustawienia, piramidę, hasła, '
+                        'notatki, a także teksty rozmów. Nie mogą jej '
+                        'odczytać. Po odzyskaniu konta Zen sam ją pobierze.',
+                      )
+                    : t(
+                        'Zaszyfrowaną kopię przechowują wybrani znajomi (ci, '
+                        'którzy są Twoimi skrzynkami, i bliscy znajomi): profil, '
+                        'znajomych, grupy, ustawienia, piramidę, notatki, a '
+                        'także teksty rozmów — bez haseł. Nie mogą jej '
+                        'odczytać. Po odzyskaniu konta Zen sam ją pobierze.',
+                      ),
+              ),
+              SwitchListTile(
+                key: const Key('circle-backup-passwords'),
+                contentPadding: EdgeInsets.zero,
+                value: passwords,
+                onChanged: (bool value) => unawaited(
+                  ref
+                      .read(appSettingsControllerProvider.notifier)
+                      .setPasswordsInCircleBackup(value),
+                ),
+                title: Text(t('Hasła w kopii u znajomych')),
+                subtitle: Text(
+                  passwords
+                      ? t(
+                          'Zamknięte. Otworzy je tylko ten, kto ma klucz '
+                          'Twojego konta: kartkę z kluczem albo kawałki '
+                          'klucza od bliskich znajomych i hasło konta. Dzięki '
+                          'temu hasła wrócą po odzyskaniu konta z samego '
+                          'klucza. Ustawienie jest takie samo na wszystkich '
+                          'Twoich urządzeniach.',
+                        )
+                      : t(
+                          'Wyłączone: nowa kopia bez haseł od razu zastępuje '
+                          'tę u znajomych, którzy są w sieci (u pozostałych, '
+                          'gdy się połączą). Po odzyskaniu konta z samego '
+                          'klucza hasła nie wrócą; z innego urządzenia albo '
+                          'z pliku kopii — tak. Ustawienie jest takie samo na '
+                          'wszystkich Twoich urządzeniach.',
+                        ),
                 ),
               ),
               SwitchListTile(
@@ -120,15 +166,50 @@ class CircleBackupCard extends ConsumerWidget {
                   ),
                 ),
               ),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(
-                  key: const Key('circle-backup-now'),
-                  onPressed: () => unawaited(service.refresh(force: true)),
-                  icon: const Icon(Icons.sync_rounded),
-                  label: Text(t('Zrób kopię teraz')),
+              if (status.blocked > 0) ...<Widget>[
+                ZenInfo(
+                  key: const Key('circle-backup-blocked'),
+                  icon: Icons.schedule_rounded,
+                  tone: zen.warning,
+                  text: tn(
+                    status.blocked,
+                    one:
+                        '{n} osoba od kilku dni nie przyjmuje nowych kopii: '
+                        'ma kopię Twojego konta z późniejszą datą. Sprawdź '
+                        'datę i godzinę na swoich urządzeniach.',
+                    few:
+                        '{n} osoby od kilku dni nie przyjmują nowych kopii: '
+                        'mają kopię Twojego konta z późniejszą datą. Sprawdź '
+                        'datę i godzinę na swoich urządzeniach.',
+                    many:
+                        '{n} osób od kilku dni nie przyjmuje nowych kopii: '
+                        'mają kopię Twojego konta z późniejszą datą. Sprawdź '
+                        'datę i godzinę na swoich urządzeniach.',
+                  ),
                 ),
-              ),
+                const SizedBox(height: 8),
+              ],
+              if (!service.restoring || restore.freshCopy)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    key: const Key('circle-backup-now'),
+                    onPressed: () => unawaited(service.refresh(force: true)),
+                    icon: const Icon(Icons.sync_rounded),
+                    label: Text(t('Zrób kopię teraz')),
+                  ),
+                )
+              else
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    key: const Key('circle-backup-fresh'),
+                    onPressed: () =>
+                        unawaited(_confirmFreshCopy(context, service)),
+                    icon: const Icon(Icons.sync_problem_rounded),
+                    label: Text(t('Zrób nową kopię z tego urządzenia')),
+                  ),
+                ),
               if (restore.phase != CircleBackupRestorePhase.idle)
                 _RestoreProgress(restore: restore),
               ..._held(context, service),
@@ -137,6 +218,45 @@ class CircleBackupCard extends ConsumerWidget {
         );
       },
     );
+  }
+
+  /// While the old copy is still looked for after a recovery, this device
+  /// makes none of its own unless the person says so here, knowing that
+  /// it replaces the copy at the friends.
+  Future<void> _confirmFreshCopy(
+    BuildContext context,
+    CircleBackupService service,
+  ) async {
+    final bool? yes = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
+        title: Text(t('Zastąpić kopię u znajomych?')),
+        content: Text(
+          t(
+            'Zen wciąż szuka kopii z Twojego poprzedniego urządzenia. Nowa '
+            'kopia z tego telefonu zastąpi ją u znajomych, którzy ją mają: '
+            'hasła, notatki i rozmowy, których tu nie ma, przepadną, gdy '
+            'nikt nie odda starej kopii w ciągu 30 dni. Zen nadal będzie '
+            'jej szukać.',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('circle-backup-fresh-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Wiem, że stara kopia zostanie zastąpiona')),
+          ),
+        ],
+      ),
+    );
+    if (yes == true) {
+      await service.allowFreshCopy();
+    }
   }
 
   List<Widget> _held(BuildContext context, CircleBackupService service) {
@@ -195,9 +315,13 @@ class _RestoreProgress extends StatelessWidget {
         {'done': restore.done, 'total': restore.total},
       ),
       CircleBackupRestorePhase.done => t('Dane z kopii przywrócone.'),
-      CircleBackupRestorePhase.failed => t('Nie znaleziono kopii u znajomych.'),
+      CircleBackupRestorePhase.failed => t(
+        'Nie znaleziono jeszcze kopii u znajomych. Zen szuka dalej, raz '
+        'dziennie: osoby, które ją mają, mogą być długo poza siecią.',
+      ),
       CircleBackupRestorePhase.newer => t(
-        'Kopię zrobiła nowsza wersja Zen. Zaktualizuj aplikację.',
+        'Kopię zrobiła nowsza wersja Zen. Zaktualizuj aplikację: kopia '
+        'czeka u znajomych i wróci po aktualizacji.',
       ),
       CircleBackupRestorePhase.idle => '',
     };

@@ -223,6 +223,26 @@ final class _NoRealtimeSession implements RealtimeAttachmentTransferSession {
   Future<void> close() async {}
 }
 
+/// A phone's stored social state, whose reads can be made to fail (as when
+/// neither the file nor its backup reads back).
+final class _FlakySnapshotStore implements SocialSnapshotStore {
+  _FlakySnapshotStore(this.inner);
+
+  final MemorySocialSnapshotStore inner;
+  bool readsFail = false;
+
+  @override
+  Future<SocialHubState?> load() async {
+    if (readsFail) {
+      throw const FormatException('the stored friends do not read back');
+    }
+    return inner.load();
+  }
+
+  @override
+  Future<void> save(SocialHubState state) => inner.save(state);
+}
+
 /// The locked Android service of a phone: what runs while the app is locked.
 final class _LockedSide {
   _LockedSide({
@@ -288,13 +308,28 @@ final class FriendsPhone implements RelayPeerSource {
 
   final MemoryRelayStateStore relayStore = MemoryRelayStateStore();
   final MemoryMessageTimelineStore timeline = MemoryMessageTimelineStore();
+  late final _FlakySnapshotStore _snapshots = _FlakySnapshotStore(
+    MemorySocialSnapshotStore(_seed),
+  );
+
+  /// Whether the stored friends and groups cannot be read back (a storage
+  /// error, a read that does not end on a busy start): the app learns it
+  /// at its next start ([FriendsWorld.restartApp]).
+  bool get friendListUnreadable => _snapshots.readsFail;
+  set friendListUnreadable(bool value) => _snapshots.readsFail = value;
   final RecordingNotices notices = RecordingNotices();
   final StreamController<SignalTransportFrame> _appFrames =
       StreamController<SignalTransportFrame>.broadcast(sync: true);
 
   late final RelayEngine engine;
   late final ReliableSignalTransport transport;
-  late final ProviderContainer container;
+  late ProviderContainer container;
+
+  /// What the app keeps besides its chats and friends, kept across an app
+  /// restart ([FriendsWorld.restartApp]).
+  final MemorySignalQueueStore _queue = MemorySignalQueueStore();
+  final MemoryAttachmentTransferStore _transfers =
+      MemoryAttachmentTransferStore();
   late final RuntimeNodeRuntime _runtime;
   late final Uint8List _masterKey;
 
@@ -473,20 +508,34 @@ final class FriendsPhone implements RelayPeerSource {
       engine: engine,
       tickInterval: const Duration(days: 1),
     );
-    container = ProviderContainer(
+    container = _appContainer();
+    // The keys the locked service would hold no master key for.
+    final Random random = Random(address.hashCode);
+    _masterKey = Uint8List.fromList(
+      List<int>.generate(32, (_) => random.nextInt(256)),
+    );
+    sim.attach(_onFrame);
+    // The social state exists from here on.
+    await hub.whenHydrated;
+    await engine.activate();
+    if (world.ledgers) {
+      await _startLedger();
+    }
+  }
+
+  /// The app's side of the phone over its stores (its node, relay layer
+  /// and transport are the phone's own).
+  ProviderContainer _appContainer() {
+    return ProviderContainer(
       overrides: [
-        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
-        socialSnapshotStoreProvider.overrideWithValue(
-          MemorySocialSnapshotStore(_seed),
-        ),
+        signalQueueStoreProvider.overrideWithValue(_queue),
+        socialSnapshotStoreProvider.overrideWithValue(_snapshots),
         // As the app has it: the copies for the account's other devices
         // are told about what is written (device_chat_sync.dart).
         messageTimelineStoreProvider.overrideWithValue(
           world.ledgers ? SyncingMessageTimelineStore(timeline) : timeline,
         ),
-        attachmentTransferStoreProvider.overrideWithValue(
-          MemoryAttachmentTransferStore(),
-        ),
+        attachmentTransferStoreProvider.overrideWithValue(_transfers),
         // Friends with several devices look like one person, as in the app.
         signalTransportProvider.overrideWithValue(
           AccountRoutingTransport(
@@ -515,18 +564,17 @@ final class FriendsPhone implements RelayPeerSource {
         ),
       ],
     );
-    // The keys the locked service would hold no master key for.
-    final Random random = Random(address.hashCode);
-    _masterKey = Uint8List.fromList(
-      List<int>.generate(32, (_) => random.nextInt(256)),
-    );
-    sim.attach(_onFrame);
-    // The social state exists from here on.
-    await hub.whenHydrated;
-    await engine.activate();
+  }
+
+  /// The app starts again on the same stores: what it held in memory only
+  /// is gone, and the friends and groups are read anew.
+  Future<void> _restartApp() async {
     if (world.ledgers) {
-      await _startLedger();
+      throw StateError('Restarting the app is not done with ledgers.');
     }
+    container.dispose();
+    container = _appContainer();
+    await hub.whenHydrated;
   }
 
   /// The ledger as the app runs it: hellos with the device certificate
@@ -677,17 +725,17 @@ final class FriendsPhone implements RelayPeerSource {
         sender: from,
         payload: next.payload,
       );
-      // The relay layer hears whether the hub kept it, as the app's signal
-      // module tells it (runtime_signal_module.dart).
+      // The relay layer hears whether the hub kept it (or refused it for
+      // good), as the app's signal module tells it
+      // (runtime_signal_module.dart).
       bool kept = false;
       try {
-        if (signal != null) {
-          await hub.receiveSignal(
-            signal,
-            receivedAtMillis: next.receivedAtMillis,
-          );
-        }
-        kept = true;
+        kept =
+            signal == null ||
+            await hub.receiveSignal(
+              signal,
+              receivedAtMillis: next.receivedAtMillis,
+            );
       } finally {
         await reportReliableKept(next.payload, kept: kept);
       }
@@ -1276,6 +1324,14 @@ final class FriendsWorld {
   /// The phone [p] is locked: only its background service runs (mailbox
   /// duties, a sealed inbox for what arrives, one notice per message).
   Future<void> lock(FriendsPhone p) => p._lock();
+
+  /// [p]'s app starts again on the same stores (its node and relay layer
+  /// stay as they are): the friends and groups are read anew, and while
+  /// [FriendsPhone.friendListUnreadable] holds the app runs without them.
+  Future<void> restartApp(FriendsPhone p) async {
+    await p._restartApp();
+    await settle();
+  }
 
   /// The user unlocks [p]: the app takes over what the service kept.
   Future<void> unlock(FriendsPhone p) async {

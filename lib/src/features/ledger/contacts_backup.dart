@@ -200,6 +200,96 @@ Map<String, dynamic> contactsItemWithStamps(
   return kept.isEmpty ? item : <String, dynamic>{...item, key: kept};
 }
 
+/// The names of [members] from [names] (a group's names of everyone who
+/// ever wrote there), in the members' order, as many as fit [budget]
+/// bytes: those who left need none in a backup, and a group at the member
+/// limit with long names must still fit a part.
+Map<String, String> contactsMemberNames(
+  Map<String, String> names,
+  List<String> members, {
+  int budget = kContactsItemBytes ~/ 2,
+}) {
+  final Map<String, String> kept = <String, String>{};
+  // `"mn":{}` and, for each name, `"address":"name",`.
+  int bytes = 8;
+  for (final String a in members) {
+    final String? name = names[a];
+    if (name == null || kept.containsKey(a)) {
+      continue;
+    }
+    bytes += contactsJsonBytes(a) + contactsJsonBytes(name) + 2;
+    if (bytes > budget) {
+      break;
+    }
+    kept[a] = name;
+  }
+  return kept;
+}
+
+/// Keys of a friend's or group's item dropped, in this order, when the
+/// item is bigger than a part may hold ([fitContacts]): the record of who
+/// left a group, the names of its members, its description, a friend's
+/// name and nickname. Each comes back with the next message or profile.
+const List<String> kContactsOptionalKeys = <String>[
+  'left',
+  'mn',
+  'd',
+  'n',
+  'k',
+];
+
+/// [snapshot] made to fit parts ([splitContacts]) whatever one friend or
+/// group holds: an item bigger than [kContactsItemBytes] loses its
+/// optional keys ([kContactsOptionalKeys]) until it fits, and is left out
+/// only when even that is not enough. [trimmed] counts the items changed
+/// or left out (the health report says so); the rest is saved as it is.
+({Map<String, dynamic> snapshot, int trimmed}) fitContacts(
+  Map<String, dynamic> snapshot,
+) {
+  int trimmed = 0;
+  Object? fit(Object? item) {
+    if (contactsJsonBytes(item) <= kContactsItemBytes) {
+      return item;
+    }
+    trimmed++;
+    if (item is! Map) {
+      return null;
+    }
+    final Map<String, dynamic> slim = <String, dynamic>{
+      for (final MapEntry<dynamic, dynamic> e in item.entries)
+        '${e.key}': e.value,
+    };
+    for (final String key in kContactsOptionalKeys) {
+      if (slim.remove(key) != null &&
+          contactsJsonBytes(slim) <= kContactsItemBytes) {
+        return slim;
+      }
+    }
+    return null;
+  }
+
+  final Map<String, dynamic> out = <String, dynamic>{};
+  for (final MapEntry<String, dynamic> e in snapshot.entries) {
+    final Object? value = e.value;
+    if (value is List) {
+      out[e.key] = <Object?>[
+        for (final Object? item in value)
+          if (fit(item) case final Object kept) kept,
+      ];
+    } else if (value is Map) {
+      out[e.key] = <String, dynamic>{
+        for (final MapEntry<dynamic, dynamic> m in value.entries)
+          if (m.key is String)
+            if (fit(<Object?>[m.key, m.value]) != null)
+              m.key as String: m.value,
+      };
+    } else {
+      out[e.key] = value;
+    }
+  }
+  return (snapshot: trimmed == 0 ? snapshot : out, trimmed: trimmed);
+}
+
 /// The set of [split] whose parts are entries [seqs] of the same log, in
 /// order.
 Map<String, dynamic> contactsSetOf(ContactsSplit split, List<int> seqs) =>
@@ -393,8 +483,28 @@ final class ContactsBackupNotice extends ChangeNotifier {
   static final ContactsBackupNotice instance = ContactsBackupNotice();
 
   bool _failing = false;
+  int _trimmed = 0;
 
   bool get failing => _failing;
+
+  /// Friends or groups saved without some of what they hold (or left out)
+  /// in the newest backup, to fit it ([fitContacts]); 0 when none.
+  int get trimmed => _trimmed;
+
+  /// The newest backup was saved with [count] items trimmed.
+  void savedTrimmed(int count) {
+    if (count > 0) {
+      logZenWarning(
+        'The friends and groups backup was saved with $count items trimmed.',
+      );
+    }
+    if (!_failing && _trimmed == count) {
+      return;
+    }
+    _failing = false;
+    _trimmed = count;
+    notifyListeners();
+  }
 
   /// Saving failed for [reason] (no names, no addresses).
   void fail(String reason) {
@@ -406,12 +516,6 @@ final class ContactsBackupNotice extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// A backup was saved (or there was nothing new to save).
-  void saved() {
-    if (!_failing) {
-      return;
-    }
-    _failing = false;
-    notifyListeners();
-  }
+  /// A backup was saved whole (or there was nothing new to save).
+  void saved() => savedTrimmed(0);
 }

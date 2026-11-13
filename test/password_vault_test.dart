@@ -110,6 +110,32 @@ void main() {
     ]);
   });
 
+  test(
+    'the search folds case and accents as the chats\' search does',
+    () async {
+      final PasswordVaultService vault = _vault(MemoryLedgerDisk());
+      final PasswordEntry e = await vault.add(
+        const PasswordFields(
+          name: 'Żabka Łódź',
+          login: 'józef',
+          password: 'x',
+          address: 'https://sklep.example.pl',
+        ),
+      );
+      for (final String query in <String>[
+        'zabka',
+        'ŻABKA',
+        'lodz',
+        'Łódź',
+        'jozef',
+        'JÓZEF',
+      ]) {
+        expect(vault.search(query).single.id, e.id, reason: query);
+      }
+      expect(vault.search('zabki'), isEmpty);
+    },
+  );
+
   test('fields are checked: a password too long is refused, never cut '
       'short', () async {
     final PasswordVaultService vault = _vault(MemoryLedgerDisk());
@@ -166,8 +192,10 @@ void main() {
     expect(e.history, hasLength(kMaxPasswordHistory));
     expect(e.history.first.password, 'haslo-8');
     expect(e.history.last.password, 'haslo-4');
-    // The pruned ones are gone from the store too.
-    expect(_keys(disk), hasLength(kMaxPasswordHistory + 1));
+    // The pruned ones are gone from the store too; one marker names them,
+    // so a copy made before never brings them back.
+    expect(_keys(disk), hasLength(kMaxPasswordHistory + 2));
+    expect(jsonEncode(_stored(disk)), isNot(contains('tajne-haslo-1')));
     expect(e.createdAtMillis, first.createdAtMillis);
 
     // An unchanged edit writes nothing.

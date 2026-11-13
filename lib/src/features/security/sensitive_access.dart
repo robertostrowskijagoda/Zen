@@ -45,6 +45,84 @@ final Provider<SensitiveAccessClock> sensitiveAccessClockProvider =
       return clock;
     });
 
+/// How long the Android side keeps an autofill request open
+/// (ZenAutofillBridge.kt): no request outlives it.
+const Duration kAutofillRequestLifetime = Duration(minutes: 1);
+
+/// The lock screen passed for an autofill request that was already waiting:
+/// that unlock was the request's one question, so its picker opens without
+/// asking again ([take]).
+///
+/// Only the lock screen's own check of this account's password or
+/// fingerprint grants it, and only for the request the Android side said
+/// was open before that check ended ([waiting], then [unlocked]). It is
+/// taken once, by that request
+/// alone, within the request's lifetime counted from when it was seen open.
+/// It opens nothing else: "Hasła" and every other sensitive place still ask
+/// ([SensitiveAccessClock] is not touched). Locking forgets it.
+final class AutofillUnlockPass {
+  AutofillUnlockPass({DateTime Function()? now}) : _now = now ?? DateTime.now;
+
+  final DateTime Function() _now;
+
+  String? _waiting;
+  DateTime? _waitingSeen;
+  String? _granted;
+  DateTime? _grantedSeen;
+
+  /// While the lock screen checks a password or a fingerprint: [requestId]
+  /// is the request open now, if any. Whatever was granted before goes.
+  void waiting(String? requestId) {
+    forget();
+    _waiting = requestId;
+    _waitingSeen = requestId == null ? null : _now();
+  }
+
+  /// The check that [waiting] came right before has just opened this
+  /// account.
+  void unlocked() {
+    _granted = _waiting;
+    _grantedSeen = _waitingSeen;
+    _waiting = null;
+    _waitingSeen = null;
+  }
+
+  /// Whether the picker for [requestId] opens without asking. Gone after
+  /// this, whatever the answer: it never counts twice.
+  bool take(String requestId) {
+    final String? granted = _granted;
+    final DateTime? seen = _grantedSeen;
+    forget();
+    if (granted == null || seen == null || granted != requestId) {
+      return false;
+    }
+    final Duration age = _now().difference(seen);
+    return !age.isNegative && age < kAutofillRequestLifetime;
+  }
+
+  void forget() {
+    _waiting = null;
+    _waitingSeen = null;
+    _granted = null;
+    _grantedSeen = null;
+  }
+}
+
+final Provider<AutofillUnlockPass> autofillUnlockPassProvider =
+    Provider<AutofillUnlockPass>((Ref ref) {
+      final AutofillUnlockPass pass = AutofillUnlockPass();
+      final AppSecurityService security = ref.watch(appSecurityServiceProvider);
+      void onChange() {
+        if (security.isLocked) {
+          pass.forget();
+        }
+      }
+
+      security.addListener(onChange);
+      ref.onDispose(() => security.removeListener(onChange));
+      return pass;
+    });
+
 /// The lock screen's words for the wait after too many wrong passwords.
 String passwordWaitText(Duration wait) => t(
   'Za dużo błędnych prób. Spróbuj ponownie za {time}.',
@@ -205,6 +283,7 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
               labelText: t('Hasło aplikacji'),
               errorText: _error,
               suffixIcon: IconButton(
+                tooltip: _obscure ? t('Pokaż hasło') : t('Ukryj hasło'),
                 onPressed: () => setState(() => _obscure = !_obscure),
                 icon: Icon(
                   _obscure

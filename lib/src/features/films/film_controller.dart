@@ -110,6 +110,7 @@ final class FilmsController extends FilmsBackend {
     this.mailboxes,
     VideoCompressor? compressor,
     this.temporaryPath,
+    this.blockedAccounts,
     int Function()? clock,
   }) : compressor = compressor ?? PlatformVideoCompressor.instance,
        _clock = clock ?? _wallClock;
@@ -121,6 +122,10 @@ final class FilmsController extends FilmsBackend {
 
   /// A friend's display name by address.
   final String Function(String address) nameOf;
+
+  /// The accounts this person blocked: their films, likes, comments and
+  /// reactions are left out.
+  final Set<String> Function()? blockedAccounts;
 
   /// The mailboxes friends announced (`RelayEngine.announcedMailboxes`);
   /// null where there are none.
@@ -280,6 +285,7 @@ final class FilmsController extends FilmsBackend {
       nameOf: nameOf,
       passes: _passes,
       friendsOfFriends: _prefs.friendsOfFriends,
+      blockedAccounts: blockedAccounts?.call() ?? const <String>{},
     );
     final List<FilmPost> ranked = orderFilms(
       built,

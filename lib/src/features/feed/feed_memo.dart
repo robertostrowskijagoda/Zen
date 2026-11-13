@@ -10,7 +10,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 /// the ledger or what is readable in it ([revision], which the caller bumps
 /// on `store.changed`, `openedChanges` and newly checked reshares), the
 /// friends and followed accounts, one of their names, the pyramid's members,
-/// or the language.
+/// the people blocked in the messenger, or the language.
 final class FeedMemo {
   List<FeedPost>? _posts;
   int _revision = -1;
@@ -27,10 +27,12 @@ final class FeedMemo {
     ReshareCache? reshares,
     HeldPosts? held,
     Set<String> pyramidAddresses = const <String>{},
+    Set<String> blockedAccounts = const <String>{},
     int? nowMillis,
   }) {
     final Map<String, String> inputs = <String, String>{
       for (final String a in pyramidAddresses) 'p $a': '',
+      for (final String a in blockedAccounts) 'b $a': '',
       for (final MapEntry<String, String> e in node.friendAccounts.entries)
         'f ${e.key}': '${e.value} ${nameOf(e.key)}',
       for (final MapEntry<String, String> e in node.followedAccounts.entries)
@@ -52,6 +54,7 @@ final class FeedMemo {
         reshares: reshares,
         held: held,
         pyramidAddresses: pyramidAddresses,
+        blockedAccounts: blockedAccounts,
         nowMillis: now,
       ))
         if (!p.isOwn && keptOnWall(p, now, friends)) p,

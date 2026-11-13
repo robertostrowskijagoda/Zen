@@ -59,6 +59,20 @@ const String kCallMissedType = 'call_missed';
 /// noted ([isMissedCallNotice] in notification_privacy.dart).
 const String kMissedCallMark = 'missed';
 
+/// Set on the `call_end` a caller sends to the callee's other devices once
+/// one device of theirs answered or declined (see `AccountRoutingTransport`),
+/// and kept under the same key in [ZenSignal.chatExtras]: the ring there
+/// stops without a word, as nothing was missed ([isCallTakenElsewhere]). A
+/// Zen before 1.17.0 reads it as the caller's hang-up: it still stops
+/// ringing (and notes a missed call, as it did).
+const String kCallElsewhereKey = 'elsewhere';
+
+/// Whether [signal] ends a call that another device of this account
+/// answered or declined ([kCallElsewhereKey]).
+bool isCallTakenElsewhere(ZenSignal signal) =>
+    signal.type == ZenSignalType.callEnd &&
+    signal.chatExtras?[kCallElsewhereKey] == true;
+
 ZenSignal? zenSignalFromTransportPayload({
   required String sender,
   required Map<String, dynamic> payload,
@@ -189,6 +203,8 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         durationMs: _readInt(payload['durationMs']),
         sentAtMillis: _readTimestamp(payload['createdAt']),
         disappearSeconds: _readInt(payload['ttl']),
+        // When that timer was set (absent before 1.17.0).
+        disappearSetAt: _readInt(payload['ttlAt']),
         miniProfile: _readMiniProfile(payload['mp']),
         chatExtras: _readChatExtras(payload),
       );
@@ -294,6 +310,9 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         sender: sender,
         callId: _readString(payload['callId']),
         content: _readString(payload['kind']) ?? 'audio',
+        chatExtras: payload[kCallElsewhereKey] == true
+            ? const <String, dynamic>{kCallElsewhereKey: true}
+            : null,
       );
     case 'call_missed': // kCallMissedType
       // Names the one call it is about, like the teardown signals.
@@ -394,6 +413,7 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         displayName: _readName(payload['senderName']),
         sentAtMillis: _readTimestamp(payload['timestamp']),
         disappearSeconds: _readInt(payload['ttl']),
+        disappearSetAt: _readInt(payload['ttlAt']),
         // A file in a group: inline, or as blocks to fetch (`media`).
         messageType: groupType == ChatMessageType.text ? null : groupType,
         attachmentData: _readString(payload['attachmentData']),
@@ -512,35 +532,46 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
 
 /// What a `group_invite` carries about single members, kept in
 /// [ZenSignal.chatExtras] under the same keys: the one address a
-/// member-list update adds ([kGroupAddedKey]), and who left the group and
-/// when ([kGroupLeftKey], an address-to-time map, at most
-/// [kMaxGroupMemberCount] entries). `null` when it carries neither (a Zen
-/// before 1.16.5 sends neither).
+/// member-list update adds ([kGroupAddedKey]), who left the group and
+/// when ([kGroupLeftKey]), and who was added by name and when
+/// ([kGroupAddsKey]); each an address-to-time map of at most
+/// [kMaxGroupMemberCount] entries. `null` when it carries none (a Zen
+/// before 1.16.5 sends none).
 Map<String, dynamic>? _readGroupMembershipExtras(Map<String, dynamic> payload) {
   final String? added = _readString(payload[kGroupAddedKey]);
-  final Object? left = payload[kGroupLeftKey];
-  final Map<String, int> departures = <String, int>{};
-  if (left is Map) {
-    for (final MapEntry<dynamic, dynamic> e in left.entries) {
-      if (departures.length >= kMaxGroupMemberCount) {
-        break;
-      }
-      final String? address = _readString(e.key);
-      final int? at = _readInt(e.value);
-      if (address != null &&
-          address.length <= kMaxSignalIdChars &&
-          at != null &&
-          at > 0) {
-        departures[PeerShareCodec.normalizeAddress(address)] = at;
-      }
-    }
-  }
+  final Map<String, int> departures = _readGroupStamps(payload[kGroupLeftKey]);
+  final Map<String, int> adds = _readGroupStamps(payload[kGroupAddsKey]);
   final Map<String, dynamic> out = <String, dynamic>{
     if (added != null && added.length <= kMaxSignalIdChars)
       kGroupAddedKey: PeerShareCodec.normalizeAddress(added),
     if (departures.isNotEmpty) kGroupLeftKey: departures,
+    if (adds.isNotEmpty) kGroupAddsKey: adds,
   };
   return out.isEmpty ? null : out;
+}
+
+/// An address-to-time map of a `group_invite` ([kGroupLeftKey],
+/// [kGroupAddsKey]): at most [kMaxGroupMemberCount] entries, each a usable
+/// address with a positive time.
+Map<String, int> _readGroupStamps(Object? raw) {
+  final Map<String, int> stamps = <String, int>{};
+  if (raw is! Map) {
+    return stamps;
+  }
+  for (final MapEntry<dynamic, dynamic> e in raw.entries) {
+    if (stamps.length >= kMaxGroupMemberCount) {
+      break;
+    }
+    final String? address = _readString(e.key);
+    final int? at = _readInt(e.value);
+    if (address != null &&
+        address.length <= kMaxSignalIdChars &&
+        at != null &&
+        at > 0) {
+      stamps[PeerShareCodec.normalizeAddress(address)] = at;
+    }
+  }
+  return stamps;
 }
 
 /// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`)

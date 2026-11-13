@@ -187,7 +187,15 @@ stricter path:
   signature, is covered, recent, between members, has the next number of
   the account and fits the daily limit of its time, and never two orders
   with one number; every phone refuses an order that breaks one of these
-  rules, whoever signed it. Two majorities share at least one treasurer
+  rules, whoever signed it. **A treasurer signs only what its own ledger would
+  count:** an order dated before the money it spends (a payer's clock nine
+  minutes slow) used to be signed by every treasurer, counted by none and
+  shown as received. A refused order now says why, and is dated again by
+  itself, so the account number is not left stuck. **The person paid counts
+  a payment only once the agreed statement lists it**; until then the wallet
+  says *waiting for confirmation*. A statement keeps a majority of
+  signatures per operation and fits a signal with any number of
+  treasurers (with seven it never got sent). Two majorities share at least one treasurer
   (two when their number is even), so a payment can be spent twice only if
   those shared treasurers sign two orders with one number, and that leaves
   proof against them.
@@ -204,6 +212,9 @@ stricter path:
   past payment. A change at the treasurers' levels or a cell vote that
   arrives late counts from when it was seen: it cannot move a sealed era,
   nor a vote that its cell closed with the list of its votes.
+- **What a seal left out is shown.** A payment a seal left out, one signed
+  against the rules and a treasurer who signed two seals of one era were
+  computed but shown nowhere; the wallet now lists them.
 - Every treasurer keeps the whole private ledger, checks it for numbering
   and balance, and syncs it with the others; a new treasurer receives it
   the same way. A treasurer keeps only what a treasurer of its era signed,
@@ -342,7 +353,14 @@ pyramid).
   later who asked. The votes themselves are post-quantum. See the
   [security model](../SECURITY_MODEL.md).
 - Readers outside the pyramid trust their member friends that a verdict or
-  post came from the right person; they cannot check the records.
+  post came from the right person; they cannot check the records. A verdict
+  seen outside is shown as the word of the named friends who passed it on,
+  and shows only while a current friend stands by it; an overturning takes
+  back only its sender's word (a friend could once make a verdict up, and
+  the accused hide a real one with an overturning of their own).
+- **Known limits, not fixed in this version** (the pyramid is not open): the
+  seal of an era can stall after a late change among the treasurers, and a
+  back-dated change in a quiet pyramid can still undo a payment.
 - The power key and the one-time voting cards are made from the account
   key, so a recovered head gets the power key back (and a vote in progress
   keeps its card). Only the founder's very first power key, made outside

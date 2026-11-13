@@ -442,10 +442,10 @@ final class AppPebblePeers implements PebblePeers {
       _social.friendByAddress(address)?.status ==
       FriendRelationshipStatus.accepted;
 
+  /// Blocked anywhere in the app: the address itself, or any device of a
+  /// blocked person's account.
   @override
-  bool isBlocked(String address) =>
-      _social.friendByAddress(address)?.status ==
-      FriendRelationshipStatus.blocked;
+  bool isBlocked(String address) => blockedPeopleNow(ref).address(address);
 
   @override
   String? accountOf(String address) => _directory?.accountOf(address);

@@ -1345,7 +1345,7 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
                   controller: _money,
                   maxLength: kFoodMaxMoneyLabel,
                   decoration: InputDecoration(
-                    labelText: t('Kwota (np. 10 zł za porcję)'),
+                    labelText: t('Kwota (np. 10 za porcję)'),
                   ),
                 ),
                 ZenInfo(

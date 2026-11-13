@@ -15,10 +15,27 @@ import 'package:zen/src/features/security/secure_screen.dart';
 /// generator. Closes with the id of the entry saved. Going back with
 /// something changed asks first.
 class PasswordFormScreen extends ConsumerStatefulWidget {
-  const PasswordFormScreen({this.entryId, super.key});
+  const PasswordFormScreen({
+    this.entryId,
+    this.initial,
+    this.fixedAddress = false,
+    this.saveLabel,
+    super.key,
+  });
 
   /// The entry edited; null for a new one.
   final String? entryId;
+
+  /// What a new entry starts with (the autofill's new login: the page or
+  /// app it is for). Going back without changing it asks nothing.
+  final PasswordFields? initial;
+
+  /// The address is [initial]'s, shown as it will be saved and not to be
+  /// changed here: it is what the matching finds the entry by.
+  final bool fixedAddress;
+
+  /// The save button's words, when saving does more than save.
+  final String? saveLabel;
 
   @override
   ConsumerState<PasswordFormScreen> createState() => _PasswordFormScreenState();
@@ -51,13 +68,14 @@ class _PasswordFormScreenState extends ConsumerState<PasswordFormScreen> {
     super.initState();
     final String? id = widget.entryId;
     final PasswordEntry? entry = id == null ? null : _vault.entry(id);
-    if (entry != null) {
-      _start = entry.fields;
-      _name.text = entry.name;
-      _login.text = entry.login;
-      _password.text = entry.password;
-      _address.text = entry.address;
-      _note.text = entry.note;
+    final PasswordFields? start = entry?.fields ?? widget.initial;
+    if (start != null) {
+      _start = start;
+      _name.text = start.name;
+      _login.text = start.login;
+      _password.text = start.password;
+      _address.text = start.address;
+      _note.text = start.note;
     }
     for (final TextEditingController c in _all) {
       c.addListener(_changed);
@@ -82,7 +100,7 @@ class _PasswordFormScreenState extends ConsumerState<PasswordFormScreen> {
     name: _name.text,
     login: _login.text,
     password: _password.text,
-    address: _address.text,
+    address: widget.fixedAddress ? _start.address : _address.text,
     note: _note.text,
   );
 
@@ -184,18 +202,25 @@ class _PasswordFormScreenState extends ConsumerState<PasswordFormScreen> {
     int max, {
     TextInputType? type,
     int maxLines = 1,
+    bool readOnly = false,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: TextField(
       key: Key(key),
       controller: c,
+      readOnly: readOnly,
       keyboardType: type,
       maxLines: maxLines,
       minLines: 1,
       autocorrect: false,
       enableIMEPersonalizedLearning: false,
       textInputAction: maxLines == 1 ? TextInputAction.next : null,
-      decoration: _decoration(label, c, max),
+      decoration: _decoration(
+        label,
+        c,
+        max,
+        suffix: readOnly ? const Icon(Icons.lock_outline_rounded) : null,
+      ),
     ),
   );
 
@@ -261,29 +286,27 @@ class _PasswordFormScreenState extends ConsumerState<PasswordFormScreen> {
                   ),
                   passwordField,
                   const SizedBox(height: 8),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: _password.text.isEmpty
-                            ? const SizedBox.shrink()
-                            : PasswordStrengthLine(password: _password.text),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        key: const Key('password-generate'),
-                        onPressed: () => unawaited(_generate()),
-                        icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-                        label: Text(t('Generuj')),
-                      ),
-                    ],
+                  // The strength line has the whole width: beside the button
+                  // its word was cut on a narrow phone.
+                  if (_password.text.isNotEmpty)
+                    PasswordStrengthLine(password: _password.text),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton.icon(
+                      key: const Key('password-generate'),
+                      onPressed: () => unawaited(_generate()),
+                      icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                      label: Text(t('Generuj')),
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 4),
                   _field(
                     'password-field-address',
                     t('Adres'),
                     _address,
                     kMaxPasswordAddressChars,
                     type: TextInputType.url,
+                    readOnly: widget.fixedAddress,
                   ),
                   _field(
                     'password-field-note',
@@ -311,7 +334,7 @@ class _PasswordFormScreenState extends ConsumerState<PasswordFormScreen> {
                             _fields.problem == PasswordFieldsProblem.tooLong
                         ? null
                         : () => unawaited(_save()),
-                    child: Text(t('Zapisz')),
+                    child: Text(widget.saveLabel ?? t('Zapisz')),
                   ),
                 ],
               ),

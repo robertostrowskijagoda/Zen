@@ -9,6 +9,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/friendship_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -177,6 +178,7 @@ final class SocialHubState {
   const SocialHubState({
     required this.lifecycle,
     this.book = FriendshipBook.empty,
+    this.blocks = BlockBook.empty,
     this.groups = const <String, GroupProfile>{},
     required this.inbox,
     required this.pendingSignalCount,
@@ -189,7 +191,10 @@ final class SocialHubState {
     this.peerProfiles = const <String, PeerPublicProfile>{},
     this.profileSentVersion = 0,
     this.disappearingTimers = const <String, int>{},
+    this.disappearTimersSetAt = const <String, int>{},
     this.disappearedMessages = const <String, int>{},
+    this.readElsewhere = const <String, int>{},
+    this.outgoingInvites = const <String, OutgoingInvite>{},
     this.notificationPrivacy = const <String, NotificationPrivacy>{},
     this.mutedUntil = const <String, int>{},
     this.groupNotifyAll = const <String, bool>{},
@@ -297,6 +302,10 @@ final class SocialHubState {
   /// only way to change it (see [FriendshipBook]).
   final FriendshipBook book;
 
+  /// Who is blocked, by person, in every feature (see [BlockBook]); the
+  /// messenger's own blocks are in [book] too.
+  final BlockBook blocks;
+
   /// Every entry of [book] by normalized address (read only).
   Map<String, FriendProfile> get friends => book.profiles;
   final Map<String, GroupProfile> groups;
@@ -331,11 +340,42 @@ final class SocialHubState {
   /// address or `group:<id>`) → seconds a message lives. Absent = off.
   final Map<String, int> disappearingTimers;
 
+  /// When each timer of [disappearingTimers] was set, on the clock of whoever
+  /// set it (see `laterDisappearStamp`): only a later setting replaces it,
+  /// so a message written before a change and arriving after it does not
+  /// undo the change. Absent (0): set by Zen 1.16.5 or earlier.
+  final Map<String, int> disappearTimersSetAt;
+
   /// Disappearing messages that are gone here (see
   /// `disappearedMessageKey`) → when they expired. A copy that comes late (from a mailbox, or
   /// sent again) is dropped instead of coming back with a new clock; each
   /// is forgotten once no copy can still be on its way.
   final Map<String, int> disappearedMessages;
+
+  /// Messages read on another device of the account before they came here
+  /// (see `readElsewhereKey`) → when that was told here. Such a message comes
+  /// in read: no unread count, no notification. Each is forgotten once it
+  /// came, or once no copy of it can still be on its way.
+  final Map<String, int> readElsewhere;
+
+  /// Invitations to become friends sent from here and not answered yet, by
+  /// the invited address: whether each reached the other side (see
+  /// [OutgoingInvite]). Absent: sent by Zen 1.16.5 or earlier, not known.
+  final Map<String, OutgoingInvite> outgoingInvites;
+
+  /// What is known of the invitation sent from here to [address].
+  OutgoingInvite? outgoingInviteTo(String address) {
+    final OutgoingInvite? exact = outgoingInvites[address];
+    if (exact != null) {
+      return exact;
+    }
+    for (final MapEntry<String, OutgoingInvite> e in outgoingInvites.entries) {
+      if (PeerShareCodec.addressesEqual(e.key, address)) {
+        return e.value;
+      }
+    }
+    return null;
+  }
 
   /// Conversations whose notifications tell more or less than the setting
   /// says (`AppSettings.notificationPrivacy`): conversation key (a
@@ -396,13 +436,20 @@ final class SocialHubState {
   int? removedFriendAt(String address) => book.removedAt(address);
 
   /// Seconds messages in conversation [key] live (0 = they stay).
-  int disappearSecondsFor(String key) {
-    final int? direct = disappearingTimers[key];
+  int disappearSecondsFor(String key) =>
+      _conversationValue(disappearingTimers, key);
+
+  /// When the timer of conversation [key] was set (0: not known).
+  int disappearSetAtFor(String key) =>
+      _conversationValue(disappearTimersSetAt, key);
+
+  static int _conversationValue(Map<String, int> values, String key) {
+    final int? direct = values[key];
     if (direct != null || key.startsWith('group:')) {
       return direct ?? 0;
     }
     final String canonical = PeerShareCodec.normalizeAddress(key);
-    for (final MapEntry<String, int> e in disappearingTimers.entries) {
+    for (final MapEntry<String, int> e in values.entries) {
       if (!e.key.startsWith('group:') &&
           PeerShareCodec.addressesEqual(e.key, canonical)) {
         return e.value;
@@ -507,6 +554,7 @@ final class SocialHubState {
   SocialHubState copyWith({
     LifecycleSnapshot? lifecycle,
     FriendshipBook? book,
+    BlockBook? blocks,
     Map<String, GroupProfile>? groups,
     List<InboxEntry>? inbox,
     int? pendingSignalCount,
@@ -519,7 +567,10 @@ final class SocialHubState {
     Map<String, PeerPublicProfile>? peerProfiles,
     int? profileSentVersion,
     Map<String, int>? disappearingTimers,
+    Map<String, int>? disappearTimersSetAt,
     Map<String, int>? disappearedMessages,
+    Map<String, int>? readElsewhere,
+    Map<String, OutgoingInvite>? outgoingInvites,
     Map<String, NotificationPrivacy>? notificationPrivacy,
     Map<String, int>? mutedUntil,
     Map<String, bool>? groupNotifyAll,
@@ -529,6 +580,7 @@ final class SocialHubState {
     return SocialHubState(
       lifecycle: lifecycle ?? this.lifecycle,
       book: book ?? this.book,
+      blocks: blocks ?? this.blocks,
       groups: groups ?? this.groups,
       inbox: inbox ?? this.inbox,
       pendingSignalCount: pendingSignalCount ?? this.pendingSignalCount,
@@ -549,7 +601,10 @@ final class SocialHubState {
       peerProfiles: peerProfiles ?? this.peerProfiles,
       profileSentVersion: profileSentVersion ?? this.profileSentVersion,
       disappearingTimers: disappearingTimers ?? this.disappearingTimers,
+      disappearTimersSetAt: disappearTimersSetAt ?? this.disappearTimersSetAt,
       disappearedMessages: disappearedMessages ?? this.disappearedMessages,
+      readElsewhere: readElsewhere ?? this.readElsewhere,
+      outgoingInvites: outgoingInvites ?? this.outgoingInvites,
       notificationPrivacy: notificationPrivacy ?? this.notificationPrivacy,
       mutedUntil: mutedUntil ?? this.mutedUntil,
       groupNotifyAll: groupNotifyAll ?? this.groupNotifyAll,
@@ -617,3 +672,110 @@ int _presenceRank(PeerPresence presence) => switch (presence) {
   PeerPresence.noConnection => 1,
   PeerPresence.hidden => 0,
 };
+
+/// How a message read on another device of the account before it came here
+/// is remembered ([SocialHubState.readElsewhere]): its conversation key and
+/// id, in a group also its author (members' ids are their own and may be
+/// the same).
+String readElsewhereKey(String conversation, String id, {String author = ''}) =>
+    author.isEmpty
+    ? '$conversation\n$id'
+    : '$conversation\n$id\n${PeerShareCodec.normalizeAddress(author)}';
+
+/// How long a message read on another device is waited for here: no copy
+/// of it is on its way any more after that (mailboxes keep mail 14 days).
+const Duration kReadElsewhereMemory = Duration(days: 15);
+
+/// The most messages read elsewhere that are waited for (the oldest go).
+const int kMaxReadElsewhere = 2000;
+
+/// [remembered] (key → when it was told here) with [keys] added at
+/// [nowMillis], less what no copy can reach any more and the oldest past
+/// [kMaxReadElsewhere].
+Map<String, int> rememberReadElsewhere(
+  Map<String, int> remembered,
+  Iterable<String> keys,
+  int nowMillis,
+) {
+  final int forgetBefore = nowMillis - kReadElsewhereMemory.inMilliseconds;
+  final Map<String, int> next = <String, int>{
+    for (final MapEntry<String, int> e in remembered.entries)
+      if (e.value >= forgetBefore &&
+          e.value <= nowMillis + kReadElsewhereMemory.inMilliseconds)
+        e.key: e.value,
+  };
+  for (final String key in keys) {
+    next.remove(key);
+    next[key] = nowMillis;
+  }
+  while (next.length > kMaxReadElsewhere) {
+    next.remove(next.keys.first);
+  }
+  return next;
+}
+
+/// Where an invitation to become friends sent from here is
+/// ([SocialHubState.outgoingInvites]). It travels directly only (the other
+/// side is no friend yet, so no mailbox carries it): it arrives while both
+/// devices are online at the same time, and is given up after two weeks.
+enum OutgoingInviteStatus {
+  /// Not at the other side yet.
+  onItsWay,
+
+  /// It reached the other side's device: the answer is theirs.
+  delivered,
+
+  /// Given up without reaching them; it can be sent again, and goes again
+  /// by itself once they are heard from.
+  lost,
+}
+
+/// An invitation to become friends sent from here, not answered yet.
+@immutable
+final class OutgoingInvite {
+  const OutgoingInvite({
+    this.status = OutgoingInviteStatus.onItsWay,
+    this.token = '',
+  });
+
+  final OutgoingInviteStatus status;
+
+  /// The token of the code it was sent with (`it`), to send it again as it
+  /// was.
+  final String token;
+
+  OutgoingInvite copyWith({OutgoingInviteStatus? status}) =>
+      OutgoingInvite(status: status ?? this.status, token: token);
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    's': status.name,
+    if (token.isNotEmpty) 'it': token,
+  };
+
+  /// One as [toJson] wrote it, or null for anything else.
+  static OutgoingInvite? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final OutgoingInviteStatus? status = OutgoingInviteStatus.values
+        .asNameMap()[json['s']];
+    final Object? token = json['it'];
+    if (status == null) {
+      return null;
+    }
+    return OutgoingInvite(
+      status: status,
+      token: token is String && token.length <= 256 ? token : '',
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is OutgoingInvite && other.status == status && other.token == token;
+
+  @override
+  int get hashCode => Object.hash(status, token);
+}
+
+/// The most invitations whose way is kept ([SocialHubState.outgoingInvites]).
+const int kMaxOutgoingInvites = 500;

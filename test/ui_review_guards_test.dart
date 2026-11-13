@@ -70,9 +70,11 @@ Future<void> _settle() async {
   }
 }
 
-/// Real file reads and writes run on, one wait and one frame at a time.
-Future<void> _real(WidgetTester tester) async {
-  for (int i = 0; i < 20; i++) {
+/// Real file reads and writes run on until [done] (at most ten seconds):
+/// how long they take is the computer's, and a busy one takes longer than
+/// any fixed wait.
+Future<void> _realUntil(WidgetTester tester, bool Function() done) async {
+  for (int i = 0; i < 400 && !done(); i++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 25)),
     );
@@ -219,7 +221,12 @@ void main() {
     await tester.pump();
     await tester.tap(entry);
     await _route(tester);
-    await _real(tester);
+    await _realUntil(
+      tester,
+      () => tester
+          .widgetList<SelectableText>(find.byType(SelectableText))
+          .any((SelectableText t) => (t.data ?? '').contains('something')),
+    );
 
     expect(
       tester.widget<SelectableText>(find.byType(SelectableText)).data,
@@ -238,8 +245,10 @@ void main() {
     // Saving fails here (no system dialog in a test): the person is told
     // plainly, the exception stays in the log.
     await tester.tap(find.byKey(const Key('diagnostics-save')));
-    await tester.runAsync(() => _settle());
-    await tester.pump();
+    await _realUntil(
+      tester,
+      () => find.text('Nie udało się zapisać pliku.').evaluate().isNotEmpty,
+    );
     expect(find.text('Nie udało się zapisać pliku.'), findsOneWidget);
     final String snack = tester
         .widgetList<Text>(
@@ -274,7 +283,10 @@ void main() {
     await tester.tap(find.byKey(const Key('diagnostics-clear-confirm')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    await _real(tester);
+    await _realUntil(
+      tester,
+      () => find.byType(SelectableText).evaluate().isEmpty,
+    );
     // What was in it is gone (the app may have written a line since).
     expect(
       await tester.runAsync(ZenDiagnosticsLog.read),

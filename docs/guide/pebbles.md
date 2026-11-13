@@ -58,7 +58,12 @@ and sent from your own device; the pebble's screen shows the author how
 many people did. A finder counts once per pebble, only from a device of
 the account that signed the note, and within a daily limit; a note
 passed on by someone else, or from an account the author's phone does not
-know, does not count.
+know, does not count. **The count takes only the author's friends:** the
+account behind a note used to be looked up among everyone who ever said
+hello, so a stranger added a finder with every fresh account, up to the
+cap, where real finders were refused. Nothing proves that a finder stood at
+the sticker, so a pebble's screen says how many *of your friends* collected
+it.
 
 **Taking one back.** The author can **retire** a pebble: keepers stop
 handing it out; people who collected it keep their copy.

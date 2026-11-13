@@ -10,6 +10,7 @@ import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_link.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -511,6 +512,10 @@ final class AccountCopySource extends ChangeNotifier {
         payload: await _seal(key, AccountCopyMessages.offer, <String, dynamic>{
           'a': archive.account,
           if (archive.seed != null) 'seed': b64(archive.seed!),
+          // The seed under the account password: the new device keeps the
+          // key the way this one does (a device of 1.16.5 ignores it).
+          if (archive.seed != null && archive.wrapped != null)
+            'wk': archive.wrapped!.toJson(),
           'sib': content.siblings.take(16).toList(),
           'mid': _manifestId,
           'ms': manifest.length,
@@ -601,10 +606,14 @@ final class AccountCopyOffer {
     required this.manifestId,
     required this.manifestSize,
     required this.totalBytes,
+    this.wrapped,
   });
 
   final String account;
   final Uint8List? seed;
+
+  /// [seed] wrapped by the account password, when the account has one.
+  final PasswordWrappedSeed? wrapped;
   final List<String> siblings;
   final String manifestId;
   final int manifestSize;
@@ -755,6 +764,7 @@ final class AccountCopyTarget {
             manifestId: mid,
             manifestSize: ms,
             totalBytes: by is int ? by : ms,
+            wrapped: PasswordWrappedSeed.fromJson(body['wk']),
           ),
         );
       }
@@ -830,7 +840,9 @@ final class AccountCopyTarget {
       }),
     );
     final Uint8List? seed = offer.seed;
-    return seed == null ? archive : archive.withSeed(seed);
+    return seed == null
+        ? archive
+        : archive.withSeed(seed, wrapped: offer.wrapped);
   }
 
   /// One file, block by block; blocks already staged are skipped.

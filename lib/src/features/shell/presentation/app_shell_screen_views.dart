@@ -520,6 +520,15 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const _RelayQuietCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // A device of the account appeared after one was cut off.
+                const UnconfirmedDevicesCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
+                // The account key here is not kept under the account
+                // password (a device that took the account without it).
+                const AccountKeyGuardCard(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
                 // Enough friends for the recovery circle and none yet.
                 const CircleReminderCard(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -3147,7 +3156,9 @@ void _showGroupActionSheet(BuildContext context, GroupProfile group) {
                         content: Text(
                           t(
                             'Czy na pewno chcesz opuścić i usunąć grupę '
-                            '{group}?',
+                            '{group}? Opuścisz ją na wszystkich swoich '
+                            'urządzeniach, a jej czat i pliki znikną z '
+                            'każdego z nich.',
                             {'group': group.name},
                           ),
                         ),
@@ -4083,6 +4094,20 @@ class _BlockedFriendsScreen extends ConsumerWidget {
     final List<FriendProfile> blockedFriends = watchSocialPeople(
       ref,
     ).blockedFriends;
+    // Blocks made elsewhere that no messenger entry shows: a dating profile
+    // whose owner is not known, a follower.
+    final BlockBook blocks = ref.watch(
+      socialHubControllerProvider.select((SocialHubState s) => s.blocks),
+    );
+    final Set<String> shown = <String>{
+      for (final FriendProfile f in blockedFriends)
+        PeerShareCodec.normalizeAddress(f.address),
+    };
+    final List<MapEntry<String, BlockRecord>> others =
+        <MapEntry<String, BlockRecord>>[
+          for (final MapEntry<String, BlockRecord> e in blocks.records.entries)
+            if (e.value.on && !e.value.addresses.any(shown.contains)) e,
+        ];
     return Scaffold(
       key: const Key('blocked-friends-screen'),
       appBar: AppBar(title: Text(t('Zablokowani użytkownicy'))),
@@ -4091,7 +4116,7 @@ class _BlockedFriendsScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           children: <Widget>[
-            if (blockedFriends.isEmpty)
+            if (blockedFriends.isEmpty && others.isEmpty)
               ZenEmpty(
                 icon: Icons.verified_user_outlined,
                 tone: zen.success,
@@ -4106,12 +4131,16 @@ class _BlockedFriendsScreen extends ConsumerWidget {
                 icon: Icons.block_rounded,
                 tone: zen.danger,
                 text: t(
-                  'Zablokowane osoby nie mogą do Ciebie pisać ani dzwonić.',
+                  'Zablokowane osoby nie mogą do Ciebie pisać ani dzwonić, '
+                  'nie widzą Cię w Randkach ani W pobliżu, a Ty ich. Lista '
+                  'jest ta sama na wszystkich Twoich urządzeniach.',
                 ),
               ),
               const SizedBox(height: 6),
               for (final FriendProfile friend in blockedFriends)
                 _BlockedFriendRow(friend: friend),
+              for (final MapEntry<String, BlockRecord> e in others)
+                _BlockedPersonRow(id: e.key, record: e.value),
             ],
           ],
         ),
@@ -4178,6 +4207,77 @@ class _BlockedFriendRow extends ConsumerWidget {
                   .read(socialHubControllerProvider.notifier)
                   .unblockFriend(peerAddress: friend.address);
             },
+            child: Text(t('Odblokuj')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A block made outside the messenger with no messenger entry: shown by the
+/// name it was made under and where.
+class _BlockedPersonRow extends ConsumerWidget {
+  const _BlockedPersonRow({required this.id, required this.record});
+
+  final String id;
+  final BlockRecord record;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final String name = record.name.trim().isNotEmpty
+        ? record.name.trim()
+        : t('Bez nazwy');
+    final String where = switch (record.origin) {
+      BlockOrigin.dating => t('Zablokowano w Randkach'),
+      BlockOrigin.nearby => t('Zablokowano W pobliżu'),
+      BlockOrigin.follower => t('Zablokowano wśród obserwujących'),
+      BlockOrigin.messenger => '',
+    };
+    return ZenCard(
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 12, 12),
+      child: Row(
+        children: <Widget>[
+          ZenBlobAvatar(name: name, size: 42, showStatus: false),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (where.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    where,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            key: Key('settings-unblock-person-$id'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+            ),
+            onPressed: () => unawaited(
+              ref.read(socialHubControllerProvider.notifier).unblockPerson(id),
+            ),
             child: Text(t('Odblokuj')),
           ),
         ],

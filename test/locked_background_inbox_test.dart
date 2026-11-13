@@ -484,7 +484,9 @@ void main() {
     Future<void> startReceiver(
       BackgroundCapability capability, {
       Duration ringTimeout = const Duration(seconds: 6),
-      LockedNoticeKit? noticeKit,
+      // Every switch on, no names: what the app writes with the defaults
+      // and no friends named. `null`: no kit at all.
+      LockedNoticeKit? noticeKit = const LockedNoticeKit(),
       LockedPresenceKit? presenceKit,
       Duration noticeThrottle = const Duration(minutes: 1),
     }) async {
@@ -523,16 +525,25 @@ void main() {
 
     test('the phone stays awake only for what is kept or rings', () async {
       final _WakeCalls wake = _WakeCalls();
+      // The arrival's hold comes at most every 1.5 s: none taken before.
+      ZenWake.resetForTest();
       ZenWake.platform = wake;
       addTearDown(() => ZenWake.platform = const TimerWakePlatform());
       await startReceiver(await publishFor(_masterKey()));
 
-      // Dropped at once: nothing more than the arrival's own moment.
+      // Dropped at once: nothing more than the arrival's own moment, which
+      // a friend's frame takes here (the node no longer takes it for
+      // anyone's), at most every 1.5 s.
       await receive(_ada, const <String, dynamic>{'type': 'pong'});
+      expect(wake.calls, <String>['hold signal 3']);
       await receive(_ada, const <String, dynamic>{'type': 'away'});
       await receive(_ada, const <String, dynamic>{'type': 'lg_hello'});
       await receive(_ada, const <String, dynamic>{'type': 'rly_deposit'});
-      expect(wake.calls, isEmpty);
+      List<String> work() => <String>[
+        for (final String c in wake.calls)
+          if (!c.startsWith('hold signal ')) c,
+      ];
+      expect(work(), isEmpty);
 
       // Kept: held while it goes into the inbox, let go right after.
       await receive(_ada, <String, dynamic>{
@@ -540,7 +551,7 @@ void main() {
         '_rid': 'w1',
         'text': 'Hej',
       });
-      expect(wake.calls, <String>[
+      expect(work(), <String>[
         'hold locked-keep 20',
         'release locked-keep 1000',
       ]);
@@ -548,7 +559,7 @@ void main() {
 
       // A ring: awake while it rings, so its end is noticed.
       await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
-      expect(wake.calls, <String>['hold ring 8']);
+      expect(work(), <String>['hold ring 8']);
     });
 
     test('polls that find nothing come less often, and often again once '
@@ -573,6 +584,7 @@ void main() {
           recipientPublicKey: capability.inboxPublicKey,
         ),
         notices: notices,
+        noticeKit: const LockedNoticeKit(),
         pollAnswerGrace: Duration.zero,
       );
       await receiver.start();
@@ -657,6 +669,7 @@ void main() {
             recipientPublicKey: capability.inboxPublicKey,
           ),
           notices: notices,
+          noticeKit: const LockedNoticeKit(),
           pollAnswerGrace: const Duration(milliseconds: 100),
           relinkStep: relinkStep,
           relinkWait: relinkWait,
@@ -1051,7 +1064,8 @@ void main() {
           for (final (LockedNoticeKit?, String) run
               in <(LockedNoticeKit?, String)>[
                 (kit(privacy: NotificationPrivacy.generic), _ada),
-                (null, _ada),
+                // A kit without names.
+                (const LockedNoticeKit(), _ada),
                 // A friend the kit has no name for.
                 (kit(), _bob),
               ]) {
@@ -1342,6 +1356,7 @@ void main() {
             maxFileBytes: 64,
           ),
           notices: notices,
+          noticeKit: const LockedNoticeKit(),
           mailboxPollInterval: Duration.zero,
         );
         await receiver.start();
@@ -1370,6 +1385,7 @@ void main() {
           maxBytesPerSender: 3000,
         ),
         notices: notices,
+        noticeKit: const LockedNoticeKit(),
         mailboxPollInterval: Duration.zero,
       );
       await receiver.start();
@@ -1463,6 +1479,7 @@ void main() {
           recipientPublicKey: capability.inboxPublicKey,
         ),
         notices: notices,
+        noticeKit: const LockedNoticeKit(),
         presence: const LockedPresenceKit(shownTo: <String>{_ada}),
         mailboxPollInterval: const Duration(minutes: 5),
         pollAnswerGrace: Duration.zero,
@@ -1547,6 +1564,7 @@ void main() {
           recipientPublicKey: capability.inboxPublicKey,
         ),
         notices: notices,
+        noticeKit: const LockedNoticeKit(),
         presence: const LockedPresenceKit(shownTo: <String>{_ada, _bob}),
         mailboxPollInterval: Duration.zero,
         pollAnswerGrace: Duration.zero,
@@ -1680,6 +1698,7 @@ void main() {
           recipientPublicKey: capability.inboxPublicKey,
         ),
         notices: notices,
+        noticeKit: const LockedNoticeKit(),
         mailboxPollInterval: Duration.zero,
         now: () => clock,
       );
@@ -1938,6 +1957,54 @@ void main() {
       expect(receiver.keptCount, 2);
     });
 
+    test('without a notice kit nothing rings, shows a call card or is told '
+        'about (the settings are not known); everything is kept, and a '
+        "friend's alarm still sounds", () async {
+      await startReceiver(await publishFor(_masterKey()), noticeKit: null);
+      final List<bool> rings = <bool>[];
+      final List<String> cards = <String>[];
+      receiver.ringForCall = (bool on) async => rings.add(on);
+      receiver.showCallCard = (String from) async => cards.add(from);
+      await receive(_ada, const <String, dynamic>{
+        'type': 'call_invite',
+        'callId': 'c1',
+      });
+      await receive(_ada, const <String, dynamic>{
+        'type': 'message',
+        'msgId': 'm1',
+        '_rid': 'm1',
+        'text': 'Hej',
+      });
+      await receive(_ada, const <String, dynamic>{
+        'type': 'call_missed',
+        'callId': 'c2',
+        '_rid': 'cm-c2',
+      });
+      await receive(_bob, const <String, dynamic>{
+        'type': 'friend_request',
+        '_rid': 'fr1',
+      });
+      await receive(_ada, <String, dynamic>{
+        'type': 'rly_mail',
+        'items': <Map<String, dynamic>>[
+          <String, dynamic>{'id': 'e1', 's': _ada, 'k': 1, 'b': 'x'},
+        ],
+      });
+      expect(rings, isEmpty);
+      expect(cards, isEmpty);
+      expect(notices.activeNotifications, isEmpty);
+      expect(receiver.keptCount, greaterThanOrEqualTo(3));
+      await receive(_ada, <String, dynamic>{
+        'type': 'alarm',
+        'id': 'a1',
+        '_rid': 'x1',
+      });
+      expect(
+        notices.activeNotifications.single.category,
+        RuntimeSystemNotificationCategory.alarm,
+      );
+    });
+
     test('without an alarm kit the power-button shortcut says the alarm did '
         'not go out', () async {
       await startReceiver(await publishFor(_masterKey()));
@@ -2021,6 +2088,7 @@ void main() {
           recipientPublicKey: capability.inboxPublicKey,
         ),
         notices: notices,
+        noticeKit: const LockedNoticeKit(),
         doorFrames: doors.stream,
         mailboxPollInterval: Duration.zero,
       );
@@ -2151,6 +2219,7 @@ void main() {
           recipientPublicKey: capability.inboxPublicKey,
         ),
         notices: notices,
+        noticeKit: const LockedNoticeKit(),
         mailboxPollInterval: Duration.zero,
         taken: taken,
         mailbox: mailbox,

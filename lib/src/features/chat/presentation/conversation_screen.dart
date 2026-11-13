@@ -405,9 +405,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final String conversationTitle = friend == null
         ? widget.title
         : (peerOwnName.isEmpty ? friend.displayLabel : peerOwnName);
+    // Whether an invitation sent from here reached them.
+    final OutgoingInvite? invite = ref.watch(
+      socialHubControllerProvider.select(
+        (SocialHubState state) => state.outgoingInviteTo(widget.peerAddress),
+      ),
+    );
     final String conversationSubtitle = _conversationSubtitle(
       friend: friend,
       peerAddress: widget.peerAddress,
+      invite: invite,
     );
     // The presence dot: only for a friend who shows it ("status nieznany"
     // while it is not known now).
@@ -458,6 +465,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           messageCount: messageCount,
           disappearSeconds: disappearSeconds,
           postsMuted: postsMuted,
+          invite: invite,
         );
     // On a narrow phone the magnifier would push the name out of the bar:
     // the search is in the menu there.
@@ -690,6 +698,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   if (cancelled) {
                     _popBackToFriends();
                   }
+                  return;
+                case _ConversationMenuAction.resendRequest:
+                  await _handleConversationAction(
+                    () => _socialHubController.resendFriendRequest(
+                      peerAddress: widget.peerAddress,
+                    ),
+                    failurePrefix: t('Nie udało się wysłać'),
+                  );
                   return;
                 case _ConversationMenuAction.setNickname:
                   if (friend != null) {
@@ -1306,61 +1322,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final String fileName = picked.name.trim().isNotEmpty
         ? picked.name.trim()
         : 'zalacznik-${DateTime.now().millisecondsSinceEpoch}';
-    final Uint8List? headerBytes = await _readAttachmentHeader(attachmentPath);
-    // A GIF file goes as an animated picture, like one from the gallery (a
-    // too large one as a file, if the person agrees).
-    if (headerBytes != null && looksLikeGif(headerBytes)) {
-      final int size = await pickedLength(picked);
-      if (size > kMaxSentGifBytes) {
-        if (await _confirmGifAsFile(PickedGifStatus.tooLarge) && mounted) {
-          await _sendGifAttachment(
-            gifFileName(fileName),
-            ChatMessageType.file,
-            path: attachmentPath,
-          );
-        }
-        return;
-      }
-      Uint8List? whole;
-      try {
-        whole = await File(attachmentPath).readAsBytes();
-      } on FileSystemException {
-        whole = null;
-      }
-      if (!mounted) {
-        return;
-      }
-      if (whole != null && await _sendPickedGif(whole, fileName)) {
-        return;
-      }
-    }
-    final String? mimeType = lookupMimeType(
-      picked.name,
-      headerBytes: headerBytes,
-    );
-    final String displayName =
-        ref
-            .read(socialHubControllerProvider)
-            .friendByAddress(widget.peerAddress)
-            ?.displayLabel ??
-        widget.title;
-
-    try {
-      await _socialHubController.sendLocalAttachment(
-        peerAddress: widget.peerAddress,
-        displayName: displayName,
-        attachmentPath: attachmentPath,
-        fileName: fileName,
-        mimeType: mimeType,
-      );
-    } on FormatException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
-    }
+    // Made ready like a dropped file: a photo or film without its
+    // location, device and time data, a GIF animated (a too large one as a
+    // file, if the person agrees), anything else as it is.
+    await _sendTransferred(<TransferItem>[
+      TransferItem(name: fileName, path: attachmentPath),
+    ]);
   }
 
   Future<Uint8List?> _readAttachmentHeader(String? path) async {
@@ -1597,7 +1564,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       }
       return;
     }
-    if (ownNew) {
+    // Not under a finger or a fling: the list would jump out from under it.
+    if (ownNew && !_scrollController.touched) {
       _scrollController.showLatest(reason: 'own-new');
     }
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -235,6 +236,34 @@ void main() {
       expect(text, contains('TIME'));
       expect(text, contains('Od instalacji: 5 razy.'));
       expect(iosShortcutSteps().join(' '), contains('Sprawdź wiadomości Zen'));
+    });
+
+    test('the steps name the action as the iPhone lists it', () {
+      // Until the app has string files for the action, Shortcuts lists it
+      // under the title written in the Swift source, in every language: the
+      // steps must give that title, not a translation of it.
+      final String swift = File(
+        'ios/Runner/ZenCheckIntent.swift',
+      ).readAsStringSync();
+      final RegExpMatch? title = RegExp(
+        r'static let title: LocalizedStringResource = "([^"]+)"',
+      ).firstMatch(swift);
+      expect(title, isNotNull);
+      expect(iosShortcutSteps().join(' '), contains('„${title![1]}”'));
+      expect(
+        Directory('ios/Runner')
+            .listSync(recursive: true)
+            .where(
+              (FileSystemEntity f) =>
+                  f.path.endsWith('Localizable.strings') ||
+                  f.path.endsWith('.xcstrings') ||
+                  f.path.endsWith('AppShortcuts.strings'),
+            ),
+        isEmpty,
+        reason:
+            'with string files for the action, every language can name it '
+            'in its own words and the steps should say so',
+      );
     });
 
     test('notifications', () {

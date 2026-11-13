@@ -50,6 +50,7 @@ final class _Name {
     required this.used,
     required this.min,
     required this.max,
+    this.large = 0,
     this.many = false,
     this.background = false,
   });
@@ -70,6 +71,10 @@ final class _Name {
   /// Sizes of the file on the disk.
   final int min;
   final int max;
+
+  /// When above [max]: how large the file of an account that keeps much
+  /// in it gets; one in four of its writes is between [max] and this.
+  final int large;
 
   /// A kind of file an account has several of (one per friend, per
   /// message, per piece).
@@ -255,13 +260,15 @@ const List<_Name> _names = <_Name>[
     max: 20000,
     background: true,
   ),
+  // Names, levels and a tag for each member of each joined group (about 35
+  // bytes a member): a few groups make it tens of kilobytes.
   _Name(
     'background/notice-kit.zenbg',
     way: _Way.atomic,
     first: 0.3,
     used: 0.6,
     min: 120,
-    max: 3000,
+    max: 40000,
     background: true,
   ),
   _Name(
@@ -314,8 +321,17 @@ const List<_Name> _names = <_Name>[
     background: true,
   ),
   // The passwords (from 1.16.5): a few hand-made entries to an imported
-  // export of hundreds (random passwords do not compress).
-  _Name('passwords/vault', used: 0.15, min: 160, max: 60000),
+  // export of hundreds (random passwords do not compress), and now and
+  // then as large as the vault can be (`kMaxPasswordVaultBytes`, 4 MiB of
+  // JSON before the store compresses it: 2000 logins with their history),
+  // so no size a real vault reaches is one no decoy has.
+  _Name(
+    'passwords/vault',
+    used: 0.15,
+    min: 160,
+    max: 60000,
+    large: 4 * 1024 * 1024,
+  ),
   // The copy with friends (from 1.16.5 every account with a friend makes
   // one, circle or not, and keeps its friends'): its state, the index of
   // the copies kept here and their chunks (named by 32 hex digits).
@@ -336,6 +352,7 @@ const List<_Name> _names = <_Name>[
   _Name('recovery/sealed', used: 0.25, min: 150, max: 300),
   _Name('recovery/gen', used: 0.25, min: 120, max: 3000),
   _Name('recovery/out', used: 0.25, min: 200, max: 30000),
+  _Name('recovery/forgot', used: 0.05, min: 90, max: 2000),
 ];
 
 /// What `account/sync/<id>` is kept for (account_state_sync_app.dart).
@@ -641,7 +658,7 @@ final class ZenAccountDecoys {
 
   Future<void> _write(_Place place, _Name name, {bool again = false}) async {
     final String path = _expand(name.path);
-    final int size = _size(name.min, name.max);
+    final int size = _sizeOf(name);
     switch (name.way) {
       case _Way.data:
         await place.data.write(path, _payload(size - _sealedOverhead));
@@ -756,6 +773,23 @@ final class ZenAccountDecoys {
     ),
     _ => _hex(32),
   };
+
+  /// How large [name] is written this time ([_Name.large]).
+  int _sizeOf(_Name name) =>
+      name.large > name.max && _random.nextInt(_largeOdds) == 0
+      ? _size(name.max, name.large)
+      : _size(name.min, name.max);
+
+  /// One file of a name with [_Name.large] in this many is a large one.
+  static const int _largeOdds = 4;
+
+  /// The sizes [place] (one of [debugPlaces]) is written with: the
+  /// smallest and the largest.
+  @visibleForTesting
+  static (int, int) debugSizesOf(String place) {
+    final _Name name = _names.firstWhere((_Name n) => n.place == place);
+    return (name.min, name.large > name.max ? name.large : name.max);
+  }
 
   int _size(int min, int max) {
     if (max <= min) {

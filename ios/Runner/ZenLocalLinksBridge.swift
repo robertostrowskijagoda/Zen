@@ -278,6 +278,9 @@ final class BluetoothLinkRadio: NSObject, CBCentralManagerDelegate, CBPeripheral
   private static let seenEvery: TimeInterval = 3
   private static let maxSeen = 512
   private static let maxIncoming = 8
+  // Incoming channels waiting from one device at once (one device must not
+  // take every slot).
+  private static let maxIncomingPerDevice = 2
   private static let maxStreams = 16
 
   private let events = EventSender()
@@ -855,6 +858,14 @@ final class BluetoothLinkRadio: NSObject, CBCentralManagerDelegate, CBPeripheral
     guard running, incoming.count < BluetoothLinkRadio.maxIncoming,
       pumps.count < BluetoothLinkRadio.maxStreams
     else {
+      close(channel)
+      return
+    }
+    // `as CBPeer?`: the same whether the SDK marks the peer optional or not.
+    let device = (channel.peer as CBPeer?)?.identifier
+    if incoming.values.filter({ ($0.peer as CBPeer?)?.identifier == device }).count
+      >= BluetoothLinkRadio.maxIncomingPerDevice
+    {
       close(channel)
       return
     }

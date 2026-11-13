@@ -200,6 +200,29 @@ void main() {
     expect(onA.followers, hasLength(1));
   });
 
+  test('someone blocked elsewhere in the app is no follower here; nothing is '
+      'told to the threads\' readers; unblocked, they are back', () async {
+    final LedgerNode a = await make(ada);
+    final LedgerNode c = await make(cel);
+    final Set<String> elsewhere = <String>{};
+    final FollowLedger onA = FollowLedger.of(a)
+      ..blockedElsewhere = elsewhere.contains;
+    await onA.ready;
+    await FollowLedger.of(c).follow(ada);
+    await _settle();
+    expect(onA.followers, hasLength(1));
+
+    elsewhere.add(c.account);
+    expect(onA.followers, isEmpty);
+    // A private block: the threads' readers are told nothing.
+    expect(
+      threadModerationOf(a.entriesOf(spaceKind: 'acts')).blocks(c.account),
+      isFalse,
+    );
+    elsewhere.clear();
+    expect(onA.followers, hasLength(1));
+  });
+
   test('followers survive a restart', () async {
     final MemoryLedgerDisk aDisk = MemoryLedgerDisk();
     final LedgerNode a = await make(ada, disk: aDisk);

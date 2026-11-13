@@ -143,7 +143,10 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
 
   Future<void> _load(UpdateService service, String path) async {
     await _run(() async {
-      final Uint8List data = await File(path).readAsBytes();
+      final Uint8List data = await readPickedFile(
+        path,
+        maxBytes: kMaxUpdateFileReadBytes,
+      );
       return service.importBundle(data);
     });
   }

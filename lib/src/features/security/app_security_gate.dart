@@ -20,6 +20,7 @@ import 'package:zen/src/features/account/presentation/account_secure_stage.dart'
 import 'package:zen/src/features/account/presentation/accounts_ui.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/passwords/password_autofill_bridge.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -586,6 +587,10 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
     }
     final String password = _passwordController.text;
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    final AutofillUnlockPass pass = ref.read(autofillUnlockPassProvider);
+    final PasswordAutofillBridge autofill = ref.read(
+      passwordAutofillBridgeProvider,
+    );
     // Counted before the password is checked: Zen closed during the check
     // (two derivations) leaves the attempt counted. The right password
     // clears it again.
@@ -612,7 +617,11 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
         return;
       }
     }
+    final _WaitingAutofill waiting = _WaitingAutofill(autofill, pass);
     final bool unlocked = await security.unlock(password);
+    // Before anything else is awaited: the app, and the picker's host in
+    // it, is built at the next frame at the earliest.
+    waiting.end(unlocked: unlocked);
     if (unlocked) {
       await throttle.clear();
       _lookAtOtherAccountGuesses(otherAccounts);
@@ -646,11 +655,16 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
     });
     final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
     final UnlockThrottle otherAccounts = ref.read(otherAccountThrottleProvider);
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    final _WaitingAutofill waiting = _WaitingAutofill(
+      ref.read(passwordAutofillBridgeProvider),
+      ref.read(autofillUnlockPassProvider),
+    );
     // The hardware vault asks for the fingerprint / face / Windows Hello
     // itself and only then releases the key.
-    final bool unlocked = await ref
-        .read(appSecurityServiceProvider)
-        .unlockWithBiometrics();
+    final bool unlocked = await security.unlockWithBiometrics();
+    // As for the password: before anything else is awaited.
+    waiting.end(unlocked: unlocked);
     if (unlocked) {
       await throttle.clear();
       _lookAtOtherAccountGuesses(otherAccounts);
@@ -729,6 +743,8 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
             ),
             const SizedBox(height: 24),
             TextFormField(
+              enableSuggestions: false,
+              autocorrect: false,
               key: const Key('app-unlock-password-field'),
               controller: _passwordController,
               obscureText: _obscureText,
@@ -850,6 +866,38 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
         ),
       ),
     );
+  }
+}
+
+/// The autofill request open on the Android side, asked for as the lock
+/// screen starts checking a password or a fingerprint. The check does not
+/// wait for the answer: only an answer that came back before the check
+/// ended counts, so only a request that was already waiting may take this
+/// unlock as its one question ([AutofillUnlockPass]). The emergency wipe
+/// password, "Nie pamiętam hasła" and "Inne konto" never start one.
+final class _WaitingAutofill {
+  _WaitingAutofill(PasswordAutofillBridge autofill, this._pass) {
+    _pass.forget();
+    unawaited(
+      autofill.pending().then((PasswordAutofillRequest? request) {
+        if (!_over) {
+          _pass.waiting(request?.id);
+        }
+      }),
+    );
+  }
+
+  final AutofillUnlockPass _pass;
+  bool _over = false;
+
+  /// The check is over; [unlocked]: it opened this account.
+  void end({required bool unlocked}) {
+    _over = true;
+    if (unlocked) {
+      _pass.unlocked();
+    } else {
+      _pass.forget();
+    }
   }
 }
 

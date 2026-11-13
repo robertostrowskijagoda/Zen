@@ -12,10 +12,22 @@ import 'package:zen/src/features/passwords/presentation/password_autofill_screen
 import 'package:zen/src/features/passwords/presentation/password_entry_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_form_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_import.dart';
+import 'package:zen/src/features/passwords/presentation/password_setup_screen.dart';
 import 'package:zen/src/features/passwords/presentation/password_vault_widgets.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+
+/// Whether the passwords go, sealed, into the copy with friends ("Hasła w
+/// kopii u znajomych" in "Konto i odzyskiwanie"): what "Hasła" says about
+/// where they are follows it.
+bool _inCircleBackup(WidgetRef ref) => ref.watch(
+  appSettingsControllerProvider.select(
+    (AppSettings s) => s.passwordsInCircleBackup,
+  ),
+);
 
 /// "Hasła": the account's passwords as a list to search, each with a
 /// one-tap copy of its password, and the way to add, import and open them.
@@ -135,7 +147,78 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
   Future<void> _openEntry(String id) =>
       pushPasswordPage<void>(context, PasswordEntryScreen(entryId: id));
 
+  /// "Usuń powtórzone": the entries that are exact copies of another one
+  /// (an export imported twice), removed at once after a question.
+  Future<void> _removeDuplicates() async {
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
+    final int n = _vault.duplicateCount;
+    if (n == 0) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text(t('Nie ma powtórzonych haseł.'))),
+      );
+      return;
+    }
+    final bool? sure = await showDialog<bool>(
+      context: context,
+      routeSettings: const RouteSettings(name: kPasswordVaultRouteName),
+      builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
+        key: const Key('passwords-duplicates-dialog'),
+        title: Text(
+          tn(
+            n,
+            one: 'Usunąć {n} powtórzone hasło?',
+            few: 'Usunąć {n} powtórzone hasła?',
+            many: 'Usunąć {n} powtórzonych haseł?',
+          ),
+        ),
+        content: Text(
+          t(
+            'Z każdej grupy haseł identycznych we wszystkich polach zostaje '
+            'jedno. Kopie znikną ze wszystkich Twoich urządzeń.',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('passwords-duplicates-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Usuń')),
+          ),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) {
+      return;
+    }
+    int removed = 0;
+    if (await runPasswordAction(context, () async {
+      removed = await _vault.removeDuplicates();
+    })) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            tn(
+              removed,
+              one: 'Usunięto {n} powtórzone hasło.',
+              few: 'Usunięto {n} powtórzone hasła.',
+              many: 'Usunięto {n} powtórzonych haseł.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
   void _howItWorks() {
+    final bool withFriends = ref
+        .read(appSettingsControllerProvider)
+        .passwordsInCircleBackup;
     unawaited(
       showDialog<void>(
         context: context,
@@ -145,15 +228,30 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
           key: const Key('passwords-help'),
           title: Text(t('Jak to działa')),
           content: Text(
-            t(
-              'Hasła są zaszyfrowane na Twoich urządzeniach, a kilkoro '
-              'Twoich znajomych trzyma ich zamkniętą kopię, której nie '
-              'otworzą. Zen przenosi je między Twoimi urządzeniami, '
-              'przywraca z kopią konta, a po odzyskaniu konta z samego '
-              'klucza — z kopii u znajomych; bez żadnego znajomego wtedy '
-              'nie wrócą. Skopiowane hasło znika ze schowka po 30 '
-              'sekundach.',
-            ),
+            withFriends
+                ? t(
+                    'Hasła są zaszyfrowane na Twoich urządzeniach, a kilkoro '
+                    'wybranych znajomych trzyma ich zamkniętą kopię w kopii '
+                    'u znajomych. Sami jej nie otworzą: otworzy ją tylko '
+                    'ten, kto ma klucz Twojego konta (kartkę z kluczem albo '
+                    'kawałki klucza od bliskich znajomych i hasło konta). '
+                    'Zen przenosi hasła między Twoimi urządzeniami, '
+                    'przywraca z kopią konta, a po odzyskaniu konta z samego '
+                    'klucza — z kopii u znajomych; bez żadnego znajomego '
+                    'wtedy nie wrócą. Wyłączysz to w „Konto i odzyskiwanie” '
+                    '(„Hasła w kopii u znajomych”). Skopiowane hasło znika '
+                    'ze schowka po 30 sekundach.',
+                  )
+                : t(
+                    'Hasła są zaszyfrowane na Twoich urządzeniach. W kopii u '
+                    'znajomych ich nie ma: wyłączono to w „Konto '
+                    'i odzyskiwanie” („Hasła w kopii u znajomych”). Zen '
+                    'przenosi je między Twoimi urządzeniami i przywraca '
+                    'z kopią konta, ale po odzyskaniu konta z samego klucza '
+                    'nie wrócą. Skopiowane hasło znika ze schowka po 30 '
+                    'sekundach.',
+                  ),
+            key: Key('passwords-help-${withFriends ? 'friends' : 'devices'}'),
           ),
           actions: <Widget>[
             FilledButton(
@@ -246,10 +344,17 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
         icon: Icons.key_rounded,
         tone: zen.tone(ZenTone.privacy),
         title: t('Tu zapiszesz swoje hasła'),
-        text: t(
-          'Zaszyfrowane i tylko na Twoich urządzeniach. Dodaj pierwsze albo '
-          'zaimportuj je z przeglądarki.',
-        ),
+        text: _inCircleBackup(ref)
+            ? t(
+                'Zaszyfrowane na Twoich urządzeniach; zamkniętą kopię trzymają '
+                'też wybrani znajomi w kopii u znajomych (wyłączysz to '
+                'w „Konto i odzyskiwanie”). Dodaj pierwsze albo zaimportuj je '
+                'z przeglądarki.',
+              )
+            : t(
+                'Zaszyfrowane na Twoich urządzeniach; w kopii u znajomych ich '
+                'nie ma. Dodaj pierwsze albo zaimportuj je z przeglądarki.',
+              ),
         action: Wrap(
           alignment: WrapAlignment.center,
           spacing: 8,
@@ -266,6 +371,14 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
               onPressed: () => unawaited(importPasswordFile(context, ref)),
               icon: const Icon(Icons.upload_file_rounded),
               label: Text(t('Importuj z pliku')),
+            ),
+            OutlinedButton.icon(
+              key: const Key('passwords-empty-setup'),
+              onPressed: () => unawaited(
+                PasswordSetupScreen.open(context, withImport: true),
+              ),
+              icon: const Icon(Icons.tune_rounded),
+              label: Text(t('Konfiguracja haseł')),
             ),
           ],
         ),
@@ -419,12 +532,24 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
             appBar: AppBar(
               title: Text(t('Hasła')),
               actions: <Widget>[
+                // The setup in sight, not in the menu: on Android the
+                // phone and each browser need a switch before Zen fills.
+                IconButton(
+                  key: const Key('passwords-setup'),
+                  tooltip: t('Konfiguracja haseł'),
+                  icon: const Icon(Icons.tune_rounded),
+                  onPressed: () => unawaited(
+                    PasswordSetupScreen.open(context, withImport: writable),
+                  ),
+                ),
                 PopupMenuButton<String>(
                   key: const Key('passwords-menu'),
                   tooltip: t('Więcej'),
                   onSelected: (String choice) {
                     if (choice == 'import') {
                       unawaited(importPasswordFile(context, ref));
+                    } else if (choice == 'duplicates') {
+                      unawaited(_removeDuplicates());
                     } else if (choice == 'autofill') {
                       unawaited(showPasswordAutofillInfo(context));
                     } else {
@@ -438,6 +563,12 @@ class _PasswordVaultScreenState extends ConsumerState<PasswordVaultScreen> {
                           value: 'import',
                           enabled: writable,
                           child: Text(t('Importuj z pliku CSV')),
+                        ),
+                        PopupMenuItem<String>(
+                          key: const Key('passwords-menu-duplicates'),
+                          value: 'duplicates',
+                          enabled: writable && _vault.entries.length > 1,
+                          child: Text(t('Usuń powtórzone hasła')),
                         ),
                         // Android only: Zen as the system's autofill.
                         if (ref.read(passwordAutofillBridgeProvider).supported)

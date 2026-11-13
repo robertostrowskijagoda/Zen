@@ -532,6 +532,30 @@ final class FfiPublicPeersBridge implements PublicPeersBridge {
       publicPeerStatesFrom(_bridge.publicPeerStates());
 }
 
+/// The node key a mesh node at a `tls://` [uri] proves in its TLS handshake
+/// (hex), by the bridge's probe (public_peers_exports.go) off this isolate:
+/// what a friend's check of this computer's address uses (NodeKeyProbe).
+/// `null` when nothing there finishes the handshake, or it shows another
+/// key than the one [uri] pins.
+Future<String?> probeNodeKeyThroughBridge(String uri) async {
+  try {
+    final String request = jsonEncode(<String, Object?>{
+      'peers': <String>[uri],
+    });
+    final Map<String, dynamic> result = await Isolate.run(
+      () => YggdrasilBridgeFfi.load().probePeers(request),
+    );
+    final PublicPeerProbe? probe = publicPeerProbesFrom(result)[uri];
+    if (probe == null || !probe.reachable || probe.keyMatches == false) {
+      return null;
+    }
+    return probe.key;
+  } on Object catch (error) {
+    logZenWarning('Node key check failed: $error');
+    return null;
+  }
+}
+
 /// The built-in list from the bridge's `{peers: [...]}`, in the order this
 /// device tries them. Every one is on: the device dials a few at once and
 /// keeps the others in reserve (`chosen` only names its first picks), so a

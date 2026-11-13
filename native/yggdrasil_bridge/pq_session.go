@@ -579,6 +579,13 @@ func (e *pqEndpoint) evictStrangerLocked() {
 	}
 }
 
+// isKnown tells whether the app named address as known (setKnown).
+func (e *pqEndpoint) isKnown(address string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.isKnownLocked(address)
+}
+
 func (e *pqEndpoint) isKnownLocked(address string) bool {
 	_, ok := e.known[address]
 	return ok

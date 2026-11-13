@@ -144,18 +144,27 @@ Map<Audience, String> get kAudienceHints => <Audience, String>{
 
 bool get _mobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
-/// Photos picked by the user (raw bytes, not yet sanitised).
+/// Photos picked by the user (not yet sanitised). A HEIC or AVIF photo,
+/// which the pure-Dart decoders that sanitise them do not read, comes as
+/// the phone's own decoder read it ([readablePicture]); every caller then
+/// re-encodes it without metadata.
 Future<List<Uint8List>> pickImageBytes({int? limit}) async {
+  final List<Uint8List> raw;
   if (_mobile) {
     final List<XFile> files = await ImagePicker().pickMultiImage(limit: limit);
-    return <Uint8List>[for (final XFile f in files) await f.readAsBytes()];
+    raw = <Uint8List>[for (final XFile f in files) await f.readAsBytes()];
+  } else {
+    final List<PlatformFile> picked = await FilePicker.pickFiles(
+      type: FileType.image,
+      dialogTitle: t('Wybierz zdjęcia'),
+    );
+    raw = <Uint8List>[
+      for (final PlatformFile f in picked) await f.readAsBytes(),
+    ];
   }
-  final List<PlatformFile> picked = await FilePicker.pickFiles(
-    type: FileType.image,
-    dialogTitle: t('Wybierz zdjęcia'),
-  );
   return <Uint8List>[
-    for (final PlatformFile f in picked) await f.readAsBytes(),
+    for (final Uint8List bytes in raw)
+      await readablePicture(bytes, maxSide: kMaxImageSide) ?? bytes,
   ];
 }
 
@@ -1335,12 +1344,13 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                   key: removeKey,
                   customBorder: const CircleBorder(),
                   onTap: onRemove,
-                  child: const Padding(
-                    padding: EdgeInsets.all(6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
                     child: Icon(
                       Icons.close_rounded,
                       size: 18,
                       color: ZenFixed.onPhoto,
+                      semanticLabel: t('Usuń'),
                     ),
                   ),
                 ),

@@ -134,8 +134,9 @@ final Provider<RecoveryService?> recoveryServiceProvider =
               'recovery-help-${request.from}',
               t('Ktoś prosi o pomoc w odzyskaniu konta'),
               t(
-                'Nowe urządzenie podało Cię jako osobę z kręgu. Zanim '
-                'pomożesz, upewnij się (najlepiej na żywo), kto to jest: '
+                'Nowe urządzenie wskazało Cię jako bliskiego znajomego, '
+                'który ma pomóc. Zanim pomożesz, upewnij się (najlepiej na '
+                'żywo), kto to jest: '
                 'Ustawienia → Konto i odzyskiwanie.',
               ),
             ),
@@ -158,6 +159,32 @@ final Provider<RecoveryService?> recoveryServiceProvider =
               ),
             ),
             context: 'Powiadomienie o wydaniu klucza',
+          );
+        }
+        ..onReduction = (RecoveryReduction reduction) {
+          unawaitedLogged(
+            post(
+              'recovery-reduction',
+              t('Mniej osób będzie mieć kawałki klucza'),
+              reduction.holders == 0
+                  ? t(
+                      'Za {days} dni przyjaciele usuną kawałki klucza Twojego '
+                      'konta: masz mniej niż 2 osoby oznaczone jako '
+                      '„Przyjaciel”. Jeśli to nie Ty, przywróć je. '
+                      'Ustawienia → Konto i odzyskiwanie.',
+                      <String, Object?>{'days': kReductionDelay.inDays},
+                    )
+                  : t(
+                      'Za {days} dni kawałki klucza Twojego konta będzie mieć '
+                      'mniej przyjaciół ({n}). Jeśli to nie Ty, przywróć ich. '
+                      'Ustawienia → Konto i odzyskiwanie.',
+                      <String, Object?>{
+                        'days': kReductionDelay.inDays,
+                        'n': reduction.holders,
+                      },
+                    ),
+            ),
+            context: 'Powiadomienie o mniejszej ochronie konta',
           );
         };
       unawaitedLogged(
@@ -305,6 +332,19 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
           }
         },
       );
+      // The passwords put into the copy or taken out of it (here, or on
+      // another device of the account): a new copy at once, which replaces
+      // the friends' copy.
+      ref.listen<bool>(
+        appSettingsControllerProvider.select(
+          (AppSettings s) => s.passwordsInCircleBackup,
+        ),
+        (bool? previous, bool next) {
+          if (previous != null && previous != next) {
+            service.contentChanged();
+          }
+        },
+      );
       // A password added, changed or deleted: a fresh copy soon.
       final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
       vault.edits.addListener(service.changed);
@@ -348,18 +388,27 @@ final class AppCircleBackupData implements CircleBackupData {
     final PyramidService pyramid = ref.read(pyramidServiceProvider);
     // No wallet statement: nothing takes it back (the balance comes back
     // with the pyramid's records, which its members confirm).
-    // The passwords, padded so the holders cannot tell how many there are.
-    // Unreadable now (locked, damaged): no copy rather than one without
-    // them.
-    final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
+    // The passwords, padded so the holders cannot tell how many there are,
+    // unless the person took them out of the copy ("Hasła w kopii u
+    // znajomych", the same on all the account's devices). Unreadable now
+    // (locked, damaged): no copy rather than one without them. The switch
+    // as saved: the controller holds the defaults until it has loaded.
+    final AppSettings settings =
+        await ref.read(appSettingsStoreProvider).load() ??
+        ref.read(appSettingsControllerProvider);
     final Map<String, Object?>? vaultSection;
-    try {
-      vaultSection = await vault.exportForCopy();
-    } on PasswordVaultException catch (error) {
-      throw CircleBackupNotNow(error.error.name);
-    }
-    if (vault.damaged) {
-      throw const CircleBackupNotNow('passwords');
+    if (settings.passwordsInCircleBackup) {
+      final PasswordVaultService vault = ref.read(passwordVaultServiceProvider);
+      try {
+        vaultSection = await vault.exportForCopy();
+      } on PasswordVaultException catch (error) {
+        throw CircleBackupNotNow(error.error.name);
+      }
+      if (vault.damaged) {
+        throw const CircleBackupNotNow('passwords');
+      }
+    } else {
+      vaultSection = null;
     }
     final Map<String, Object?>? notesSection = await ref
         .read(selfNotesServiceProvider)
@@ -382,10 +431,9 @@ final class AppCircleBackupData implements CircleBackupData {
       sections: <String, Object?>{
         CircleBackupSections.profile: profile,
         CircleBackupSections.contacts: _hub.contactsBackup(),
-        CircleBackupSections.levels: <String, String>{
-          for (final String address in _acceptedFriends(state))
-            address: node.levelOf(address).name,
-        },
+        CircleBackupSections.levels: node.levelsForCopy(
+          _acceptedFriends(state),
+        ),
         CircleBackupSections.settings: ref
             .read(appSettingsControllerProvider)
             .toJson(),
@@ -459,17 +507,9 @@ final class AppCircleBackupData implements CircleBackupData {
       await _hub.importContactsBackup(contacts);
     }
     step();
-    final Object? levels = content.sections[CircleBackupSections.levels];
-    if (levels is Map) {
-      for (final MapEntry<dynamic, dynamic> e in levels.entries) {
-        final FriendLevel? level = FriendLevel.values
-            .where((FriendLevel l) => l.name == e.value)
-            .firstOrNull;
-        if (e.key is String && level != null) {
-          await node.setLevel(e.key as String, level);
-        }
-      }
-    }
+    // Merged by time: a level changed on another device of the account
+    // after the copy was made stays.
+    await node.takeLevels(content.sections[CircleBackupSections.levels]);
     step();
     final Object? pyramid = content.sections[CircleBackupSections.pyramid];
     if (pyramid is Map<String, dynamic>) {

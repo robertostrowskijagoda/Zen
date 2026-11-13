@@ -74,7 +74,9 @@ class CallActionBar extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final bool incomingRinging =
         session.status == CallSessionStatus.ringing && session.isIncoming;
-    final bool active = session.status == CallSessionStatus.active;
+    // The same controls from the first ring on: a button whose action is
+    // missing (the media still being set up) shows disabled.
+    final bool controls = session.ownControlsShown;
 
     return Wrap(
       spacing: 14,
@@ -101,7 +103,7 @@ class CallActionBar extends StatelessWidget {
             labelColor: zen.textSecondary,
             onPressed: onAccept,
           ),
-        if (active)
+        if (controls)
           _CallRoundButton(
             buttonKey: Key('$keyPrefix-mute-button'),
             zen: zen,
@@ -112,7 +114,7 @@ class CallActionBar extends StatelessWidget {
             tooltip: session.isMuted ? t('Włącz mikrofon') : t('Wycisz'),
             onPressed: onToggleMute,
           ),
-        if (active)
+        if (controls)
           _CallRoundButton(
             buttonKey: Key('$keyPrefix-speaker-button'),
             zen: zen,
@@ -123,7 +125,7 @@ class CallActionBar extends StatelessWidget {
             tooltip: session.isSpeakerOn ? t('Głośnik') : t('Słuchawka'),
             onPressed: onToggleSpeaker,
           ),
-        if (active)
+        if (controls)
           _CallRoundButton(
             buttonKey: Key('$keyPrefix-camera-button'),
             zen: zen,
@@ -136,7 +138,7 @@ class CallActionBar extends StatelessWidget {
                 : t('Włącz kamerę'),
             onPressed: onToggleCamera,
           ),
-        if (active && session.isCameraEnabled && onSwitchCamera != null)
+        if (controls && session.isCameraEnabled && onSwitchCamera != null)
           _CallRoundButton(
             buttonKey: Key('$keyPrefix-flip-camera-button'),
             zen: zen,
@@ -145,7 +147,7 @@ class CallActionBar extends StatelessWidget {
             tooltip: t('Zmień kamerę'),
             onPressed: onSwitchCamera,
           ),
-        if (active && onOpenDevices != null)
+        if (controls && onOpenDevices != null)
           _CallRoundButton(
             buttonKey: Key('$keyPrefix-devices-button'),
             zen: zen,
@@ -208,45 +210,48 @@ class _CallPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: ZenLook.of(context).tinted(
-              ZenColors.of(context),
-              color,
-              radius: 18,
-              alpha: 0.40,
-              offset: const Offset(0, 5),
+    // The label below names the button for a screen reader.
+    return MergeSemantics(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: ZenLook.of(context).tinted(
+                ZenColors.of(context),
+                color,
+                radius: 18,
+                alpha: 0.40,
+                offset: const Offset(0, 5),
+              ),
+            ),
+            child: IconButton.filled(
+              key: buttonKey,
+              onPressed: onPressed == null ? null : () => onPressed!.call(),
+              style: IconButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: ZenColors.foregroundFor(color),
+                disabledBackgroundColor: color.withValues(alpha: 0.35),
+                fixedSize: const Size(60, 60),
+                minimumSize: const Size(60, 60),
+                shape: const CircleBorder(),
+              ),
+              icon: Icon(icon, size: 28),
             ),
           ),
-          child: IconButton.filled(
-            key: buttonKey,
-            onPressed: onPressed == null ? null : () => onPressed!.call(),
-            style: IconButton.styleFrom(
-              backgroundColor: color,
-              foregroundColor: ZenColors.foregroundFor(color),
-              disabledBackgroundColor: color.withValues(alpha: 0.35),
-              fixedSize: const Size(60, 60),
-              minimumSize: const Size(60, 60),
-              shape: const CircleBorder(),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              color: labelColor,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
             ),
-            icon: Icon(icon, size: 28),
           ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          maxLines: 1,
-          style: TextStyle(
-            color: labelColor,
-            fontSize: 12.5,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

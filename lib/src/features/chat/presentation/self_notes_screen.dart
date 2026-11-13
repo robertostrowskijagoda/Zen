@@ -160,6 +160,7 @@ class _SelfNotesScreenState extends ConsumerState<SelfNotesScreen> {
                 children: <Widget>[
                   Expanded(
                     child: TextField(
+                      enableIMEPersonalizedLearning: false,
                       key: const Key('self-notes-input'),
                       controller: _text,
                       minLines: 1,

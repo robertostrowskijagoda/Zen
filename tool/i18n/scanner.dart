@@ -13,6 +13,8 @@
 import 'dart:collection';
 import 'dart:io';
 
+import 'label_exceptions.dart';
+
 /// The plural categories of CLDR, in their usual order.
 const List<String> kI18nPluralCategories = <String>[
   'zero',
@@ -22,6 +24,31 @@ const List<String> kI18nPluralCategories = <String>[
   'many',
   'other',
 ];
+
+/// Languages whose CLDR "one" category holds more than the number 1, with
+/// numbers it also holds: Russian and Ukrainian use it for 21, 31, 101 …,
+/// French, Portuguese and Hindi for 0. A "one" form that shows no number
+/// reads "A verdict" for 21 verdicts, "once" for 0 times.
+const Map<String, List<int>> kI18nWideOneForms = <String, List<int>>{
+  'ru': <int>[21, 31, 101],
+  'uk': <int>[21, 31, 101],
+  'fr': <int>[0],
+  'pt': <int>[0],
+  'hi': <int>[0],
+};
+
+/// Texts (as written in the code) that the app shows only for a count of at
+/// least 1, so a French, Portuguese or Hindi "one" form of them may leave the
+/// number out: the votes needed to remove a phone from the flat, the shared
+/// events of a map that has some, the new comments of a post that has some.
+const Set<String> kI18nNeverZero = <String>{
+  'Gdy zgodzi się większość pozostałych domowników (potrzeba {n} głosów), '
+      'mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon '
+      'zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę '
+      'trzeba będzie wymienić.',
+  'Wspólne wydarzenia ({n}): {names}',
+  '{name} skomentował(a) {post} ({n} komentarzy)',
+};
 
 final RegExp _placeholderPattern = RegExp(r'\{([A-Za-z][A-Za-z0-9_]*)\}');
 
@@ -292,11 +319,14 @@ final class I18nFileReport {
 /// Checks [translations] (a decoded `assets/i18n/<code>.json`) against the
 /// texts of [scan]: a text is a JSON string with the same placeholders; a
 /// `tn()` text is an object of CLDR forms (at least "other") under the
-/// `many` text.
+/// `many` text. With [languageCode] a "one" form that shows no number is
+/// refused in a language whose "one" also holds other numbers
+/// ([kI18nWideOneForms]).
 I18nFileReport checkI18nTranslations(
   I18nScan scan,
-  Map<String, Object?> translations,
-) {
+  Map<String, Object?> translations, {
+  String? languageCode,
+}) {
   final I18nFileReport report = I18nFileReport();
   for (final I18nEntry entry in scan.entries.values) {
     final Object? value = translations[entry.key];
@@ -308,7 +338,7 @@ I18nFileReport checkI18nTranslations(
     if (plural == null) {
       _checkText(entry.key, value, report);
     } else {
-      _checkPlural(entry.key, plural, value, report);
+      _checkPlural(entry.key, plural, value, report, languageCode);
     }
   }
   for (final String key in translations.keys) {
@@ -317,8 +347,102 @@ I18nFileReport checkI18nTranslations(
     }
   }
   report.stale.sort();
+  if (languageCode != null) {
+    _checkQuotedLabels(scan, translations, languageCode, report);
+  }
   return report;
 }
+
+final RegExp _quotedName = RegExp('„([^”]{2,60})”');
+
+/// A Polish text that names a control or a screen between „ and ” (a text of
+/// the app that is a label of its own) must, in every language, name it by
+/// its translation: otherwise the text sends the person to a button that is
+/// called something else. Inflected or shortened forms that are right go in
+/// [kI18nLabelExceptions].
+void _checkQuotedLabels(
+  I18nScan scan,
+  Map<String, Object?> translations,
+  String languageCode,
+  I18nFileReport report,
+) {
+  final Map<String, String> byLowerCase = <String, String>{
+    for (final String key in scan.entries.keys) key.toLowerCase(): key,
+  };
+  // "Randki" (a screen) and "randki" (a tag on the graph) are two labels:
+  // the exact spelling first.
+  String? labelKey(String name) {
+    final String stripped = _withoutTrailingMarks(name);
+    for (final String candidate in <String>[name, stripped]) {
+      if (scan.entries.containsKey(candidate)) {
+        return candidate;
+      }
+    }
+    return byLowerCase[name.toLowerCase()] ??
+        byLowerCase[stripped.toLowerCase()];
+  }
+
+  for (final I18nEntry entry in scan.entries.values) {
+    final Object? text = translations[entry.key];
+    if (entry.plural != null || text is! String || text.isEmpty) {
+      continue;
+    }
+    for (final RegExpMatch match in _quotedName.allMatches(entry.key)) {
+      final String name = match[1]!.trim();
+      if (kI18nFixedNames.contains(name)) {
+        if (!text.contains(name)) {
+          report.mismatched.add(
+            '${_quoted(entry.key)}: must give the name "$name" as it is',
+          );
+        }
+        continue;
+      }
+      final List<String> labels = <String>[];
+      final String? whole = labelKey(name);
+      if (whole != null) {
+        labels.add(whole);
+      } else {
+        // „A → B”: a path through two screens.
+        final List<String> steps = name
+            .split('→')
+            .map((String step) => step.trim())
+            .toList();
+        final List<String?> found = steps.map(labelKey).toList();
+        if (steps.length > 1 && !found.contains(null)) {
+          labels.addAll(found.whereType<String>());
+        }
+      }
+      for (final String label in labels) {
+        final Object? translated = translations[label];
+        if (translated is! String ||
+            translated.isEmpty ||
+            translated.contains('{')) {
+          continue;
+        }
+        final String wanted = _withoutTrailingMarks(_forSearch(translated));
+        if (_forSearch(text).contains(wanted) ||
+            kI18nLabelExceptions.any(
+              (I18nLabelException exception) =>
+                  exception.label == label &&
+                  exception.languages.contains(languageCode) &&
+                  entry.key.startsWith(exception.text),
+            )) {
+          continue;
+        }
+        report.mismatched.add(
+          '${_quoted(entry.key)}: names "$label" but does not say '
+          '${_quoted(translated)}',
+        );
+      }
+    }
+  }
+}
+
+String _forSearch(String text) =>
+    text.toLowerCase().replaceAll('’', "'").replaceAll(' ', ' ');
+
+String _withoutTrailingMarks(String text) =>
+    text.replaceFirst(RegExp(r'[.…,;:?!]+$'), '');
 
 void _checkText(String key, Object value, I18nFileReport report) {
   if (value is! String) {
@@ -341,6 +465,7 @@ void _checkPlural(
   I18nPlural plural,
   Object value,
   I18nFileReport report,
+  String? languageCode,
 ) {
   if (value is! Map) {
     report.mismatched.add(
@@ -376,6 +501,18 @@ void _checkPlural(
       continue;
     }
     final Set<String> found = i18nPlaceholders(text);
+    final List<int>? alsoOne = category == 'one'
+        ? kI18nWideOneForms[languageCode]
+        : null;
+    if (alsoOne != null &&
+        i18nPlaceholders(plural.many).contains('n') &&
+        !found.contains('n') &&
+        !(kI18nNeverZero.contains(key) && alsoOne.every((int n) => n == 0))) {
+      report.mismatched.add(
+        '${_quoted(key)} (one): the "one" form of $languageCode also holds '
+        '${alsoOne.join(', ')}, so it must show {n}',
+      );
+    }
     final Set<String> unknown = found.difference(allowed);
     final Set<String> lost =
         (category == 'other'

@@ -45,6 +45,15 @@ final class CallSession {
   String get kindLabel =>
       kind == CallInviteKind.video ? t('wideo') : t('audio');
 
+  /// Whether this side's own controls (microphone, loudspeaker, camera)
+  /// belong on the screen: from the first ring of an outgoing call on,
+  /// while it connects, and in the call; not while an incoming call rings
+  /// (answering or declining it is all there is to do then).
+  bool get ownControlsShown =>
+      status == CallSessionStatus.active ||
+      status == CallSessionStatus.connecting ||
+      (status == CallSessionStatus.ringing && !isIncoming);
+
   CallSession copyWith({
     String? id,
     String? peerAddress,

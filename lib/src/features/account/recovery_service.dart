@@ -34,8 +34,9 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///   (an unsigned one, from 1.16.4 and earlier, only for the pieces it
 ///   handed out, from an address not unlinked);
 /// * `rc_piece {kind, half, more?, account}`: helper → new device, after
-///   the delay. `more` holds the helper's previous generation, kept until
-///   the new one is complete. `account` is the account the piece is for;
+///   the delay. `more` holds the helper's earlier generations, kept until
+///   a newer one is complete (1.16.5 and earlier take one of them, and
+///   their helpers keep one). `account` is the account the piece is for;
 ///   the account the pieces open must still be confirmed by its
 ///   fingerprint.
 /// * `rc_help {}`: new device → helper, when the person names the helper
@@ -44,8 +45,9 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///
 /// The new device takes pieces only while a recovery is started on it
 /// ([RecoveryService.beginRecovery]), only from its friends and the helpers
-/// the person listed there ([RecoveryService.allowHelper]), at most two
-/// of each kind per sender, and only with the Argon2 costs this app writes.
+/// the person listed there ([RecoveryService.allowHelper]), at most
+/// [kMaxHeldGenerations] of each kind per sender, and only with the Argon2
+/// costs this app writes.
 abstract final class RecoveryMessages {
   static const String store = 'rc_store';
   static const String ack = 'rc_ack';
@@ -72,10 +74,28 @@ const Duration kForgetTold = Duration(days: 90);
 /// there (a friendship that comes back within it changes nothing).
 const Duration kPiecesAfterFriendship = Duration(days: 42);
 
-/// How long a helper keeps the previous generation after a newer one
-/// came, when nobody told it to forget it (the owner's phone may be gone
-/// before the new generation was complete).
-const Duration kPreviousPieceKept = Duration(days: 60);
+/// Generations of one account's pieces a helper keeps, at most: the newest
+/// and those before it, until the owner says to forget them (it does once
+/// a newer generation is complete). Over this, one from the middle goes:
+/// the oldest kept is the last one that was complete.
+const int kMaxHeldGenerations = 8;
+
+/// How long a holder's confirmation counts: it answers the weekly offer
+/// ([kPieceReoffer]); one silent for longer (the app removed, the phone
+/// gone) no longer makes the account secured.
+const Duration kAckFresh = Duration(days: 35);
+
+/// How long a change that leaves fewer people holding pieces waits before
+/// it is made (unless confirmed with the account password): handing a
+/// piece out again takes a day and an alarm, so taking them away must not
+/// be quicker.
+const Duration kReductionDelay = Duration(days: 7);
+
+/// How long a helper remembers that it forgot an account's pieces: the
+/// mark travels with the pieces between its devices, so one that was away
+/// longer than the deletions are carried ([kAccountSyncTombstoneLife])
+/// still drops them.
+const Duration kForgottenKept = Duration(days: 400);
 
 /// How long a release stopped by the owner waits before the helper may
 /// still give the piece, and how long a stopped one stays listed.
@@ -246,6 +266,7 @@ final class RecoveryGeneration {
     required this.sealAt,
     required this.holders,
     this.acks = const <String, int>{},
+    this.ackAt = const <String, int>{},
     this.cleared = false,
   });
 
@@ -266,6 +287,9 @@ final class RecoveryGeneration {
   /// Holder → the generation it confirmed.
   final Map<String, int> acks;
 
+  /// Holder → when it last confirmed this generation (wall clock).
+  final Map<String, int> ackAt;
+
   /// Whether the older generations were told to forget (it was complete).
   final bool cleared;
 
@@ -276,16 +300,45 @@ final class RecoveryGeneration {
   bool get complete =>
       holders.length >= kRecoveryCircleMinimum && acked >= threshold;
 
-  RecoveryGeneration copyWith({Map<String, int>? acks, bool? cleared}) =>
-      RecoveryGeneration(
-        generation: generation,
-        threshold: threshold,
-        device: device,
-        sealAt: sealAt,
-        holders: holders,
-        acks: acks ?? this.acks,
-        cleared: cleared ?? this.cleared,
-      );
+  /// Whether [holder] confirmed this generation and answered within
+  /// [kAckFresh] before [now].
+  bool answered(String holder, int now) =>
+      acks[holder] == generation &&
+      now - (ackAt[holder] ?? 0) < kAckFresh.inMilliseconds;
+
+  /// Holders who confirmed this generation and answered lately.
+  int ackedNow(int now) => holders.where((String h) => answered(h, now)).length;
+
+  /// This generation with a time for every confirmation that has none (one
+  /// saved before confirmations had a time): [now], as if just answered.
+  RecoveryGeneration withAckTimes(int now) {
+    final Iterable<String> missing = acks.keys.where(
+      (String h) => !ackAt.containsKey(h),
+    );
+    return missing.isEmpty
+        ? this
+        : copyWith(
+            ackAt: <String, int>{
+              ...ackAt,
+              for (final String h in missing) h: now,
+            },
+          );
+  }
+
+  RecoveryGeneration copyWith({
+    Map<String, int>? acks,
+    Map<String, int>? ackAt,
+    bool? cleared,
+  }) => RecoveryGeneration(
+    generation: generation,
+    threshold: threshold,
+    device: device,
+    sealAt: sealAt,
+    holders: holders,
+    acks: acks ?? this.acks,
+    ackAt: ackAt ?? this.ackAt,
+    cleared: cleared ?? this.cleared,
+  );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'g': generation,
@@ -294,6 +347,7 @@ final class RecoveryGeneration {
     's': sealAt,
     'holders': holders,
     'acks': acks,
+    if (ackAt.isNotEmpty) 'ackAt': ackAt,
     if (cleared) 'cleared': true,
   };
 
@@ -307,6 +361,7 @@ final class RecoveryGeneration {
     final Object? s = json['s'];
     final Object? holders = json['holders'];
     final Object? acks = json['acks'];
+    final Object? ackAt = json['ackAt'];
     if (g is! int || t is! int || d is! String || s is! int) {
       return null;
     }
@@ -324,7 +379,54 @@ final class RecoveryGeneration {
             if (e.key is String && e.value is int)
               e.key! as String: e.value! as int,
       },
+      ackAt: <String, int>{
+        if (ackAt is Map)
+          for (final MapEntry<Object?, Object?> e in ackAt.entries)
+            if (e.key is String && e.value is int)
+              e.key! as String: e.value! as int,
+      },
       cleared: json['cleared'] == true,
+    );
+  }
+}
+
+/// A change of the close friends that leaves fewer people holding pieces
+/// (or nobody): made at [due], or sooner when confirmed with the account
+/// password ([RecoveryService.confirmReduction]).
+@immutable
+final class RecoveryReduction {
+  const RecoveryReduction({
+    required this.since,
+    required this.holders,
+    this.confirmed = false,
+  });
+
+  /// When it was first wanted.
+  final int since;
+
+  /// How many are to hold pieces then (0: nobody, fewer than two close
+  /// friends).
+  final int holders;
+
+  /// Confirmed with the account password: made at once.
+  final bool confirmed;
+
+  int get due => since + kReductionDelay.inMilliseconds;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'since': since,
+    'n': holders,
+    if (confirmed) 'ok': true,
+  };
+
+  static RecoveryReduction? fromJson(Object? json) {
+    if (json is! Map || json['since'] is! int || json['n'] is! int) {
+      return null;
+    }
+    return RecoveryReduction(
+      since: json['since'] as int,
+      holders: json['n'] as int,
+      confirmed: json['ok'] == true,
     );
   }
 }
@@ -339,6 +441,8 @@ final class RecoveryProtection {
     this.acked = 0,
     this.legacy = 0,
     this.legacyAcked = 0,
+    this.silent = const <String>[],
+    this.reduction,
   });
 
   /// Whether pieces can be made (an account password was set for them
@@ -346,7 +450,17 @@ final class RecoveryProtection {
   final bool sealed;
   final int holders;
   final int threshold;
+
+  /// Holders who confirmed the current pieces and answered within
+  /// [kAckFresh].
   final int acked;
+
+  /// Holders who confirmed the current pieces but have not answered within
+  /// [kAckFresh] (addresses): they no longer count.
+  final List<String> silent;
+
+  /// Fewer people are to hold pieces, waiting ([kReductionDelay]).
+  final RecoveryReduction? reduction;
 
   /// The circle handed out by 1.16.4 or earlier, still valid until the new
   /// pieces are complete: its people and how many confirmed.
@@ -378,7 +492,7 @@ final class _Held {
   /// The owner's address they came from (last).
   String from;
 
-  /// Newest generation first, at most two.
+  /// Newest generation first, at most [kMaxHeldGenerations].
   List<Map<String, dynamic>> pieces;
 
   /// When the newest came.
@@ -388,7 +502,9 @@ final class _Held {
   int? gone;
   final bool signed;
 
-  int get newest => RecoveryPiece.fromJson(pieces.first)?.generation ?? 0;
+  int get newest => pieces.isEmpty
+      ? 0
+      : RecoveryPiece.fromJson(pieces.first)?.generation ?? 0;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'account': account,
@@ -415,7 +531,7 @@ final class _Held {
       return null;
     }
     final List<Map<String, dynamic>> kept = <Map<String, dynamic>>[
-      for (final Object? p in pieces.take(2))
+      for (final Object? p in pieces.take(kMaxHeldGenerations))
         if (RecoveryPiece.fromJson(p) != null) p! as Map<String, dynamic>,
     ];
     if (kept.isEmpty) {
@@ -443,15 +559,18 @@ final class _Held {
 /// confirmed it, everyone who held an older generation (the circle of
 /// 1.16.4 too) is told to forget it. Only the device whose seal is the
 /// newest hands pieces out; the others show the same state
-/// ([syncState]).
+/// ([syncState]). A change that leaves fewer people holding pieces waits
+/// [kReductionDelay] unless confirmed with the account password
+/// ([confirmReduction]), and a holder counts only while it answers
+/// ([kAckFresh]).
 ///
 /// As a helper: pieces are kept under the owner's account (proved by the
-/// device signature that came with them), the newest generation and the
-/// one before it, and they travel to this account's other devices
-/// ([syncState]) and into its moves and full copies. They go when the
-/// owner says to forget them, [kPiecesAfterFriendship] after the
-/// friendship ended, and (the one before) [kPreviousPieceKept] after a
-/// newer came.
+/// device signature that came with them), the newest generation and those
+/// before it (at most [kMaxHeldGenerations]), and they travel to this
+/// account's other devices ([syncState]) and into its moves and full
+/// copies. They go when the owner says to forget them (once a newer
+/// generation is complete), and [kPiecesAfterFriendship] after the
+/// friendship ended.
 final class RecoveryService {
   RecoveryService({
     required this.transport,
@@ -497,6 +616,7 @@ final class RecoveryService {
   static const String _sealKey = 'recovery/sealed';
   static const String _generationKey = 'recovery/gen';
   static const String _outKey = 'recovery/out';
+  static const String _forgotKey = 'recovery/forgot';
 
   /// The key of the pieces of [address] kept unsigned (from 1.16.4 and
   /// earlier).
@@ -506,8 +626,9 @@ final class RecoveryService {
   static const int maxRequests = 8;
   static const Duration requestLifetime = Duration(days: 30);
 
-  /// Pieces kept for one recovery, at most.
-  static const int maxReceived = 48;
+  /// Pieces kept for one recovery, at most: every generation a helper
+  /// keeps, from each helper the person may list.
+  static const int maxReceived = maxHelpers * kMaxHeldGenerations;
 
   /// Helpers the person may list for one recovery, at most.
   static const int maxHelpers = 24;
@@ -566,8 +687,9 @@ final class RecoveryService {
   /// piece they confirmed.
   final Map<String, int> _acks = <String, int>{};
 
-  /// Received halves: `normal` / `emergency` lists (at most two per
-  /// sender, each share once), with the account they name and who sent
+  /// Received halves: `normal` / `emergency` lists (at most
+  /// [kMaxHeldGenerations] per sender, each share once), with the account
+  /// they name and who sent
   /// them.
   final Map<RecoveryKind, List<Map<String, dynamic>>> _received =
       <RecoveryKind, List<Map<String, dynamic>>>{
@@ -601,6 +723,14 @@ final class RecoveryService {
 
   /// Former (or current) holder → when it was last told to forget.
   final Map<String, int> _told = <String, int>{};
+
+  /// Fewer holders wanted, waiting ([kReductionDelay]).
+  RecoveryReduction? _reduction;
+
+  /// Key of [_held] → the newest generation forgotten there and when: the
+  /// mark that drops those pieces on the account's other devices too.
+  final Map<String, ({int generation, int at})> _forgot =
+      <String, ({int generation, int at})>{};
   bool _reconciling = false;
   bool _reconcileAgain = false;
 
@@ -610,6 +740,10 @@ final class RecoveryService {
   /// Told when a friend is about to release this account's piece to a new
   /// device (the app posts a notification on the old devices).
   void Function(RecoveryAlarm alarm)? onAlarm;
+
+  /// Told when a change of the close friends would leave fewer people
+  /// holding pieces: it waits (the app posts a notification).
+  void Function(RecoveryReduction reduction)? onReduction;
   final StreamController<void> _changes = StreamController<void>.broadcast();
   StreamSubscription<SignalTransportFrame>? _frames;
   Timer? _timer;
@@ -667,16 +801,55 @@ final class RecoveryService {
   }
 
   /// How the account is kept by its friends now.
+  /// Only holders that answered within [kAckFresh] count: a confirmation
+  /// does not hold for ever.
   RecoveryProtection get protection {
     final RecoveryGeneration? g = _generation;
+    final int now = _clock();
     return RecoveryProtection(
       sealed: _seal != null || g != null,
       holders: g?.holders.length ?? 0,
       threshold: g?.threshold ?? 0,
-      acked: g?.acked ?? 0,
+      acked: g?.ackedNow(now) ?? 0,
       legacy: _circle.length,
       legacyAcked: _circle.where((String a) => _acks.containsKey(a)).length,
+      silent: <String>[
+        if (g != null)
+          for (final String h in g.holders)
+            if (g.acks[h] == g.generation && !g.answered(h, now)) h,
+      ],
+      reduction: _reduction,
     );
+  }
+
+  /// Whether [holder] confirmed the current pieces but has not answered
+  /// within [kAckFresh].
+  bool isSilent(String holder) {
+    final RecoveryGeneration? g = _generation;
+    return g != null &&
+        g.acks[holder] == g.generation &&
+        !g.answered(holder, _clock());
+  }
+
+  /// Confirms the waiting change to fewer holders ([RecoveryReduction])
+  /// with the account password: it is made now. False for a wrong
+  /// password or when nothing waits.
+  Future<bool> confirmReduction(String password) async {
+    await start();
+    final RecoveryReduction? r = _reduction;
+    final RecoverySeal? seal = _seal;
+    if (r == null || seal == null || !await seal.opensWith(password)) {
+      return false;
+    }
+    _reduction = RecoveryReduction(
+      since: r.since,
+      holders: r.holders,
+      confirmed: true,
+    );
+    await _saveOut();
+    _changed();
+    await reconcile();
+    return true;
   }
 
   /// New devices that asked for help and were not answered yet.
@@ -852,9 +1025,53 @@ final class RecoveryService {
         : g.device != id.device ||
               g.sealAt != seal.at ||
               !setEquals(g.holders.toSet(), next.toSet())) {
-      await _newGeneration(id, seal, next, g);
+      if (await _mayChangeTo(g, next)) {
+        await _newGeneration(id, seal, next, g);
+      }
+    } else if (_reduction != null) {
+      // The close friends are as before again: nothing waits.
+      _reduction = null;
+      await _saveOut();
+      _changed();
     }
     await _sendDue(id);
+  }
+
+  /// Whether the pieces may go to [next] now. Fewer holders than [before]
+  /// has (nobody, below two close friends) wait [kReductionDelay] from the
+  /// first time they are wanted, unless confirmed with the account
+  /// password; the person is told. A further cut starts the wait again.
+  Future<bool> _mayChangeTo(
+    RecoveryGeneration? before,
+    List<String> next,
+  ) async {
+    if (before == null || next.length >= before.holders.length) {
+      if (_reduction != null) {
+        _reduction = null;
+        await _saveOut();
+        _changed();
+      }
+      return true;
+    }
+    final int now = _clock();
+    final RecoveryReduction? r = _reduction;
+    if (r != null && next.length >= r.holders) {
+      if (r.confirmed || now >= r.due) {
+        _reduction = null;
+        await _saveOut();
+        return true;
+      }
+      return false;
+    }
+    final RecoveryReduction waiting = RecoveryReduction(
+      since: now,
+      holders: next.length,
+    );
+    _reduction = waiting;
+    await _saveOut();
+    _changed();
+    onReduction?.call(waiting);
+    return false;
   }
 
   Future<void> _newGeneration(
@@ -941,6 +1158,20 @@ final class RecoveryService {
     if (reoffer) {
       _reofferAt = now;
       changed = true;
+      // Those who keep the complete generation hear again to drop the
+      // older ones (a "forget" lost on the way leaves no set behind for
+      // good: a helper keeps a bounded number of them).
+      final RecoveryGeneration? latest = _generation;
+      if (latest != null &&
+          latest.generation == g.generation &&
+          latest.cleared &&
+          latest.complete) {
+        for (final String h in latest.holders) {
+          if (latest.acks[h] == latest.generation) {
+            await _sendForget(id, h, latest.generation);
+          }
+        }
+      }
     }
     // Confirmations came while the pieces went out: the generation as it
     // is now.
@@ -960,9 +1191,14 @@ final class RecoveryService {
     if (!g.cleared) {
       if (g.complete) {
         await _retireLegacy(g);
-        // The holders drop the generation before this one.
+        // The holders drop the generations before this one: only those who
+        // keep this one (the others confirm it later and are told then,
+        // [_onAck]), so nobody drops a complete set for nothing.
+        final RecoveryGeneration latest = _generation ?? g;
         for (final String h in g.holders) {
-          await _sendForget(id, h, g.generation);
+          if (latest.acks[h] == g.generation) {
+            await _sendForget(id, h, g.generation);
+          }
         }
       }
       // As it is after the messages above (more confirmations may have
@@ -1252,7 +1488,13 @@ final class RecoveryService {
           'type': RecoveryMessages.piece,
           'kind': p.kind.name,
           'half': halves.first,
-          if (halves.length > 1) 'more': halves.sublist(1),
+          // The oldest first: the last complete generation, and the one a
+          // new device on 1.16.5 or earlier (which takes one) gets.
+          if (halves.length > 1)
+            'more': <Object?>[
+              halves.last,
+              ...halves.sublist(1, halves.length - 1),
+            ],
           // Whose key it is: the new device checks the seed against it.
           'account': held.account,
         });
@@ -1269,8 +1511,8 @@ final class RecoveryService {
   }
 
   /// Drops the pieces of people who are no longer friends here (after
-  /// [kPiecesAfterFriendship]) and previous generations kept longer than
-  /// [kPreviousPieceKept].
+  /// [kPiecesAfterFriendship]), and the marks of forgotten pieces older
+  /// than [kForgottenKept].
   Future<void> _keepHeld(int now) async {
     bool changed = false;
     for (final String key in _held.keys.toList()) {
@@ -1294,24 +1536,56 @@ final class RecoveryService {
           continue;
         }
       }
-      if (h.pieces.length > 1 &&
-          now - h.at >= kPreviousPieceKept.inMilliseconds) {
-        h.pieces = <Map<String, dynamic>>[h.pieces.first];
-        changed = true;
-      }
+      // Earlier generations stay until the owner says to forget them: the
+      // owner's phone may be gone before the newer one was complete.
+    }
+    final int forgotBefore = _forgot.length;
+    _forgot.removeWhere(
+      (String _, ({int generation, int at}) f) =>
+          now - f.at >= kForgottenKept.inMilliseconds,
+    );
+    if (_forgot.length != forgotBefore) {
+      await _saveForgot();
+      _changed();
     }
     if (changed) {
       await _savePieces();
     }
   }
 
-  Future<void> _dropHeld(String key) async {
-    if (_held.remove(key) == null) {
+  /// Drops what is kept under [key], and marks it forgotten (see
+  /// [_forgot]): a device of this account that kept the same pieces and
+  /// was away too long to get the deletion drops them by the mark.
+  Future<void> _dropHeld(String key, {int? newest}) async {
+    final _Held? h = _held.remove(key);
+    if (h == null) {
       return;
     }
+    _markForgotten(key, newest ?? h.newest);
+    await _saveForgot();
     _pending.removeWhere((PendingRelease p) => p.owner == key);
     await _savePending();
     _changed();
+  }
+
+  void _markForgotten(String key, int generation) {
+    final ({int generation, int at})? had = _forgot[key];
+    if (had != null && had.generation >= generation) {
+      // Marked already (on another device, perhaps): the same mark.
+      return;
+    }
+    _forgot[key] = (generation: generation, at: _clock());
+    if (_forgot.length > maxHeld) {
+      final String oldest = _forgot.entries
+          .reduce(
+            (
+              MapEntry<String, ({int generation, int at})> a,
+              MapEntry<String, ({int generation, int at})> b,
+            ) => a.value.at <= b.value.at ? a : b,
+          )
+          .key;
+      _forgot.remove(oldest);
+    }
   }
 
   // ---- as the new device ----
@@ -1505,6 +1779,9 @@ final class RecoveryService {
           at: now,
           signed: false,
         );
+        if (_forgot.remove(key) != null) {
+          await _saveForgot();
+        }
         await _savePieces();
       }
       await _ack(from, piece.account, piece.created);
@@ -1541,6 +1818,7 @@ final class RecoveryService {
     }
     // The pieces of 1.16.4 the same person handed out before: kept as the
     // previous generation until the new one is complete.
+    bool merged = false;
     for (final String key in _held.keys.toList()) {
       final _Held old = _held[key]!;
       if (!old.signed &&
@@ -1548,6 +1826,8 @@ final class RecoveryService {
           (old.from == from || accountOf(old.from) == account)) {
         held.pieces.addAll(old.pieces);
         _held.remove(key);
+        _markForgotten(key, old.newest);
+        merged = true;
         for (int i = 0; i < _pending.length; i++) {
           final PendingRelease r = _pending[i];
           if (r.owner == key) {
@@ -1578,8 +1858,11 @@ final class RecoveryService {
               RecoveryPiece.fromJson(a)?.generation ?? 0,
             ),
       );
-    if (held.pieces.length > 2) {
-      held.pieces = held.pieces.sublist(0, 2);
+    // Every generation stays until the owner says to forget it; over the
+    // bound, the one after the oldest goes: the oldest is the last that
+    // was complete (the owner says to forget what is older once one is).
+    while (held.pieces.length > kMaxHeldGenerations) {
+      held.pieces.removeAt(held.pieces.length - 2);
     }
     held
       ..from = from
@@ -1588,6 +1871,10 @@ final class RecoveryService {
       held.at = now;
     }
     _held[account] = held;
+    // Kept again (a friendship back): the mark would drop it elsewhere.
+    if (_forgot.remove(account) != null || merged) {
+      await _saveForgot();
+    }
     await _savePieces();
     await _ack(from, account, held.newest);
     _changed();
@@ -1608,11 +1895,26 @@ final class RecoveryService {
       return;
     }
     final RecoveryGeneration? g = _generation;
+    final int now = _clock();
     if (g != null &&
         g.holders.contains(from) &&
         created == g.generation &&
-        g.acks[from] != created) {
-      _generation = g.copyWith(acks: <String, int>{...g.acks, from: created});
+        g.acks[from] == created) {
+      // Answered again (the weekly offer): when, at most once a day, so the
+      // screen can tell a holder who went silent.
+      if (now - (g.ackAt[from] ?? 0) >=
+          const Duration(days: 1).inMilliseconds) {
+        _generation = g.copyWith(ackAt: <String, int>{...g.ackAt, from: now});
+        await _saveGeneration();
+        _changed();
+      }
+      return;
+    }
+    if (g != null && g.holders.contains(from) && created == g.generation) {
+      _generation = g.copyWith(
+        acks: <String, int>{...g.acks, from: created},
+        ackAt: <String, int>{...g.ackAt, from: now},
+      );
       await _saveGeneration();
       _changed();
       final RecoveryIdentity? id = identity();
@@ -1655,6 +1957,7 @@ final class RecoveryService {
         continue;
       }
       final int before = h.pieces.length;
+      final int newest = h.newest;
       // Pieces of 1.16.4 and earlier (unsigned, or kept as the one before)
       // are older than any generation, whatever their time says.
       h.pieces.removeWhere((Map<String, dynamic> x) {
@@ -1665,7 +1968,7 @@ final class RecoveryService {
             piece.generation < g;
       });
       if (h.pieces.isEmpty) {
-        await _dropHeld(key);
+        await _dropHeld(key, newest: newest);
         changed = true;
       } else if (h.pieces.length != before) {
         changed = true;
@@ -1779,7 +2082,7 @@ final class RecoveryService {
     bool changed = false;
     for (final Object? raw in <Object?>[
       payload['half'],
-      if (more is List) ...more.take(1),
+      if (more is List) ...more.take(kMaxHeldGenerations - 1),
     ]) {
       final Map<String, dynamic>? half = _receivedHalf(
         kind,
@@ -1791,11 +2094,12 @@ final class RecoveryService {
         continue;
       }
       final List<Map<String, dynamic>> list = _received[kind]!;
-      // At most two halves of each kind per sender (its newest generation
-      // and the one before), so one helper cannot crowd out the others.
+      // At most the generations a helper keeps, of each kind per sender (its
+      // newest and those before it, the last complete one among them), so
+      // one helper cannot crowd out the others.
       if (list.length >= maxReceived ||
           list.where((Map<String, dynamic> h) => h['from'] == from).length >=
-              2 ||
+              kMaxHeldGenerations ||
           list.any(
             (Map<String, dynamic> h) =>
                 h['share'] == half['share'] ||
@@ -1842,19 +2146,55 @@ final class RecoveryService {
 
   /// What the account's other devices keep the same: the pieces kept for
   /// others (each account's as one unit) and this account's generation.
+  ///
+  /// `forgot` marks the pieces forgotten here (key → `[generation, at]`):
+  /// a deletion is carried between the devices only for a while
+  /// (`kAccountSyncTombstoneLife`), the mark for [kForgottenKept], so a
+  /// device away for longer drops what was forgotten meanwhile. Builds
+  /// before 1.17.0 ignore it.
   Map<String, Object?> syncState() => <String, Object?>{
     'held': <String, Object?>{
       for (final MapEntry<String, _Held> e in _held.entries)
         e.key: e.value.toJson(),
     },
     'own': ?_generation?.toJson(),
+    if (_forgot.isNotEmpty)
+      'forgot': <String, Object?>{
+        for (final MapEntry<String, ({int generation, int at})> e
+            in _forgot.entries)
+          e.key: <int>[e.value.generation, e.value.at],
+      },
   };
 
   /// Takes the state the account's devices agreed on ([syncState]): pieces
-  /// that came to another device, or went from it (forgotten there); the
-  /// newer generation of this account's pieces, with every confirmation.
+  /// that came to another device, or went from it (forgotten there, or
+  /// marked forgotten, see [syncState]); the newer generation of this
+  /// account's pieces, with every confirmation.
   Future<void> takeSyncState(Map<String, Object?> state) async {
     await start();
+    final Object? forgot = state['forgot'];
+    final Map<String, ({int generation, int at})> marks =
+        <String, ({int generation, int at})>{
+          if (forgot is Map)
+            for (final MapEntry<Object?, Object?> e in forgot.entries)
+              if (e.key is String &&
+                  e.value is List &&
+                  (e.value! as List).length == 2 &&
+                  (e.value! as List).every((Object? x) => x is int))
+                e.key! as String: (
+                  generation: (e.value! as List)[0] as int,
+                  at: (e.value! as List)[1] as int,
+                ),
+        };
+    final bool marksChanged =
+        marks.length != _forgot.length ||
+        marks.entries.any(
+          (MapEntry<String, ({int generation, int at})> e) =>
+              _forgot[e.key] != e.value,
+        );
+    _forgot
+      ..clear()
+      ..addAll(marks);
     final Object? held = state['held'];
     final Map<String, _Held> incoming = <String, _Held>{
       if (held is Map)
@@ -1862,7 +2202,15 @@ final class RecoveryService {
           if (e.key is String && _Held.fromJson(e.value) != null)
             e.key! as String: _Held.fromJson(e.value)!,
     };
-    bool piecesChanged = false;
+    // Kept on a device that was away, forgotten since on another.
+    incoming.removeWhere(
+      (String key, _Held h) =>
+          marks[key] != null && h.newest <= marks[key]!.generation,
+    );
+    bool piecesChanged = marksChanged;
+    if (marksChanged) {
+      await _saveForgot();
+    }
     for (final String key in _held.keys.toList()) {
       if (!incoming.containsKey(key)) {
         await _dropHeld(key);
@@ -1888,17 +2236,28 @@ final class RecoveryService {
     final RecoveryGeneration? mine = _generation;
     if (theirs != null &&
         (mine == null || theirs.generation > mine.generation)) {
-      _generation = theirs;
+      _generation = theirs.withAckTimes(_clock());
       await _saveGeneration();
       piecesChanged = true;
     } else if (theirs != null && theirs.generation == mine!.generation) {
       final Map<String, int> acks = <String, int>{...mine.acks, ...theirs.acks};
+      // The latest answer of each holder, from whichever device heard it.
+      final Map<String, int> ackAt = <String, int>{...mine.ackAt};
+      theirs.ackAt.forEach((String h, int at) {
+        if (at > (ackAt[h] ?? 0)) {
+          ackAt[h] = at;
+        }
+      });
       if (acks.length != mine.acks.length ||
+          !mapEquals(ackAt, mine.ackAt) ||
           (theirs.cleared && !mine.cleared)) {
-        _generation = mine.copyWith(
-          acks: acks,
-          cleared: mine.cleared || theirs.cleared,
-        );
+        _generation = mine
+            .copyWith(
+              acks: acks,
+              ackAt: ackAt,
+              cleared: mine.cleared || theirs.cleared,
+            )
+            .withAckTimes(_clock());
         await _saveGeneration();
         piecesChanged = true;
       }
@@ -2033,7 +2392,28 @@ final class RecoveryService {
       }
     }
     _seal = RecoverySeal.fromJson(await _read(_sealKey));
-    _generation = RecoveryGeneration.fromJson(await _read(_generationKey));
+    final RecoveryGeneration? saved = RecoveryGeneration.fromJson(
+      await _read(_generationKey),
+    );
+    // Confirmations saved before they had a time count from now (and are
+    // kept so: a holder silent since does not count again at every start).
+    _generation = saved?.withAckTimes(_clock());
+    if (!identical(_generation, saved)) {
+      await _saveGeneration();
+    }
+    final Object? forgot = await _read(_forgotKey);
+    if (forgot is Map) {
+      forgot.forEach((Object? k, Object? v) {
+        if (k is String &&
+            v is List &&
+            v.length == 2 &&
+            v[0] is int &&
+            v[1] is int &&
+            _forgot.length < maxHeld) {
+          _forgot[k] = (generation: v[0] as int, at: v[1] as int);
+        }
+      });
+    }
     final Object? out = await _read(_outKey);
     if (out is Map) {
       final Object? pieces = out['pieces'];
@@ -2059,8 +2439,15 @@ final class RecoveryService {
       ints(out['told'], _told);
       final Object? reoffer = out['reoffer'];
       _reofferAt = reoffer is int ? reoffer : 0;
+      _reduction = RecoveryReduction.fromJson(out['reduce']);
     }
   }
+
+  Future<void> _saveForgot() => _write(_forgotKey, <String, Object?>{
+    for (final MapEntry<String, ({int generation, int at})> e
+        in _forgot.entries)
+      e.key: <int>[e.value.generation, e.value.at],
+  });
 
   Future<void> _saveCollecting() => _write(_collectingKey, <String, dynamic>{
     'since': _collectingSince,
@@ -2087,6 +2474,7 @@ final class RecoveryService {
     'reoffer': _reofferAt,
     'retired': _retired,
     'told': _told,
+    'reduce': ?_reduction?.toJson(),
   });
 
   Future<void> _saveRequests() => _write(_requestsKey, <Map<String, dynamic>>[

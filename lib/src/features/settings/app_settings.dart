@@ -15,7 +15,9 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// 3 (1.15.5): the notifications step has "W grupach tylko wzmianki" (new,
 /// on by default) and an additional account's "Powiadomienia z tego konta"
 /// (1.15.4, which did not bump this).
-const int kSetupRevision = 3;
+/// 4: the password manager's step (whether to use it, then its setup). Who
+/// went through 3 sees only that step (first_run_setup.dart).
+const int kSetupRevision = 4;
 
 /// Settings saved before this revision had "Znajomi w tej samej sieci
 /// Wi-Fi", Wi-Fi Direct and Bluetooth off from when they were off by
@@ -501,6 +503,7 @@ final class AppSettings {
     this.multipeerLinks = true,
     this.keepReceivingInBackground = false,
     this.showLastOpened = true,
+    this.passwordsInCircleBackup = true,
     this.seenTips = const <String>{},
     this.notificationsSeenMillis = 0,
     this.lastAccountBackupMillis = 0,
@@ -725,6 +728,14 @@ final class AppSettings {
   /// person's presence also see when Zen was last open here. On by default.
   final bool showLastOpened;
 
+  /// "Hasła w kopii u znajomych": the passwords go, sealed, into the copy
+  /// the chosen friends keep (CircleBackupService), so they come back with
+  /// the account by every way it comes back. On by default (as in 1.16.5,
+  /// which had no switch); off, the next copy has none and replaces the
+  /// friends' copy. A setting of the account: the same on all its devices,
+  /// or one device's copy would bring them back.
+  final bool passwordsInCircleBackup;
+
   /// One-time cards and reminders already shown or dismissed, by id (see
   /// `ZenTips`): a card shows until its id is here.
   final Set<String> seenTips;
@@ -845,6 +856,7 @@ final class AppSettings {
     bool? multipeerLinks,
     bool? keepReceivingInBackground,
     bool? showLastOpened,
+    bool? passwordsInCircleBackup,
     Set<String>? seenTips,
     int? notificationsSeenMillis,
     int? lastAccountBackupMillis,
@@ -900,6 +912,8 @@ final class AppSettings {
       keepReceivingInBackground:
           keepReceivingInBackground ?? this.keepReceivingInBackground,
       showLastOpened: showLastOpened ?? this.showLastOpened,
+      passwordsInCircleBackup:
+          passwordsInCircleBackup ?? this.passwordsInCircleBackup,
       seenTips: seenTips ?? this.seenTips,
       notificationsSeenMillis:
           notificationsSeenMillis ?? this.notificationsSeenMillis,
@@ -1009,6 +1023,7 @@ final class AppSettings {
     'multipeerLinks': multipeerLinks,
     'keepReceivingInBackground': keepReceivingInBackground,
     'showLastOpened': showLastOpened,
+    'passwordsInCircleBackup': passwordsInCircleBackup,
     if (seenTips.isNotEmpty) 'seenTips': seenTips.toList(growable: false),
     if (notificationsSeenMillis > 0)
       'notificationsSeenMillis': notificationsSeenMillis,
@@ -1113,6 +1128,7 @@ final class AppSettings {
           : pick<bool>('multipeerLinks'),
       keepReceivingInBackground: pick<bool>('keepReceivingInBackground'),
       showLastOpened: pick<bool>('showLastOpened'),
+      passwordsInCircleBackup: pick<bool>('passwordsInCircleBackup'),
       seenTips: switch (json['seenTips']) {
         final List<dynamic> ids => ids.whereType<String>().toSet(),
         _ => null,

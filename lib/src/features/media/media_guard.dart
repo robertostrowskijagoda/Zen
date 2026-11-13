@@ -222,14 +222,7 @@ MediaKind sniffMediaKind(Uint8List bytes) {
     if (const <String>{'M4A ', 'M4B ', 'M4P ', 'F4A '}.contains(brand)) {
       return MediaKind.audio;
     }
-    if (const <String>{
-      'heic',
-      'heix',
-      'mif1',
-      'msf1',
-      'avif',
-      'avis',
-    }.contains(brand)) {
+    if (_isoPictureBrands.contains(brand)) {
       // A HEIC/AVIF picture: no decoder here can make a safe copy of it.
       return MediaKind.file;
     }
@@ -265,6 +258,9 @@ String? sniffMimeType(Uint8List bytes) {
   }
   final String? brand = _isoBrand(bytes);
   if (brand != null) {
+    if (_isoPictureBrands.contains(brand)) {
+      return brand.startsWith('avi') ? 'image/avif' : 'image/heic';
+    }
     if (brand.startsWith('M4')) {
       return 'audio/mp4';
     }
@@ -654,18 +650,37 @@ bool looksExecutable(Uint8List bytes) {
       _startsWith(bytes, const <int>[0x23, 0x21]); // #!
 }
 
+/// Extensions that run something when opened. Besides programs and
+/// scripts this takes in what the attachment block lists of Outlook
+/// ("Blocked attachments in Outlook") and Gmail ("File types blocked in
+/// Gmail") name: OneNote notebooks (which carry runnable attachments),
+/// Access databases and add-ins, certificates (opening one offers to
+/// install it), and web pages and SVG pictures, which run scripts in the
+/// browser that opens them from the disk.
 const Set<String> _riskyExtensions = <String>{
   // Windows
-  'exe', 'com', 'scr', 'pif', 'bat', 'cmd', 'msi', 'msp', 'mst', 'msc',
-  'dll', 'cpl', 'sys', 'drv', 'ocx', 'lnk', 'url', 'scf', 'inf', 'reg',
-  'hta', 'htc', 'chm', 'hlp', 'gadget', 'application', 'xbap', 'website',
-  'appref-ms', 'settingcontent-ms', 'library-ms', 'search-ms',
+  'exe', 'ex_', 'com', 'scr', 'pif', 'bat', 'cmd', 'msi', 'msp', 'mst',
+  'msc', 'msu', 'dll', 'cpl', 'sys', 'drv', 'ocx', 'vxd', 'lnk', 'url',
+  'scf', 'inf', 'ins', 'isp', 'reg', 'hta', 'htc', 'chm', 'hlp', 'hpj',
+  'cnt', 'gadget', 'application', 'xbap', 'website', 'appref-ms',
+  'appcontent-ms', 'settingcontent-ms', 'library-ms', 'search-ms',
   'searchconnector-ms', 'appx', 'appxbundle', 'msix', 'msixbundle',
   'ps1', 'ps1xml', 'ps2', 'ps2xml', 'psc1', 'psc2', 'psm1', 'psd1',
-  'msh', 'msh1', 'msh2', 'mshxml', 'msh1xml', 'msh2xml', 'vb', 'vbs',
-  'vbe', 'js', 'jse', 'wsf', 'wsh', 'ws', 'wsc', 'sct', 'job', 'jar',
-  'jnlp', 'iso', 'img', 'vhd', 'vhdx', 'xll', 'iqy', 'cab', 'diagcab',
-  'diagcfg', 'diagpkg', 'theme', 'themepack', 'shb', 'shs',
+  'psdm1', 'pssc', 'cdxml', 'msh', 'msh1', 'msh2', 'mshxml', 'msh1xml',
+  'msh2xml', 'vb', 'vbs', 'vbe', 'vbp', 'bas', 'js', 'jse', 'mjs', 'wsf',
+  'wsh', 'ws', 'wsc', 'wsb', 'sct', 'job', 'jar', 'jnlp', 'iso', 'img',
+  'vhd', 'vhdx', 'xll', 'iqy', 'cab', 'diagcab', 'diagcfg', 'diagpkg',
+  'theme', 'themepack', 'shb', 'shs', 'udl', 'grp', 'its', 'mcf', 'ops',
+  'osd', 'pcd', 'prf', 'prg', 'plg', 'fxp', 'bgi', 'nsh', 'xnk', 'asx',
+  'printerexport', 'webpnp', 'vsmacros', 'vsw',
+  // Certificates: opening one offers to install it.
+  'cer', 'crt', 'der',
+  // OneNote notebooks, Access databases and add-ins.
+  'one', 'onepkg', 'accde', 'accdr', 'accda', 'mde', 'mda', 'mdb', 'mdt',
+  'mdw', 'mdz', 'ade', 'adp', 'mad', 'maf', 'mag', 'mam', 'maq', 'mar',
+  'mas', 'mat', 'mau', 'mav', 'maw',
+  // Web pages and SVG pictures: scripts run in the browser that opens them.
+  'html', 'htm', 'xhtml', 'xht', 'shtml', 'mht', 'mhtml', 'svg', 'svgz',
   // Office documents with macros
   'docm', 'dotm', 'xlsm', 'xltm', 'xlam', 'pptm', 'potm', 'ppam', 'sldm',
   // Android
@@ -772,6 +787,27 @@ bool _isMatroska(Uint8List b) =>
 
 /// The major brand of an ISO media file (MP4, MOV, 3GP, M4A, HEIC), or
 /// null when [b] does not start with an `ftyp` box.
+/// Major brands of pictures kept in ISO boxes (HEIC/HEIF, AVIF).
+const Set<String> _isoPictureBrands = <String>{
+  'heic',
+  'heix',
+  'heim',
+  'heis',
+  'hevc',
+  'hevx',
+  'mif1',
+  'msf1',
+  'avif',
+  'avis',
+};
+
+/// Whether [head] starts a HEIC/HEIF or AVIF picture: an ISO box file like
+/// a film, whose `meta` box holds the picture itself.
+bool isIsoPicture(Uint8List head) {
+  final String? brand = _isoBrand(head);
+  return brand != null && _isoPictureBrands.contains(brand);
+}
+
 String? _isoBrand(Uint8List b) {
   if (b.length < 12) {
     return null;

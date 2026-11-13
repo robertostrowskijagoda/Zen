@@ -6,8 +6,8 @@ import (
 )
 
 func TestAPhoneKeepsTheWholePoolInReserveBehindItsPicks(t *testing.T) {
-	candidates := phonePeerCandidates(publicPeerPool)
-	picks := selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
+	candidates := phonePeerCandidates(publicPeerPool, nil)
+	picks := selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize, nil)
 	if len(candidates) != len(builtInPublicPeers()) {
 		t.Fatalf("%d candidates, %d encrypted peers built in", len(candidates), len(builtInPublicPeers()))
 	}
@@ -49,9 +49,9 @@ func TestAPhoneKeepsTheWholePoolInReserveBehindItsPicks(t *testing.T) {
 }
 
 func TestAPhoneWhosePicksAreDeadMovesOnToItsReserve(t *testing.T) {
-	candidates := phonePeerCandidates(publicPeerPool)
+	candidates := phonePeerCandidates(publicPeerPool, nil)
 	picks := map[string]bool{}
-	for _, uri := range selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize) {
+	for _, uri := range selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize, nil) {
 		picks[uri] = true
 	}
 	w := newPeerWorld(t, candidates, phonePeerCount)
@@ -73,10 +73,10 @@ func TestAPhoneWhosePicksAreDeadMovesOnToItsReserve(t *testing.T) {
 func TestPhonePoolIsTheUsersWholeList(t *testing.T) {
 	mine := testPool(phonePeerPoolSize + 10)
 	withUserPublicPeers(t, mine)
-	if got := androidBootstrapPeers(); len(got) != len(mine) {
+	if got := androidBootstrapPeers(nil); len(got) != len(mine) {
 		t.Fatalf("phone pool has %d of the user's %d peers", len(got), len(mine))
 	}
-	if got := desktopPublicPeers(desktopPublicPeerCount); len(got) != desktopPublicPeerCount || got[0] != mine[0] {
+	if got := desktopPublicPeers(desktopPublicPeerCount, nil); len(got) != desktopPublicPeerCount || got[0] != mine[0] {
 		t.Fatalf("a computer dials the first %d of the user's list, got %v", desktopPublicPeerCount, got)
 	}
 }

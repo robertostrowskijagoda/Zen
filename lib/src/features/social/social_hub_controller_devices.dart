@@ -42,6 +42,12 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     );
   }
 
+  /// Whether a message another own device sent tells its timer: with when
+  /// it was set (switched off too), or, from Zen 1.16.5, only a timer on.
+  static bool _carriesDisappearTimer(Map<String, dynamic> payload) =>
+      sanitizeDisappearSetAt(payload[kDisappearSetAtKey]) != null ||
+      sanitizeDisappearSeconds(payload['ttl']) > 0;
+
   /// Another device of this account sent [payload] to [peerAddress]: show
   /// it in the conversation here too.
   Future<void> recordMirroredSend(
@@ -86,9 +92,10 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       return;
     }
     final String peer = friend.address;
-    if (sanitizeDisappearSeconds(payload['ttl']) > 0) {
+    if (_carriesDisappearTimer(payload)) {
       await _applyMirroredDisappearTimer(peer, <String, dynamic>{
         'seconds': payload['ttl'],
+        'at': payload[kDisappearSetAtKey],
       });
     }
     final int sentAt =
@@ -130,10 +137,11 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       return;
     }
     final String key = 'group:$groupId';
-    if (sanitizeDisappearSeconds(payload['ttl']) > 0) {
+    if (_carriesDisappearTimer(payload)) {
       await _applyMirroredDisappearTimer(key, <String, dynamic>{
         'groupId': groupId,
         'seconds': payload['ttl'],
+        'at': payload[kDisappearSetAtKey],
       });
     }
     final Object? at = payload['timestamp'];
@@ -577,10 +585,21 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
           added++;
         }
       }
-      if (identical(book, before) && groups.length == state.groups.length) {
+      // Blocks by person: the later decision wins, what is known of the
+      // person is put together; a block a device of Zen 1.16.5 made or
+      // lifted in the messenger comes in line ([BlockBook.reconcile]).
+      final BlockBook blocks = state.blocks
+          .mergeAll(
+            BlockBook.restore(blockRecordsFromJson(backup['bk'])),
+            wallMillis: tick.wallMillis,
+          )
+          .reconcile(book, accountOf: _blockAccountOf);
+      if (identical(book, before) &&
+          identical(blocks, state.blocks) &&
+          groups.length == state.groups.length) {
         return;
       }
-      state = state.copyWith(book: book, groups: groups);
+      state = state.copyWith(book: book, blocks: blocks, groups: groups);
       await _persistState();
     });
     return added;
@@ -600,7 +619,9 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
         return true;
       }
     }
-    return false;
+    return state.blocks.aheadOf(
+      BlockBook.restore(blockRecordsFromJson(backup['bk'])),
+    );
   }
 }
 
@@ -645,7 +666,12 @@ Map<String, dynamic> contactsBackupOf(SocialHubState state) =>
                     'by': g.createdById,
                     'at': g.createdAtMillis,
                     'm': g.memberAddresses,
-                    if (g.memberNames.isNotEmpty) 'mn': g.memberNames,
+                    // The names of the members only (everyone who ever
+                    // wrote there is not), within half an item's room.
+                    if (contactsMemberNames(g.memberNames, g.memberAddresses)
+                        case final Map<String, String> names
+                        when names.isNotEmpty)
+                      'mn': names,
                   },
                   kGroupLeftKey,
                   g.departedAt,
@@ -656,6 +682,10 @@ Map<String, dynamic> contactsBackupOf(SocialHubState state) =>
           ),
       if (state.book.records.isNotEmpty)
         'r': friendshipRecordsToJson(state.book.records),
+      // Blocks by person (`bk`, see [BlockBook]), lifted ones included, so
+      // no device and no copy brings a lifted block back. Zen 1.16.5
+      // ignores it.
+      if (!state.blocks.isEmpty) 'bk': blockRecordsToJson(state.blocks.records),
     };
 
 /// The records [backup] holds ([contactsBackupOf]). A copy of Zen 1.14.0

@@ -140,7 +140,9 @@ final class DesktopBackgroundAccounts {
         final String signature = <String>[
           skip,
           '${list.defaultOn}',
-          for (final ZenBackgroundAccount a in list.additional) a.folder,
+          // "Powiadomienia z tego konta" too: the ring follows it.
+          for (final ZenBackgroundAccount a in list.additional)
+            '${a.folder}:${a.notify}',
         ].join('|');
         if (!force && signature == _signature) {
           return;
@@ -221,6 +223,28 @@ final Provider<bool> desktopBackgroundBridgeEnabledProvider = Provider<bool>(
       zenDesktopBackgroundPlatform &&
       !Platform.environment.containsKey('FLUTTER_TEST'),
 );
+
+/// Whether, on a computer, the account open in the window receives in the
+/// background (its tray node runs while the window is locked): then its
+/// notice kit is kept in step (LockedNoticeKitBridge). Only then: on a
+/// computer an account's background files exist only while it receives in
+/// the background, as its decoys' do.
+final NotifierProvider<DesktopReceivesInBackground, bool>
+desktopReceivesInBackgroundProvider =
+    NotifierProvider<DesktopReceivesInBackground, bool>(
+      DesktopReceivesInBackground.new,
+    );
+
+class DesktopReceivesInBackground extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool on) {
+    if (ref.mounted && state != on) {
+      state = on;
+    }
+  }
+}
 
 /// On a computer, for the account open in the window: while it is
 /// unlocked with "Odbieraj w tle" on, keeps what its background node needs
@@ -311,6 +335,11 @@ class _DesktopBackgroundBridgeState
       }
       try {
         _backgroundOn = await settings.isOn(account);
+        if (mounted) {
+          ref
+              .read(desktopReceivesInBackgroundProvider.notifier)
+              .set(_backgroundOn);
+        }
         // Its own node runs here only while unlocked: the background one
         // stops first, so the two never keep the same inbox at once.
         await runner.update(

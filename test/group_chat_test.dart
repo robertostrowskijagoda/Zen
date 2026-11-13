@@ -490,6 +490,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Opuść grupę'));
       await tester.pumpAndSettle();
+      // The account's other devices leave the group too and drop its chat,
+      // so the dialog may not promise that only this phone is affected.
+      expect(find.textContaining('ze wszystkich Twoich urządzeń'), findsOne);
+      expect(find.textContaining('z tego telefonu'), findsNothing);
       await tester.tap(find.text('Anuluj'));
       await tester.pumpAndSettle();
       expect(

@@ -1080,7 +1080,7 @@ class CircleScreen extends ConsumerWidget {
                     onAction: () async {
                       final String? v = await _ask(
                         context,
-                        t('Ile dorzucasz do kasy (zł)?'),
+                        t('Ile dorzucasz do kasy?'),
                       );
                       final int? cents = parseKittyCents(v);
                       if (cents == null) {
@@ -1103,7 +1103,7 @@ class CircleScreen extends ConsumerWidget {
                       key: const Key('circle-kitty'),
                       tone: tone,
                       child: Text(
-                        t('Razem {total} zł · po {share} zł na osobę', {
+                        t('Razem {total} · po {share} na osobę', {
                           'total': formatKitty(c.kittyTotal),
                           'share': formatKitty(c.kittyShare),
                         }),
@@ -1123,11 +1123,7 @@ class CircleScreen extends ConsumerWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            trailing: Text(
-                              t('{n} zł', {
-                                'n': formatKitty(c.paidBy(m.address)),
-                              }),
-                            ),
+                            trailing: Text(formatKitty(c.paidBy(m.address))),
                           ),
                       ],
                     ),

@@ -300,7 +300,10 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('account-restore-run')));
     await _real(tester);
-    expect(find.text('Złe hasło albo plik został zmieniony.'), findsOneWidget);
+    expect(
+      find.text('Złe hasło albo plik jest uszkodzony (lub został zmieniony).'),
+      findsOneWidget,
+    );
     expect(sink.applied, 0);
 
     await tester.enterText(

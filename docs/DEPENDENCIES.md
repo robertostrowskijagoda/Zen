@@ -86,7 +86,7 @@ Development only: `flutter_test`, `integration_test`, `flutter_lints`.
 
 | Platform | What Zen uses |
 |---|---|
-| Android | Bluetooth LE advertising, scanning and GATT (Nearby, alarm wave, links); Wi-Fi Direct; Android Keystore and StrongBox; MediaCodec and MediaMuxer (video compression); the system location service (no Google Play services); a foreground service without a permanent wake lock, AlarmManager alarms allowed while idle and short timed wake locks (waking for Nearby looks, mailbox polls, reminders and calls); `FLAG_SECURE`; the package installer (self-update); AndroidX Biometric; Tink (via `flutter_secure_storage`); AudioSwitch (via `flutter_webrtc`) |
+| Android | Bluetooth LE advertising, scanning and GATT (Nearby, alarm wave, links); Wi-Fi Direct; Android Keystore and StrongBox; MediaCodec and MediaMuxer (video compression); the system location service (no Google Play services); a foreground service without a permanent wake lock, AlarmManager alarms allowed while idle and short timed wake locks (waking for Nearby looks, mailbox polls, reminders and calls); `FLAG_SECURE`; the package installer (self-update); AndroidX Biometric; AndroidX Autofill (`androidx.autofill:autofill` 1.3.0, Apache-2.0, Android Open Source Project: the autofill suggestion inside the keyboard on Android 11 and later); Tink (via `flutter_secure_storage`); AudioSwitch (via `flutter_webrtc`) |
 | iOS | Multipeer Connectivity (offline links); Keychain; LocalAuthentication; AVAssetExportSession; UIPasteboard (pasting keyboard GIFs and images); Core Location; AVAudioFile with flutter_webrtc's audio processing hooks (call recording, AAC); process integrity checks |
 | macOS | `pmset` (battery mode); Multipeer Connectivity; CoreBluetooth (Nearby, looking around only); the Secure Enclave with Touch ID; Keychain; AVAssetExportSession; AVCaptureSession (the films' camera and QR scanning); window drag and drop and NSPasteboard (dropping and pasting files and images); Core Location; AVAudioFile with flutter_webrtc's audio processing hooks (call recording, AAC); window capture protection |
 | Windows | the Microsoft Visual C++ runtime (`msvcp140*.dll`, `vcruntime140*.dll`, shipped in the ZIP); `GetSystemPowerStatus` (battery mode); Media Foundation (video compression and covers) and WIC (cover JPEGs); WinRT Wi-Fi Direct, Bluetooth (RFCOMM) and Bluetooth LE advertising and scanning (Nearby); `WM_DROPFILES` and the clipboard (dropping and pasting files and images); WASAPI process loopback (call recording); the TPM (Platform Crypto Provider) with Windows Hello; `WDA_EXCLUDEFROMCAPTURE`; the location API; heap and DLL-loading hardening |
@@ -105,6 +105,18 @@ Films on Linux are written by Zen's own MP4 writer (`zen_film_codec.cc`);
 sound is copied when it is AAC and otherwise encoded by vo-aacenc (ffmpeg's
 own encoder on the ffmpeg path), so it is lost only when it cannot even be
 decoded (the app says so).
+
+## Data shipped with the app
+
+The **Public Suffix List** (https://publicsuffix.org/list/, MPL-2.0) is part
+of the app: `lib/src/features/passwords/public_suffix_rules.dart` holds its
+rules without the comments, with its version, its commit and its licence
+notice (`assets/licenses/native/public_suffix_list.txt`). The password
+autofill offers a login as the same site only within one registrable domain
+of this list. `dart run tool/public_suffix_list.dart` refreshes it (and its
+test vectors, `test/fixtures/public_suffix/test_psl.txt`, public domain);
+`dart run tool/release.dart prepare` stops when the list is older than 120
+days, since hosts that hand out subdomains are added to it every week.
 
 ## Fonts, icons and sounds
 

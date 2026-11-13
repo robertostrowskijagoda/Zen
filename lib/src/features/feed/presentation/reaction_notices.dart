@@ -14,7 +14,11 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 /// The new reactions under your own posts, kept for the bell in the top bar
 /// (its notification list). Opening that list marks everything as seen.
 class ReactionNoticesFeed extends ChangeNotifier {
-  ReactionNoticesFeed({required this.node, required this.nameOf}) {
+  ReactionNoticesFeed({
+    required this.node,
+    required this.nameOf,
+    this.blockedAccounts = _nobody,
+  }) {
     _changes = node.store.changed.listen((_) => _schedule());
     _added = node.store.added.listen((_) => _schedule());
     unawaitedLogged(_start(), context: 'The reaction notices did not start');
@@ -22,6 +26,11 @@ class ReactionNoticesFeed extends ChangeNotifier {
 
   final LedgerNode node;
   final String Function(String address) nameOf;
+
+  /// The people blocked in the messenger: their reactions are no news.
+  final Set<String> Function() blockedAccounts;
+
+  static Set<String> _nobody() => const <String>{};
 
   ReactionsSeen? _seen;
   List<FeedPost> _own = const <FeedPost>[];
@@ -64,7 +73,11 @@ class ReactionNoticesFeed extends ChangeNotifier {
       return;
     }
     _own = <FeedPost>[
-      for (final FeedPost p in buildFeed(node, nameOf: nameOf))
+      for (final FeedPost p in buildFeed(
+        node,
+        nameOf: nameOf,
+        blockedAccounts: blockedAccounts(),
+      ))
         if (p.isOwn && p.resharedBy.isEmpty) p,
     ];
     if (seen.fresh) {
@@ -112,6 +125,8 @@ final Provider<ReactionNoticesFeed?> reactionNoticesProvider =
           final FriendProfile? friend = social.friendByAddress(address);
           return friend == null ? address : social.nameFor(friend);
         },
+        blockedAccounts: () =>
+            blockedAccountsOf(node, ref.read(socialHubControllerProvider)),
       );
       ref.onDispose(feed.dispose);
       return feed;

@@ -70,7 +70,7 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
               text: t(
                 'Pierwszy raz w Zen? Załóż nowe konto. Masz już konto? '
                 'Przywróć je z kopii, z drugiego urządzenia albo z pomocą '
-                'kręgu odzyskiwania.',
+                'bliskich znajomych.',
               ),
             ),
             FilledButton.icon(
@@ -92,8 +92,8 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                 icon: Icons.password_rounded,
                 text: t(
                   'Hasło aplikacji wróci razem z kopią całego konta. Przy '
-                  'przywracaniu z innego urządzenia albo z pomocą kręgu '
-                  'ustawisz nowe.',
+                  'przywracaniu z innego urządzenia albo z pomocą bliskich '
+                  'znajomych ustawisz nowe.',
                 ),
               ),
             AccountCopyActions(

@@ -99,6 +99,13 @@ case "$mode" in
     adb shell am force-stop "$package"
     files_of_app > before.txt
     echo "The previous version left $(wc -l < before.txt) files."
+    # files_of_app ends well even when adb or run-as failed (a pipe with
+    # no pipefail), and a loop over nothing finds nothing missing: with no
+    # file read, there is nothing to compare, which must not pass.
+    if [ ! -s before.txt ]; then
+      echo "::error::No file of the previous version could be read (adb, run-as or its first start failed): the update is not checked."
+      exit 1
+    fi
     node=$(grep ' ./runtime/yggdrasil.config.json$' before.txt | cut -d ' ' -f 1 || true)
     run_start_test --dart-define=ZEN_OLD_NODE_CONFIG_SHA="$node"
     files_of_app > after.txt

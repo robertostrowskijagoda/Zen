@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/update/adb_installer.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
+import 'package:zen/src/features/update/own_copy.dart';
 
 const int _v2 = 0x7109871a;
 const int _v3 = 0xf05368c0;
@@ -19,14 +20,40 @@ Uint8List _u64(int value) =>
 Uint8List _prefixed(List<int> bytes) =>
     Uint8List.fromList(<int>[..._u32(bytes.length), ...bytes]);
 
+/// A v3 proof of rotation claiming that each of [certificates] signed the
+/// next one, with signatures nobody made: what an APK can list without the
+/// keys.
+Uint8List _claimedLineage(List<List<int>> certificates) {
+  final BytesBuilder nodes = BytesBuilder();
+  for (final List<int> certificate in certificates) {
+    nodes.add(
+      _prefixed(<int>[
+        ..._prefixed(<int>[..._prefixed(certificate), ..._u32(0x0103)]),
+        ..._u32(0x1f), // flags: every capability
+        ..._u32(0x0103),
+        ..._prefixed(<int>[0xde, 0xad]), // signature
+      ]),
+    );
+  }
+  return _prefixed(<int>[
+    ..._u32(0x3ba06f8c), // proof-of-rotation attribute
+    ..._u32(1),
+    ..._prefixed(nodes.takeBytes()),
+  ]);
+}
+
 /// One scheme's value: a sequence of signers, each with signed data that
-/// holds [certificate] (and, for v3, the SDK range).
-Uint8List _schemeValue(List<int> certificate, {required bool v3}) {
+/// holds [certificate] (and, for v3, the SDK range and [attributes]).
+Uint8List _schemeValue(
+  List<int> certificate, {
+  required bool v3,
+  List<int> attributes = const <int>[],
+}) {
   final Uint8List signedData = Uint8List.fromList(<int>[
     ..._prefixed(_prefixed(<int>[1, 2, 3])), // digests
     ..._prefixed(_prefixed(certificate)), // certificates
     if (v3) ...<int>[..._u32(24), ..._u32(0x7fffffff)],
-    ..._prefixed(const <int>[]), // attributes
+    ..._prefixed(attributes), // additional attributes
   ]);
   final Uint8List signer = Uint8List.fromList(<int>[
     ..._prefixed(signedData),
@@ -39,10 +66,17 @@ Uint8List _schemeValue(List<int> certificate, {required bool v3}) {
 
 /// A minimal APK: entries, the APK Signing Block with [schemes], the
 /// central directory and its end record.
-Uint8List _apk(Map<int, List<int>> schemes) {
+Uint8List _apk(
+  Map<int, List<int>> schemes, {
+  List<int> v3Attributes = const <int>[],
+}) {
   final BytesBuilder pairs = BytesBuilder();
   schemes.forEach((int id, List<int> certificate) {
-    final Uint8List value = _schemeValue(certificate, v3: id == _v3);
+    final Uint8List value = _schemeValue(
+      certificate,
+      v3: id == _v3,
+      attributes: id == _v3 ? v3Attributes : const <int>[],
+    );
     pairs
       ..add(_u64(value.length + 4))
       ..add(_u32(id))
@@ -172,6 +206,262 @@ void main() {
       );
     },
   );
+
+  group('a rotated APK key', () {
+    final String newSha = sha256
+        .convert(utf8.encode('certyfikat nowy'))
+        .toString();
+    final String newerSha = sha256
+        .convert(utf8.encode('certyfikat jeszcze nowszy'))
+        .toString();
+
+    test('an update whose verified lineage holds the installed copy\'s '
+        'certificate installs over it, as Android installs it', () {
+      // The system's answer on a copy that never rotated, for the first
+      // release signed with the new key.
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[newSha],
+            lineage: <String>[officialSha, newSha],
+          ),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.matches,
+      );
+      // Keytool's notation on either side.
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[formatCertificateFingerprint(newSha)],
+            lineage: <String>[
+              formatCertificateFingerprint(officialSha),
+              newSha,
+            ],
+          ),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.matches,
+      );
+    });
+
+    test('once rotated, later releases and a further rotation install', () {
+      final ApkSigners rotated = ApkSigners(
+        <String>[newSha],
+        lineage: <String>[officialSha, newSha],
+      );
+      expect(
+        apkUpdateSignatureVerdict(apk: rotated, installed: rotated),
+        ApkSignatureVerdict.matches,
+      );
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(<String>[newSha]),
+          installed: rotated,
+        ),
+        ApkSignatureVerdict.matches,
+      );
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[newerSha],
+            lineage: <String>[officialSha, newSha, newerSha],
+          ),
+          installed: rotated,
+        ),
+        ApkSignatureVerdict.matches,
+      );
+      // Never rotated, two rotations behind: still an ancestor.
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[newerSha],
+            lineage: <String>[officialSha, newSha, newerSha],
+          ),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.matches,
+      );
+    });
+
+    test('a signer that is not the installed one nor its descendant is '
+        'refused', () {
+      // Unrelated, with or without a lineage of its own.
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(<String>[otherSha]),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[otherSha],
+            lineage: <String>[newSha, otherSha],
+          ),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+      // A branch from the old key past the installed copy's new one: what
+      // somebody holding only the old key could make after the rotation.
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[otherSha],
+            lineage: <String>[officialSha, otherSha],
+          ),
+          installed: ApkSigners(
+            <String>[newSha],
+            lineage: <String>[officialSha, newSha],
+          ),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+    });
+
+    test('back to the key the installed copy rotated away from is refused, '
+        'as Android refuses it without "rollback"', () {
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(<String>[officialSha]),
+          installed: ApkSigners(
+            <String>[newSha],
+            lineage: <String>[officialSha, newSha],
+          ),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+    });
+
+    test('a lineage that does not hold up is no lineage', () {
+      // The system refuses a file whose proof of rotation it cannot
+      // verify, and gives nothing for it.
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: null,
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.unreadable,
+      );
+      // Not ending with the signer, or going round in a circle.
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[otherSha],
+            lineage: <String>[officialSha, newSha],
+          ),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(
+            <String>[otherSha],
+            lineage: <String>[officialSha, otherSha, officialSha, otherSha],
+          ),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+    });
+
+    test('several signers rotate nothing: the same set or nothing', () {
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(<String>[otherSha, officialSha]),
+          installed: ApkSigners(<String>[officialSha, otherSha]),
+        ),
+        ApkSignatureVerdict.matches,
+      );
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(<String>[officialSha, otherSha]),
+          installed: ApkSigners(<String>[officialSha]),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+      expect(
+        apkUpdateSignatureVerdict(
+          apk: ApkSigners(<String>[officialSha]),
+          installed: ApkSigners(<String>[officialSha, otherSha]),
+        ),
+        ApkSignatureVerdict.differs,
+      );
+    });
+
+    test('a computer takes no lineage an APK merely lists: the new key '
+        'counts once it is pinned', () async {
+      final File apk = await write(
+        _apk(<int, List<int>>{
+          _v2: official,
+          _v3: other,
+        }, v3Attributes: _claimedLineage(<List<int>>[official, other])),
+      );
+      final List<List<String>>? schemes = await readApkSignerCertificates(apk);
+      expect(schemes, <List<String>>[
+        <String>[otherSha],
+        <String>[officialSha],
+      ]);
+      expect(
+        apkSignatureVerdict(schemes: schemes, reference: <String>[officialSha]),
+        ApkSignatureVerdict.differs,
+      );
+      // The release that rotates pins the new key next to the old one.
+      expect(
+        apkSignatureVerdict(
+          schemes: schemes,
+          reference: <String>[officialSha, otherSha],
+        ),
+        ApkSignatureVerdict.matches,
+      );
+    });
+
+    test('the native answer is read as signers and lineage', () {
+      final ApkSigners? read = ApkSigners.fromChannel(<Object?, Object?>{
+        'signers': <Object?>[newSha],
+        'lineage': <Object?>[officialSha, newSha, 7],
+      });
+      expect(read?.signers, <String>[newSha]);
+      expect(read?.lineage, <String>[officialSha, newSha]);
+      expect(read?.all, <String>[officialSha, newSha]);
+      expect(ApkSigners(<String>[officialSha]).all, <String>[officialSha]);
+      expect(
+        ApkSigners.fromChannel(<Object?, Object?>{
+          'signers': <Object?>[],
+          'lineage': <Object?>[officialSha],
+        }),
+        isNull,
+      );
+      expect(ApkSigners.fromChannel(null), isNull);
+    });
+
+    test('an installed copy is official by the key it is signed with now', () {
+      expect(
+        ownCopyState(own: <String>[newSha], official: <String>[officialSha]),
+        OwnCopyState.differs,
+      );
+      expect(
+        ownCopyState(
+          own: <String>[newSha],
+          official: <String>[officialSha, newSha],
+        ),
+        OwnCopyState.official,
+      );
+      // The old key may leave the list (stolen, say) without the rotated
+      // copies turning into "not official".
+      expect(
+        ownCopyState(own: <String>[newSha], official: <String>[newSha]),
+        OwnCopyState.official,
+      );
+      expect(
+        ownCopyState(own: <String>[officialSha], official: <String>[newSha]),
+        OwnCopyState.differs,
+      );
+    });
+  });
 
   test('fingerprints read the way keytool prints them', () {
     expect(formatCertificateFingerprint('0a1B2c'), '0A:1B:2C');

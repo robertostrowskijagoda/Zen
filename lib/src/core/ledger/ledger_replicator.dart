@@ -483,15 +483,15 @@ final class LedgerReplicator {
       }
     }
     // We asked for a log from where ours ends and the answer starts later,
-    // at its writer's checkpoint: the peer holds it only from there (it was
-    // cut at the checkpoint), so the gap would never fill. Not for entries
+    // at its writer's checkpoint or fold: the peer holds it only from there
+    // (it was cut there), so the gap would never fill. Not for entries
     // pushed unasked, which may skip ahead for other reasons.
     for (final LogEntry first in firsts.values) {
       final int? askedFrom = _wantedFrom.remove(
         '$peer|${first.space}|${first.writer}',
       );
       if (askedFrom != null &&
-          isLedgerCheckpoint(first) &&
+          startsLog(first) &&
           first.seq > askedFrom + 1 &&
           first.seq > store.headOf(first.space, first.writer) + 1) {
         store.adoptCheckpoint(first.space, first.writer);

@@ -307,8 +307,9 @@ void main() {
     );
   });
 
-  test('a backup that cannot be saved is reported, not only logged, and the '
-      'report goes when one is saved', () async {
+  test('a group too big for a part does not stop the backup: it is left '
+      'out, the rest is saved, the report says so and goes when a whole one '
+      'is saved', () async {
     final (LedgerNode author, LedgerNode _, MemoryLedgerDisk _) =
         await _authorAndHolder();
     final Map<String, dynamic> huge = _snapshot(300)
@@ -319,10 +320,13 @@ void main() {
           'm': <String>[],
         },
       ];
-    expect(await author.publishContacts(huge), isFalse);
-    expect(ContactsBackupNotice.instance.failing, isTrue);
-    expect(await author.publishContacts(_snapshot(300)), isTrue);
+    expect(await author.publishContacts(huge), isTrue);
     expect(ContactsBackupNotice.instance.failing, isFalse);
+    expect(ContactsBackupNotice.instance.trimmed, 1);
+    expect(author.latestContacts()!['friends'], hasLength(300));
+    expect(author.latestContacts()!['groups'], isEmpty);
+    expect(await author.publishContacts(_snapshot(300)), isTrue);
+    expect(ContactsBackupNotice.instance.trimmed, 0);
   });
 
   test('a log of 1,000 superseded backups shrinks to the bound at the '

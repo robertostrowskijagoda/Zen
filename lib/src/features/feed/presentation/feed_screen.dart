@@ -991,6 +991,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       reshares: _reshares,
       held: _reach,
       pyramidAddresses: _pyramidAddresses(),
+      blockedAccounts: blockedAccountsOf(node, social),
     ).where((FeedPost p) => p.id == id).firstOrNull;
     _byId = (_feedRevision, id, found);
     return found;
@@ -1004,6 +1005,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         reshares: _reshares,
         held: _reach,
         pyramidAddresses: _pyramidAddresses(),
+        blockedAccounts: blockedAccountsOf(node, social),
       );
 
   @override
@@ -2966,6 +2968,7 @@ class _PostVideoState extends State<PostVideo> {
                         Icons.play_arrow_rounded,
                         size: 40,
                         color: zen.textPrimary,
+                        semanticLabel: t('Odtwórz'),
                       ),
                     ),
                     if (_error != null)

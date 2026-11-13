@@ -115,6 +115,8 @@ type localLinkManager struct {
 	// Where the links count the traffic they carry for the devices at
 	// their other ends (the node's ownTraffic; nil: not counted).
 	forwarded *atomic.Uint64
+	// When each device listed was last linked with (localAdvertOrder).
+	linkedAt map[string]time.Time
 }
 
 func newLocalLinkManager(c localLinkCore, logger *log.Logger) *localLinkManager {
@@ -190,6 +192,11 @@ func (m *localLinkManager) apply(settings localLinkSettings) {
 	allowed := make(map[string]bool, len(settings.peers))
 	for _, peer := range settings.peers {
 		allowed[peer.address] = true
+	}
+	for address := range m.linkedAt {
+		if !allowed[address] {
+			delete(m.linkedAt, address)
+		}
 	}
 	var gone []*localLink
 	for id, link := range m.links {
@@ -342,8 +349,19 @@ func (m *localLinkManager) hasLink(address string) bool {
 // handshakeAndAttach runs the handshake on conn and makes it a peering; it
 // owns conn (closed on failure). remote is the other side's IP over a
 // network ("" over a native stream).
+//
+// Over a network both ends start the handshake the moment the connection
+// is made, so the other side's opening is due at once: a connection that
+// stays silent is let go after localFirstFrameTimeout, not after the whole
+// handshake's time (strangers held every LAN handshake slot that way). A
+// native stream waits longer: the other phone's app takes it only when its
+// Dart side gets to it.
 func (m *localLinkManager) handshakeAndAttach(conn net.Conn, transport, remote string) (*localLink, error) {
-	session, err := localLinkHandshake(conn, m.peers(), m.core.PublicKey())
+	firstFrame := localHandshakeTimeout
+	if remote != "" {
+		firstFrame = localFirstFrameTimeout
+	}
+	session, err := localLinkHandshakeWithin(conn, m.peers(), m.core.PublicKey(), firstFrame)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -393,6 +411,10 @@ func (m *localLinkManager) attach(session *localLinkSession, transport, remote s
 	}
 	if err == nil {
 		m.links[link.id] = link
+		if m.linkedAt == nil {
+			m.linkedAt = make(map[string]time.Time)
+		}
+		m.linkedAt[link.address] = link.since
 	}
 	m.mu.Unlock()
 	if err != nil {
@@ -615,7 +637,20 @@ func (m *localLinkManager) status() map[string]any {
 // advert is an advert of this node's devices for a native transport, with
 // a filter of bloomBytes bytes (0: sized to them).
 func (m *localLinkManager) advert(bloomBytes int) ([]byte, error) {
-	return buildLocalAdvert(m.peers(), time.Now(), bloomBytes, rand.Reader)
+	now := time.Now()
+	return buildLocalAdvert(m.advertPeers(bloomBytes, now), now, bloomBytes, rand.Reader)
+}
+
+// advertPeers are this node's devices in the order an advert with a filter
+// of bloomBytes bytes (0: sized to them) takes them (localAdvertOrder).
+func (m *localLinkManager) advertPeers(bloomBytes int, now time.Time) []localPeer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	peers := append([]localPeer(nil), m.settings.peers...)
+	if bloomBytes == 0 {
+		bloomBytes = localLinkBloomBytes(len(peers))
+	}
+	return localAdvertOrder(peers, m.linkedAt, now, localAdvertCapacity(bloomBytes))
 }
 
 // matches tells whether an advert may come from a device this node links

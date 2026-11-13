@@ -186,14 +186,29 @@ final class BackgroundUpdateCheck {
     final String? newer = release != null && release.isNewerThan(currentVersion)
         ? release.version
         : null;
-    final UpdateNoticeState answered = await store.update(
+    await store.update(
       (UpdateNoticeState s) => s.answered(at: now, newest: newer),
+    );
+    // A version announced or closed earlier that is newer than this answer
+    // and whose signed sums are gone holds back nothing any more.
+    final UpdateNoticeState answered = await forgetWithdrawnUpdateVersions(
+      store: store,
+      newest: newer,
+      currentVersion: currentVersion,
+      signed: _signed,
     );
     if (release == null || newer == null || !updateNoticeDue(answered, newer)) {
       return;
     }
     final RuntimeSystemNotificationService? notices = await _notices();
     if (notices == null) {
+      return;
+    }
+    // Announced, and so kept, only for a version its signed sums vouch for:
+    // the unsigned answer naming the newest release may be a tag set by
+    // mistake or a forged one, and the kept notice holds back every version
+    // up to it.
+    if (await _signed(newer) != true) {
       return;
     }
     await announceUpdateOnce(
@@ -204,6 +219,9 @@ final class BackgroundUpdateCheck {
       whatsNew: await _whatsNew(release),
     );
   }
+
+  Future<bool?> _signed(String version) =>
+      githubReleaseSigned(version, fetchText: _fetchText, keys: releaseKeys);
 
   /// The note of [release] in the app's language; none when it has none
   /// or it does not hold up.

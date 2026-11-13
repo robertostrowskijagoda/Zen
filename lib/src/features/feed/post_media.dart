@@ -9,9 +9,9 @@ import 'package:image/image.dart' as img;
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/utils/background_work.dart';
-import 'package:zen/src/features/feed/video_metadata.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_stream_server.dart';
+import 'package:zen/src/features/media/outgoing_media.dart';
 import 'package:zen/src/features/media/video_faststart.dart';
 
 /// Photos per post and their longest side after sanitising.
@@ -54,11 +54,11 @@ const int kMediaSegmentBytes = kBlobChunkSize - 16;
 /// segments of [kMediaSegmentBytes], each with its own nonce (`n` with the
 /// segment's number in its last 4 bytes).
 ///
-/// With [stripMetadata], films and recordings in MP4 / MOV / M4A lose
-/// their metadata first (place, dates, device: see `video_metadata.dart`),
-/// like photos lose EXIF, and get their index in front so they can play
-/// while they download (`video_faststart.dart`). Posts and the gallery
-/// always ask for it.
+/// With [stripMetadata], films and recordings lose their metadata first
+/// (place, dates, device: MP4 / MOV / M4A, MP3, WAV and FLAC, see
+/// `outgoing_media.dart`), like photos lose EXIF, and get their index in
+/// front so they can play while they download (`video_faststart.dart`).
+/// Posts and the gallery always ask for it.
 Future<Map<String, dynamic>> storeMedia(
   BlobStore blobs,
   Uint8List media, {
@@ -67,7 +67,7 @@ Future<Map<String, dynamic>> storeMedia(
   bool stripMetadata = false,
 }) async {
   final Uint8List plain = stripMetadata && !isPhotoMime(mime)
-      ? moveMoovToFront(stripVideoMetadata(media))
+      ? moveMoovToFront(stripOutgoingMetadata(media))
       : media;
   final Uint8List key = randomBytes(32);
   final Uint8List nonce = randomBytes(12);

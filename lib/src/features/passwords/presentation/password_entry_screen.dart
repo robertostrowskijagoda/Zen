@@ -401,12 +401,48 @@ class _PasswordEntryScreenState extends ConsumerState<PasswordEntryScreen> {
         ),
       ),
     if (e.keptOverDeletion)
-      ZenInfo(
+      ZenCard(
         key: const Key('password-kept-info'),
-        icon: Icons.info_outline_rounded,
-        text: t(
-          'Na innym urządzeniu usunięto je, gdy tu było zmieniane, więc '
-          'zostało.',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: zen.textSecondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    t(
+                      'Na innym urządzeniu usunięto je, gdy tu było '
+                      'zmieniane, więc zostało.',
+                    ),
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontSize: 13.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton(
+                key: const Key('password-keep-over-deletion'),
+                // Saved again as it is, it is made knowing the deletion:
+                // settled, on every device. "Usuń" below deletes it.
+                onPressed: () => unawaited(
+                  runPasswordAction(context, () => _vault.edit(_id, e.fields)),
+                ),
+                child: Text(t('Zostaw')),
+              ),
+            ),
+          ],
         ),
       ),
     _fields(zen, e),

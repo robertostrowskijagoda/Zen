@@ -1355,7 +1355,10 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Czekasz na akceptację'), findsOneWidget);
+    expect(
+      find.textContaining('Zaproszenie jeszcze nie dotarło'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
@@ -1432,7 +1435,10 @@ void main() {
     await tester.tap(find.byKey(const Key('met-level-skip')));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Czekasz na akceptację'), findsOneWidget);
+    expect(
+      find.textContaining('Zaproszenie jeszcze nie dotarło'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();

@@ -171,7 +171,8 @@ Future<String> accountBlobIdOf(AccountArchiveBlob blob) async {
 /// A copy of an account: what is in it ([manifest]) and its files.
 ///
 /// The manifest names the account, the scope, the account key's seed (in
-/// a copy that carries the key), the sections (profile, friends and groups,
+/// a copy that carries the key, with its wrapping by the account password
+/// when the account has one), the sections (profile, friends and groups,
 /// settings, pyramid, dating, household…), the conversations as their
 /// devices sync them (a message with a file names it: `af`), the stored
 /// states taken as they are (key → file) and every file by its content
@@ -183,6 +184,7 @@ final class AccountArchive {
     required this.createdAt,
     required this.scope,
     this.seed,
+    this.wrapped,
     this.sections = const <String, Object?>{},
     this.chats = const <String, List<Map<String, dynamic>>>{},
     this.raw = const <String, String>{},
@@ -195,6 +197,11 @@ final class AccountArchive {
   final int createdAt;
   final Set<AccountScope> scope;
   final Uint8List? seed;
+
+  /// [seed] wrapped by the account password (signed by the account key),
+  /// when the account has one: the device that takes the copy keeps the
+  /// key under it from the first byte. Only with [seed].
+  final PasswordWrappedSeed? wrapped;
   final Map<String, Object?> sections;
   final Map<String, List<Map<String, dynamic>>> chats;
 
@@ -211,17 +218,20 @@ final class AccountArchive {
     (int sum, List<Map<String, dynamic>> m) => sum + m.length,
   );
 
-  /// With the account key's [key] (sent apart from the manifest).
-  AccountArchive withSeed(Uint8List key) => AccountArchive(
-    account: account,
-    createdAt: createdAt,
-    scope: <AccountScope>{...scope, AccountScope.keys},
-    seed: key,
-    sections: sections,
-    chats: chats,
-    raw: raw,
-    files: files,
-  );
+  /// With the account key's [key] (sent apart from the manifest), and its
+  /// [wrapped] form when the account has a password.
+  AccountArchive withSeed(Uint8List key, {PasswordWrappedSeed? wrapped}) =>
+      AccountArchive(
+        account: account,
+        createdAt: createdAt,
+        scope: <AccountScope>{...scope, AccountScope.keys},
+        seed: key,
+        wrapped: wrapped,
+        sections: sections,
+        chats: chats,
+        raw: raw,
+        files: files,
+      );
 
   /// Without the section [key].
   AccountArchive withoutSection(String key) => AccountArchive(
@@ -229,6 +239,7 @@ final class AccountArchive {
     createdAt: createdAt,
     scope: scope,
     seed: seed,
+    wrapped: wrapped,
     sections: <String, Object?>{...sections}..remove(key),
     chats: chats,
     raw: raw,
@@ -253,6 +264,7 @@ final class AccountArchive {
     'at': createdAt,
     'sc': <String>[for (final AccountScope s in scope) s.name],
     if (seed != null) 'seed': b64(seed!),
+    if (seed != null && wrapped != null) 'wk': wrapped!.toJson(),
     's': sections,
     'c': chats,
     'r': raw,
@@ -287,6 +299,7 @@ final class AccountArchive {
             if (sc.contains(x.name)) x,
       },
       seed: seed,
+      wrapped: seed == null ? null : PasswordWrappedSeed.fromJson(json['wk']),
       sections: s is Map ? Map<String, Object?>.from(s) : <String, Object?>{},
       chats: <String, List<Map<String, dynamic>>>{
         if (c is Map)
@@ -339,6 +352,7 @@ final class AccountArchiveBuilder {
       <String, List<Map<String, dynamic>>>{};
   final Map<String, String> raw = <String, String>{};
   Uint8List? seed;
+  PasswordWrappedSeed? wrapped;
 
   bool has(AccountScope s) => scope.contains(s);
 
@@ -379,6 +393,7 @@ final class AccountArchiveBuilder {
     createdAt: at,
     scope: scope,
     seed: has(AccountScope.keys) ? seed : null,
+    wrapped: has(AccountScope.keys) && seed != null ? wrapped : null,
     sections: sections,
     chats: chats,
     raw: raw,
@@ -405,12 +420,21 @@ enum AccountBackupError {
   /// Not a backup file, damaged or cut short.
   format,
 
-  /// The password is wrong (or the file was changed).
+  /// The password is wrong, or the file's header was damaged or changed:
+  /// the check of the key fails either way, and the two cannot be told
+  /// apart.
   password,
 
-  /// Made by a newer Zen (a format or password cost this build does not
-  /// know): update the app, the file is fine.
+  /// Made by a newer Zen: the copy itself says so (its manifest, which the
+  /// password opened and nothing could change). Update the app, the file
+  /// is fine.
   newer,
+
+  /// The header names a layout or a password cost this build does not
+  /// know: a newer Zen made it, or a byte of the header was damaged (the
+  /// header is checked only with the key, which these decide). Nothing is
+  /// tried.
+  newerOrDamaged,
 }
 
 /// A copy written into a backup file, or read from one.
@@ -600,8 +624,8 @@ final class AccountBackupFile {
         magic.startsWith('ZENACCT') &&
         magic.codeUnitAt(7) > kAccountBackupMagic.codeUnitAt(7) &&
         magic.codeUnitAt(7) <= 0x39) {
-      // `ZENACCT2`…: a newer layout.
-      return (archive: null, error: AccountBackupError.newer);
+      // `ZENACCT2`…: a newer layout, or a damaged byte.
+      return (archive: null, error: AccountBackupError.newerOrDamaged);
     }
     if (header == null || magic != kAccountBackupMagic) {
       return (archive: null, error: AccountBackupError.format);
@@ -613,9 +637,10 @@ final class AccountBackupFile {
       parallelism: h.getUint8(13),
     );
     if (!acceptedCosts.contains(cost)) {
-      // Only a newer build picks a cost this one does not know (and an
-      // unknown one is never tried: it could take all the memory).
-      return (archive: null, error: AccountBackupError.newer);
+      // Only a newer build picks a cost this one does not know, unless the
+      // header was damaged (and an unknown one is never tried: it could
+      // take all the memory).
+      return (archive: null, error: AccountBackupError.newerOrDamaged);
     }
     final SecretKey key = SecretKey(
       await derivePasswordKey(password, header.sublist(14, 30), cost: cost),
@@ -986,7 +1011,13 @@ final class AccountImportStaging {
   Future<void> saveManifest(AccountArchive archive) => disk.write(
     _manifestKey,
     Uint8List.fromList(
-      utf8.encode(jsonEncode(archive.toJson()..remove('seed'))),
+      utf8.encode(
+        jsonEncode(
+          archive.toJson()
+            ..remove('seed')
+            ..remove('wk'),
+        ),
+      ),
     ),
   );
 

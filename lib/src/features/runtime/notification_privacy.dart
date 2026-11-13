@@ -468,7 +468,8 @@ IncomingAlert? incomingAlertOf(
 ///
 /// A conversation the kit has no name for is told about without one: so is
 /// everything from strangers, a group message from anyone the kit does not
-/// list as a member of that group, and everything without a kit. A name
+/// list as a member of that group. Without a kit nothing is told about
+/// ([LockedNoticeKit.quiet]). A name
 /// the sender gave itself is never shown: only the names this person gave
 /// their friends.
 @immutable
@@ -490,7 +491,41 @@ final class LockedNoticeKit {
     this.self = '',
     this.memberTags = const <String>{},
     this.speakersKnown = true,
+    this.unlistedGroups = const <String>{},
   });
+
+  /// What a background runner decides with when it has no kit (the app was
+  /// not unlocked since the kit came in, or the file does not open), and
+  /// what an additional account whose notifications are off decides with:
+  /// every kind of news that can be switched off counts as off, and nobody
+  /// is named. Nothing rings, no call card shows, no message or invitation
+  /// is told about: unknown settings must not make a phone loud that the
+  /// person made quiet. Frames are still kept for the app; a friend's alarm
+  /// (which no switch turns off) still shows.
+  static final LockedNoticeKit quiet = LockedNoticeKit(
+    privacy: NotificationPrivacy.generic,
+    muted: <NoticeKind>{
+      for (final NoticeKind kind in NoticeKind.values)
+        if (kind.canMute) kind,
+    },
+  );
+
+  /// Groups whose speakers did not fit among [memberTags]
+  /// ([maxMemberTags]), as [groupTag]s: for these the locked receiver takes
+  /// the background capability's word (a friend, or a member of some joined
+  /// group), so their members are not silenced by the size of the kit.
+  final Set<String> unlistedGroups;
+
+  /// The tag of the group chat [groupKey] in [unlistedGroups].
+  static String groupTag(String groupKey) => crypto.sha256
+      .convert(utf8.encode('group\n$groupKey'))
+      .toString()
+      .substring(0, 32);
+
+  /// The most [memberTags] a kit holds (one per group and speaking device).
+  /// At 35 bytes each in the file that is about 700 KB at worst; a kit of
+  /// a few groups stays a few kilobytes.
+  static const int maxMemberTags = 20000;
 
   /// Conversations muted for a while (`SocialHubState.mutedUntil`).
   final Map<String, int> mutedChats;
@@ -755,6 +790,7 @@ final class LockedNoticeKit {
     // Always there, empty too: its presence says the kit knows who speaks
     // where ([speakersKnown]).
     'gt': memberTags.toList(growable: false),
+    if (unlistedGroups.isNotEmpty) 'gx': unlistedGroups.toList(growable: false),
     if (kindLevels.isNotEmpty)
       'k': <String, String>{
         for (final MapEntry<NoticeKind, NotificationPrivacy> e
@@ -866,10 +902,15 @@ final class LockedNoticeKit {
       },
       memberTags: <String>{
         if (json['gt'] case final List<dynamic> gt)
-          for (final Object? tag in gt.take(maxEntries))
+          for (final Object? tag in gt.take(maxMemberTags))
             if (tag is String && _tagPattern.hasMatch(tag)) tag,
       },
       speakersKnown: json['gt'] is List,
+      unlistedGroups: <String>{
+        if (json['gx'] case final List<dynamic> gx)
+          for (final Object? tag in gx.take(maxEntries))
+            if (tag is String && _tagPattern.hasMatch(tag)) tag,
+      },
       kindLevels: <NoticeKind, NotificationPrivacy>{
         if (json['k'] case final Map<dynamic, dynamic> k)
           for (final MapEntry<dynamic, dynamic> e in k.entries)
@@ -898,7 +939,10 @@ final class _KitAlertFacts implements AlertFacts {
   @override
   bool speaksIn(String groupId, String address) =>
       _kit.speaksIn(groupId, address) ||
-      (!_kit.speakersKnown &&
+      ((!_kit.speakersKnown ||
+              _kit.unlistedGroups.contains(
+                LockedNoticeKit.groupTag(groupConversationKey(groupId)),
+              )) &&
           (_inJoinedGroup?.call(PeerShareCodec.normalizeAddress(address)) ??
               false));
 
@@ -987,6 +1031,7 @@ LockedNoticeKit lockedNoticeKitOf(
     }
   }
   final Set<String> memberTags = <String>{};
+  final Set<String> unlistedGroups = <String>{};
   for (final GroupProfile group in state.groups.values) {
     if (group.isInvitePending) {
       continue;
@@ -994,17 +1039,21 @@ LockedNoticeKit lockedNoticeKitOf(
     final String key = groupConversationKey(group.id);
     // Who speaks in it, whatever its level: whether a group message or a
     // group call counts at all is decided by that (as the app decides:
-    // [speaksInGroup], so not a creator who left).
-    for (final String speaker in <String>[
-      ...group.memberAddresses,
-      if (speaksInGroup(group, group.createdById)) group.createdById,
-    ]) {
-      for (final String device in devicesOf(speaker)) {
-        if (device.isNotEmpty &&
-            memberTags.length < LockedNoticeKit.maxEntries) {
-          memberTags.add(LockedNoticeKit.memberTag(key, device));
-        }
-      }
+    // [speaksInGroup], so not a creator who left). A group goes in whole
+    // or, past [LockedNoticeKit.maxMemberTags], as unlisted: never half of
+    // its members.
+    final Set<String> tags = <String>{
+      for (final String speaker in <String>[
+        ...group.memberAddresses,
+        if (speaksInGroup(group, group.createdById)) group.createdById,
+      ])
+        for (final String device in devicesOf(speaker))
+          if (device.isNotEmpty) LockedNoticeKit.memberTag(key, device),
+    };
+    if (memberTags.length + tags.length <= LockedNoticeKit.maxMemberTags) {
+      memberTags.addAll(tags);
+    } else if (unlistedGroups.length < LockedNoticeKit.maxEntries) {
+      unlistedGroups.add(LockedNoticeKit.groupTag(key));
     }
     final NotificationPrivacy? own = state.ownNotificationPrivacyOf(key);
     if (own != null) {
@@ -1058,16 +1107,63 @@ LockedNoticeKit lockedNoticeKitOf(
     sounds: sounds,
     inviteToken: inviteToken,
     kindLevels: kindLevels,
+    // A muted friend is muted on each of their devices: the locked receiver
+    // hears the device's own address (no account routing there), the app
+    // the friend's.
     mutedChats: <String, int>{
       for (final MapEntry<String, int> e in state.mutedUntil.entries)
-        if (e.value > DateTime.now().millisecondsSinceEpoch) e.key: e.value,
+        if (e.value > DateTime.now().millisecondsSinceEpoch)
+          for (final String key
+              in e.key.startsWith('group:')
+                  ? <String>[e.key]
+                  : devicesOf(e.key))
+            if (key.isNotEmpty) key: e.value,
     },
     groupNotifyAll: state.groupNotifyAll,
     groupMentionsOnly: groupMentionsOnly,
     self: normal(self),
     memberTags: memberTags,
+    unlistedGroups: unlistedGroups,
   );
 }
+
+/// The kit the app writes for its background runners: [state] under the
+/// notification settings [settings], a friend's devices from [directory],
+/// this device's address [self]. One function for every platform that
+/// writes one, so what the runners decide with is what the app decides
+/// with.
+LockedNoticeKit lockedNoticeKitFor(
+  SocialHubState state, {
+  required AppSettings settings,
+  AccountDeviceDirectory? directory,
+  String self = '',
+}) => lockedNoticeKitOf(
+  state,
+  privacy: settings.notificationPrivacy,
+  directory: directory,
+  muted: <NoticeKind>{
+    for (final NoticeKind kind in NoticeKind.values)
+      if (settings.mutes(kind)) kind,
+  },
+  sounds: settings.notificationSounds,
+  inviteToken: settings.inviteToken,
+  kindLevels: settings.noticePrivacy,
+  groupMentionsOnly: settings.groupMentionsOnly,
+  self: self,
+);
+
+/// The notice kit kept in the account folder [supportDirectory], as a
+/// background runner reads it; `null` when there is none or it does not
+/// open (the runner then decides with [LockedNoticeKit.quiet]).
+Future<LockedNoticeKit?> readLockedNoticeKit({
+  required Future<Directory> Function() supportDirectory,
+  required AppSecurityCredentialsStore credentials,
+}) async => LockedNoticeKit.fromJson(
+  await lockedNoticeKitFile(
+    supportDirectory: supportDirectory,
+    credentials: credentials,
+  ).read(),
+);
 
 /// Where the notice kit is kept.
 BackgroundKitFile lockedNoticeKitFile({

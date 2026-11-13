@@ -216,6 +216,11 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	if phonePeers != nil {
 		go node.watchPhonePeers()
 	}
+	if isPhoneOS() && peerTarget == receiveOnlyPeerTarget {
+		// A locked phone: strangers' signals wake it only so often
+		// (stranger_signals.go).
+		node.strangerSignals = newStrangerSignalBudget()
+	}
 	if isPhoneOS() {
 		// Strangers' traffic through the phone (transit_guard.go).
 		node.transitGuard = &transitGuard{}

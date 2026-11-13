@@ -416,7 +416,7 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            _title(zen, t('Lista osób z kręgu')),
+            _title(zen, t('Lista bliskich znajomych z kawałkami klucza')),
             const SizedBox(height: 4),
             Text(
               t(
@@ -701,6 +701,8 @@ class _PaperBackupViewState extends State<PaperBackupView> {
     const SizedBox(height: 8),
     for (int i = 0; i < _asked.length; i++) ...<Widget>[
       TextField(
+        enableIMEPersonalizedLearning: false,
+        keyboardType: TextInputType.visiblePassword,
         key: Key('paper-check-$i'),
         controller: _answers[i],
         autocorrect: false,

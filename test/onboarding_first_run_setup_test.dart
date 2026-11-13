@@ -7,6 +7,8 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/intro/gate_terms.dart';
+import 'package:zen/src/features/passwords/password_autofill_bridge.dart';
+import 'package:zen/src/features/passwords/password_setup.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/presentation/ios_background_section.dart';
@@ -67,6 +69,40 @@ final class _NoPermissions implements PermissionsPlatform {
 
   @override
   Stream<bool> get bluetoothChanges => const Stream<bool>.empty();
+}
+
+/// The device as the password manager's setup sees it.
+final class _PasswordDevice implements PasswordSetupPlatform {
+  _PasswordDevice({required this.fillsOtherApps});
+
+  @override
+  final bool fillsOtherApps;
+  int reads = 0;
+
+  @override
+  Future<PasswordAutofillState> autofill() async {
+    reads++;
+    return PasswordAutofillState.off;
+  }
+
+  @override
+  Future<bool> openAutofillSettings() async => true;
+
+  @override
+  Future<List<BrowserProbe>> browsers(
+    List<String> known, {
+    required Set<String> switches,
+  }) async => const <BrowserProbe>[
+    BrowserProbe(
+      packageName: 'com.android.chrome',
+      label: 'Chrome',
+      state: BrowserSwitchState.off,
+      canOpenSettings: true,
+    ),
+  ];
+
+  @override
+  Future<bool> openBrowserSettings(String packageName) async => true;
 }
 
 /// A settings file that cannot be written until [failing] is cleared.
@@ -135,7 +171,7 @@ Future<ProviderContainer> _iphoneStep(
     ),
   );
   await tester.pumpAndSettle();
-  expect(find.text('Krok 1 z 5'), findsOneWidget);
+  expect(find.text('Krok 1 z 6'), findsOneWidget);
   await tester.tap(find.byKey(const Key('first-run-next')));
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const Key('first-run-next')));
@@ -461,7 +497,7 @@ void main() {
     expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
     expect(find.text('aplikacja'), findsNothing);
     expect(find.byKey(const Key('first-run-welcome')), findsOneWidget);
-    expect(find.text('Krok 1 z 4'), findsOneWidget);
+    expect(find.text('Krok 1 z 5'), findsOneWidget);
 
     // 1) The lock: the honest note about "Nigdy".
     await tester.tap(find.byKey(const Key('settings-lock-mode-never')));
@@ -509,6 +545,12 @@ void main() {
     await tester.tap(find.byKey(const Key('settings-animations-off')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('first-run-next')));
+    await tester.pumpAndSettle();
+
+    // 5) The password manager: "no" goes on (here: the end).
+    expect(find.byKey(const Key('first-run-step-passwords')), findsOneWidget);
+    expect(find.text('Krok 5 z 5'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('first-run-passwords-no')));
     await tester.pumpAndSettle();
 
     expect(find.text('aplikacja'), findsOneWidget);
@@ -811,7 +853,7 @@ void main() {
       onShortcuts: () => shortcuts++,
     );
     expect(find.byKey(const Key('first-run-step-iphone')), findsOneWidget);
-    expect(find.text('Krok 3 z 5'), findsOneWidget);
+    expect(find.text('Krok 3 z 6'), findsOneWidget);
     for (final String option in <String>[
       'ios-wake-refresh',
       'ios-wake-shortcut',
@@ -871,5 +913,222 @@ void main() {
         reason: button,
       );
     }
+  });
+
+  group('the password manager step', () {
+    List overrides(
+      MemoryAppSettingsStore store,
+      AppSettings initial,
+      PasswordSetupPlatform device,
+    ) => [
+      appSettingsStoreProvider.overrideWithValue(store),
+      appSettingsInitialStateProvider.overrideWithValue(initial),
+      appSettingsHydrationEnabledProvider.overrideWithValue(false),
+      firstRunSetupRequiredProvider.overrideWithValue(true),
+      permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+      gateDefaultsProvider.overrideWithValue(_Gates()),
+      passwordSetupPlatformProvider.overrideWithValue(device),
+    ];
+
+    Future<void> next(WidgetTester tester, int times) async {
+      for (int i = 0; i < times; i++) {
+        await tester.tap(find.byKey(const Key('first-run-next')));
+        await tester.pumpAndSettle();
+      }
+    }
+
+    testWidgets('first start on Android: asked first; yes shows the same '
+        'setup as "Hasła" in the step, the count stays, and the setup ends', (
+      WidgetTester tester,
+    ) async {
+      _tallScreen(tester);
+      const AppSettings none = AppSettings();
+      final MemoryAppSettingsStore store = MemoryAppSettingsStore(none);
+      final _PasswordDevice device = _PasswordDevice(fillsOtherApps: true);
+      await tester.pumpWidget(
+        _gatedApp(overrides: overrides(store, none, device)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Krok 1 z 5'), findsOneWidget);
+      await next(tester, 4);
+
+      expect(find.byKey(const Key('first-run-step-passwords')), findsOneWidget);
+      expect(find.text('Krok 5 z 5'), findsOneWidget);
+      expect(
+        find.byKey(const Key('first-run-passwords-question')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Ustawienia → Hasła'), findsOneWidget);
+      // Nothing is asked of the phone before the answer.
+      expect(device.reads, 0);
+      expect(find.byKey(const Key('password-setup')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('first-run-passwords-yes')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('first-run-passwords-question')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('password-setup')), findsOneWidget);
+      expect(
+        find.byKey(const Key('password-setup-system-off')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('password-setup-browser-com.android.chrome')),
+        findsOneWidget,
+      );
+      // The passwords are not open here: no import.
+      expect(find.byKey(const Key('password-setup-import')), findsNothing);
+      expect(find.text('Krok 5 z 5'), findsOneWidget);
+
+      // Back and forth keeps the answer.
+      await tester.tap(find.byKey(const Key('first-run-back')));
+      await tester.pumpAndSettle();
+      await next(tester, 1);
+      expect(find.byKey(const Key('password-setup')), findsOneWidget);
+
+      await next(tester, 1);
+      expect(find.text('aplikacja'), findsOneWidget);
+      expect((await store.load())!.setupRevision, kSetupRevision);
+    });
+
+    testWidgets('elsewhere (Ustawienia → the setup again): the step is '
+        'counted the same, and yes says honestly that Zen fills nothing here', (
+      WidgetTester tester,
+    ) async {
+      _tallScreen(tester);
+      final _PasswordDevice device = _PasswordDevice(fillsOtherApps: false);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appSettingsInitialStateProvider.overrideWithValue(
+              const AppSettings(),
+            ),
+            appSettingsHydrationEnabledProvider.overrideWithValue(false),
+            permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+            gateDefaultsProvider.overrideWithValue(_Gates()),
+            passwordSetupPlatformProvider.overrideWithValue(device),
+          ],
+          child: MaterialApp(
+            theme: ZenTheme.dark(),
+            home: const FirstRunSetupScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Krok 1 z 5'), findsOneWidget);
+      await next(tester, 4);
+      expect(find.text('Krok 5 z 5'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('first-run-passwords-yes')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('password-setup-elsewhere')), findsOneWidget);
+      expect(find.byKey(const Key('password-setup-system')), findsNothing);
+      expect(device.reads, 0);
+    });
+
+    testWidgets('no changes nothing and goes on to the next step', (
+      WidgetTester tester,
+    ) async {
+      _tallScreen(tester);
+      final MemoryAppSettingsStore store = MemoryAppSettingsStore(
+        const AppSettings(),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appSettingsStoreProvider.overrideWithValue(store),
+            appSettingsInitialStateProvider.overrideWithValue(
+              const AppSettings(),
+            ),
+            appSettingsHydrationEnabledProvider.overrideWithValue(false),
+            permissionsPlatformProvider.overrideWithValue(_NoPermissions()),
+            gateDefaultsProvider.overrideWithValue(_Gates()),
+            passwordSetupPlatformProvider.overrideWithValue(
+              _PasswordDevice(fillsOtherApps: true),
+            ),
+          ],
+          child: MaterialApp(
+            theme: ZenTheme.dark(),
+            home: Builder(
+              builder: (BuildContext context) => TextButton(
+                onPressed: () => unawaited(FirstRunSetupScreen.open(context)),
+                child: const Text('ustawienia'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('ustawienia'));
+      await tester.pumpAndSettle();
+      await next(tester, 4);
+      await tester.tap(find.byKey(const Key('first-run-passwords-no')));
+      await tester.pumpAndSettle();
+      // The last step: the setup closes, nothing saved by the answer.
+      expect(find.byKey(const Key('first-run-setup-screen')), findsNothing);
+      expect(find.text('ustawienia'), findsOneWidget);
+      expect((await store.load())!.toJson(), const AppSettings().toJson());
+    });
+
+    testWidgets('after this update: who went through the revision before '
+        'sees only the new step; anyone further behind sees every step', (
+      WidgetTester tester,
+    ) async {
+      _tallScreen(tester);
+      final _PasswordDevice device = _PasswordDevice(fillsOtherApps: true);
+
+      // The revision just before: only the password manager.
+      const AppSettings previous = AppSettings(
+        setupRevision: kSetupRevision - 1,
+        permissionsSetupDone: true,
+        lockMode: AppLockMode.appClose,
+      );
+      final MemoryAppSettingsStore store = MemoryAppSettingsStore(previous);
+      await tester.pumpWidget(
+        _gatedApp(overrides: overrides(store, previous, device)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('first-run-setup')), findsOneWidget);
+      expect(find.byKey(const Key('first-run-step-passwords')), findsOneWidget);
+      expect(find.text('Krok 1 z 1'), findsOneWidget);
+      expect(
+        find.text('Nowość po aktualizacji. Reszta ustawień zostaje bez zmian.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('first-run-welcome')), findsNothing);
+      await tester.tap(find.byKey(const Key('first-run-passwords-no')));
+      await tester.pumpAndSettle();
+      expect(find.text('aplikacja'), findsOneWidget);
+      final AppSettings saved = (await store.load())!;
+      expect(saved.setupRevision, kSetupRevision);
+      expect(saved.lockMode, AppLockMode.appClose);
+
+      // Once done, not again.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(
+        _gatedApp(overrides: overrides(store, saved, device)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('aplikacja'), findsOneWidget);
+
+      // Two revisions behind: every step, with the usual note.
+      await tester.pumpWidget(const SizedBox.shrink());
+      const AppSettings older = AppSettings(
+        setupRevision: kSetupRevision - 2,
+        permissionsSetupDone: true,
+      );
+      await tester.pumpWidget(
+        _gatedApp(
+          overrides: overrides(MemoryAppSettingsStore(older), older, device),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('first-run-step-lock')), findsOneWidget);
+      expect(find.text('Krok 1 z 5'), findsOneWidget);
+      expect(
+        find.text('Po aktualizacji: sprawdź te ustawienia — niektóre są nowe.'),
+        findsOneWidget,
+      );
+    });
   });
 }

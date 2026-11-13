@@ -61,6 +61,7 @@ const Set<String> kSyncedSettingKeys = <String>{
   'legalAcceptedAtMillis',
   'groupInviteFrom',
   'showLastOpened',
+  'passwordsInCircleBackup',
 };
 
 /// Stored states of meetings and circles kept the same on every device.

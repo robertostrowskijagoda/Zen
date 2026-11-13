@@ -5,29 +5,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_collect.dart';
+import 'package:zen/src/features/account/account_holdings.dart';
 import 'package:zen/src/features/account/account_media.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_state_sync_app.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
+import 'package:zen/src/features/chat/self_notes.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
-import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/passwords/password_entry.dart';
 import 'package:zen/src/features/passwords/password_vault_service.dart';
+import 'package:zen/src/features/pebbles/pebble_store.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
@@ -36,7 +42,6 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
-import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -65,13 +70,10 @@ final class AppAccountArchiveSource implements AccountArchiveSource {
   Map<String, dynamic> contacts() => _hub.contactsBackup();
 
   @override
-  Map<String, String> levels() => <String, String>{
+  Map<String, Object> levels() => node.levelsForCopy(<String>[
     for (final FriendProfile f in _social.friends.values)
-      if (f.status == FriendRelationshipStatus.accepted)
-        PeerShareCodec.normalizeAddress(f.address): node
-            .levelOf(f.address)
-            .name,
-  };
+      if (f.status == FriendRelationshipStatus.accepted) f.address,
+  ]);
 
   @override
   List<String> conversationKeys() => _hub.conversationKeys();
@@ -152,15 +154,8 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       node.isReady ? node.identity.account : null;
 
   @override
-  Future<bool> isFresh() async {
-    final SocialHubState state = ref.read(socialHubControllerProvider);
-    final bool friends = state.friends.values.any(
-      (FriendProfile f) => f.status == FriendRelationshipStatus.accepted,
-    );
-    return !friends &&
-        state.groups.isEmpty &&
-        !ref.read(pyramidServiceProvider).isMember;
-  }
+  Future<bool> isFresh() async =>
+      (await readAccountHoldings(ref, node)).isFresh;
 
   @override
   Future<void> adoptAccount(AccountArchive archive) async {
@@ -172,6 +167,7 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       node.disk,
       seed,
       deviceName: thisDeviceName,
+      wrapped: archive.wrapped,
     );
     if (!archive.scope.contains(AccountScope.pyramid)) {
       // Its place and wallet come back from the pyramid's people.
@@ -215,10 +211,15 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
 
     // The passwords: merged with those here (a deletion here stays, nothing
     // here is written over), on a new device and on one that has the
-    // account alike.
+    // account alike. A device that takes another account is fresh (it
+    // holds no passwords of its own), and those the person chose to take
+    // along from the account that was here before come in now.
     final Object? passwords = s[CircleBackupSections.passwords];
     if (passwords != null) {
       await ref.read(passwordVaultServiceProvider).mergeCopy(passwords);
+    }
+    if (!merge) {
+      await takeCarriedPasswords(() => ref.read(passwordVaultServiceProvider));
     }
     step();
 
@@ -284,17 +285,9 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       groups = (contacts['groups'] as List?)?.length ?? 0;
     }
     step();
-    final Object? levels = s[CircleBackupSections.levels];
-    if (levels is Map) {
-      for (final MapEntry<dynamic, dynamic> e in levels.entries) {
-        final FriendLevel? level = FriendLevel.values
-            .where((FriendLevel l) => l.name == e.value)
-            .firstOrNull;
-        if (e.key is String && level != null) {
-          await node.setLevel(e.key as String, level);
-        }
-      }
-    }
+    // Merged by time: a level changed here (or on another device of the
+    // account) after the copy was made stays.
+    await node.takeLevels(s[CircleBackupSections.levels]);
     step();
     final Object? pyramid = s[CircleBackupSections.pyramid];
     if (pyramid is Map<String, dynamic>) {
@@ -421,6 +414,72 @@ Future<void> takeAccountArchiveSettings(
   }
 }
 
+/// What the account on [node] holds that the person made or received
+/// ([AccountHoldings]): the one answer to "would another account here lose
+/// something" for every way another account can come onto this device.
+Future<AccountHoldings> readAccountHoldings(Ref ref, LedgerNode node) async {
+  await node.start();
+  final SocialHubState state = ref.read(socialHubControllerProvider);
+  int friends = 0;
+  int invitations = 0;
+  for (final FriendProfile f in state.friends.values) {
+    switch (f.status) {
+      case FriendRelationshipStatus.accepted:
+        friends++;
+      case FriendRelationshipStatus.pendingIncoming:
+      case FriendRelationshipStatus.pendingOutgoing:
+        invitations++;
+      case FriendRelationshipStatus.none:
+      case FriendRelationshipStatus.blocked:
+        break;
+    }
+  }
+  final LedgerDisk disk = node.disk;
+  final Uint8List? strangers = await disk.read('chat/strangers');
+  final List<String> pebbles = await PebbleStore.archiveKeys(disk.read);
+  final String feed = accountSpace('feed', node.account);
+  return AccountHoldings(
+    account: node.account,
+    name: ref.read(userProfileControllerProvider).publicName,
+    notes: selfNotesCountOf(await disk.read(kSelfNotesKey)),
+    passwords: passwordsCountOf(await disk.read(kPasswordVaultKey)),
+    posts: node.store
+        .entries(feed)
+        .where((LogEntry e) => e.account == node.account)
+        .length,
+    chats: strangers != null && strangers.length > 2 ? 1 : 0,
+    invitations: invitations,
+    friends: friends,
+    groups: state.groups.length,
+    pyramid: ref.read(pyramidServiceProvider).isMember,
+    dating: ref.read(datingServiceProvider).me.complete,
+    pebbles: pebbles.length > 1 ? pebbles.length - 1 : 0,
+    accountPassword: node.identity.hasPassword,
+  );
+}
+
+/// Reads what the account on this device holds ([readAccountHoldings]);
+/// null while there is no account.
+final Provider<Future<AccountHoldings> Function()?> accountHoldingsProvider =
+    Provider<Future<AccountHoldings> Function()?>((Ref ref) {
+      final LedgerNode? node = ref.watch(ledgerNodeProvider);
+      if (node == null) {
+        return null;
+      }
+      return () => readAccountHoldings(ref, node);
+    });
+
+/// The saved passwords the person chose to take along from the account
+/// that was on this device before ([AccountPasswordCarry]) go into the
+/// vault of the account just taken ([vault], read only then). Nothing when
+/// none wait.
+Future<void> takeCarriedPasswords(PasswordVaultService Function() vault) async {
+  final Map<String, Object?>? carried = AccountPasswordCarry.instance.take();
+  if (carried != null) {
+    await vault().mergeCopy(carried);
+  }
+}
+
 /// Builds a copy of the account on this device ([buildAccountArchive]);
 /// [appLock] for a backup file.
 typedef AccountArchiveCollector =
@@ -443,11 +502,15 @@ final Provider<AccountArchiveCollector?> accountArchiveCollectorProvider =
         bool appLock = false,
       }) async {
         await node.start();
+        final PasswordWrappedSeed? wrapped = node.identity.wrapped;
         return buildAccountArchive(
           AppAccountArchiveSource(ref, node),
           scope,
           measureOnly: measureOnly,
           appLock: appLock,
+          // Signed (the key was unlocked for the copy): the device that
+          // takes it keeps the key under the account password.
+          wrapped: wrapped?.signature == null ? null : wrapped,
         );
       };
     });

@@ -31,6 +31,7 @@ import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/notice_kind.dart';
+import 'package:zen/src/features/social/block_book.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -151,6 +152,13 @@ const Set<String> _socialTypes = <String>{
 /// receiver (friend requests, neighbours).
 const int kLockedStrangerFramesPerSender = 5;
 const int kLockedStrangerFramesTotal = 50;
+
+/// How many times an hour at most what one sender who is not a friend sets
+/// off (a message kept, a mailbox's duty) holds a locked phone awake until
+/// it is done; past that it runs while the phone is awake anyway. Each hold
+/// lasts the work and a second more: a group member or a stranger keeps the
+/// phone awake about a minute an hour at most this way.
+const int kLockedWorkHoldsPerHour = 60;
 
 /// How often the receiver asks its mailboxes for mail held for it, at
 /// first and again once something came.
@@ -523,6 +531,23 @@ BackgroundCapabilityDraft backgroundCapabilityDraftOf(
   if (directory != null && directory.ownAccount.isNotEmpty) {
     friends.addAll(directory.addressesOf(directory.ownAccount).map(normal));
   }
+  // One block list: every address known to be a blocked person's — named
+  // by a block made in any feature, or another device of a blocked account
+  // — is refused while the app is locked too. A friend's own entry decides
+  // for itself.
+  blocked.addAll(state.blocks.addresses.map(normal));
+  if (directory != null) {
+    final Set<String> accounts = <String>{
+      ...state.blocks.accounts,
+      for (final String a in blocked) ?directory.accountOf(a),
+    }..remove(directory.ownAccount);
+    for (final String account in accounts) {
+      blocked.addAll(directory.addressesOf(account).map(normal));
+    }
+  }
+  blocked
+    ..removeAll(friends)
+    ..remove('');
   final Set<String> members = <String>{};
   for (final GroupProfile group in state.groups.values) {
     if (group.isInvitePending) {
@@ -562,6 +587,9 @@ String backgroundContactsSignature(SocialHubState state) {
   final List<String> parts = <String>[
     for (final FriendProfile friend in state.friends.values)
       '${friend.status.name}:${friend.address}',
+    for (final MapEntry<String, BlockRecord> b in state.blocks.records.entries)
+      if (b.value.on)
+        'b:${b.key}:${b.value.account}:${b.value.addresses.join(',')}',
     for (final GroupProfile group in state.groups.values)
       if (!group.isInvitePending)
         'g:${group.id}:${group.createdById}:'
@@ -640,6 +668,8 @@ final class LockedReceiver {
     Future<bool> Function()? onNetwork,
     this.relinkWait = const Duration(seconds: 10),
     this.relinkStep = const Duration(milliseconds: 500),
+    this.callCardRoute = '',
+    this.callCardNames = true,
   }) : _transport = transport,
        _beat = beat,
        _meshLinked = meshLinked,
@@ -651,7 +681,7 @@ final class LockedReceiver {
        _doorFrames = doorFrames,
        _knocks = knocks,
        _mailbox = mailbox,
-       _noticeKit = noticeKit ?? const LockedNoticeKit(),
+       _noticeKit = noticeKit ?? LockedNoticeKit.quiet,
        _presence = presence ?? const LockedPresenceKit(),
        _presenceSnapshot =
            presenceSnapshot ??
@@ -687,13 +717,15 @@ final class LockedReceiver {
   /// This phone as a mailbox for friends (`null`: no mailbox kit).
   final LockedMailbox? _mailbox;
 
-  /// What a message's notice may say (without a kit: only that it came).
+  /// What a message's notice may say, and the switches the app wrote.
+  /// Without a kit [LockedNoticeKit.quiet]: what the settings could have
+  /// switched off counts as off, so a runner that has none stays quiet
+  /// rather than ringing against the person's choice.
   final LockedNoticeKit _noticeKit;
 
   /// What decides whether a call rings and a chat message is told about,
   /// by the app's own rules ([incomingAlertOf]): who is a friend from the
-  /// capability, the rest from the notice kit. Without a kit only friends'
-  /// calls and messages count; with a kit of before 1.16.5, which does not
+  /// capability, the rest from the notice kit. With a kit of before 1.16.5, which does not
   /// say who speaks in which group, the capability's friends and group
   /// members do, as they did then.
   late final AlertFacts _alertFacts = _noticeKit.alertFacts(
@@ -802,25 +834,44 @@ final class LockedReceiver {
   /// call_platform_channel.dart; replaced in tests).
   Future<void> Function(bool on) ringForCall = setCallRinging;
 
-  /// Who calls, as the card over the lock screen may say it: the name the
-  /// notice kit knows, unless the notification level keeps names off it.
-  String _callCardName(String from) {
-    final String name = (_noticeKit.names[from] ?? '').trim();
-    return name.isEmpty ||
-            _noticeKit.levelOf(from) == NotificationPrivacy.generic
-        ? t('Połączenie przychodzące')
-        : name;
+  /// Where "Odbierz" on the call card leads once Zen is unlocked (`''`: the
+  /// call itself, in the account Zen opens; an additional account's own
+  /// route, so that account opens and its call rings on there).
+  final String callCardRoute;
+
+  /// Whether the call card may name who calls (an additional account's
+  /// card never does, as none of its notices does).
+  final bool callCardNames;
+
+  /// What the card over the lock screen says of a call from [from] and
+  /// where its "Odbierz" leads: the name the notice kit knows, unless the
+  /// notification level keeps names off it or [callCardNames] is off.
+  @visibleForTesting
+  ({String name, String route}) callCardFor(String from) {
+    final String name = callCardNames
+        ? (_noticeKit.names[from] ?? '').trim()
+        : '';
+    return (
+      name:
+          name.isEmpty ||
+              _noticeKit.levelOf(from) == NotificationPrivacy.generic
+          ? t('Połączenie przychodzące')
+          : name,
+      route: callCardRoute,
+    );
   }
 
   /// Shows the native call card for a call from [from] (replaced in
-  /// tests): the name as the notice kit knows it.
-  late Future<void> Function(String from) showCallCard = (String from) =>
-      showIncomingCallPopup(
-        displayName: _callCardName(from),
-        isVideo: false,
-        peerAddress: from,
-        acceptRouteKey: '',
-      );
+  /// tests), as [callCardFor] says.
+  late Future<void> Function(String from) showCallCard = (String from) {
+    final ({String name, String route}) card = callCardFor(from);
+    return showIncomingCallPopup(
+      displayName: card.name,
+      isVideo: false,
+      peerAddress: from,
+      acceptRouteKey: card.route,
+    );
+  };
   final Map<String, int> _pongedAt = <String, int>{};
 
   /// A contact's pings from a Zen that just started ([kPresenceFreshKey])
@@ -887,12 +938,7 @@ final class LockedReceiver {
     );
     _doorSubscription = _doorFrames?.listen(
       (SignalTransportFrame frame) => unawaitedLogged(
-        // Kept and rung (a knock): the phone stays awake until done.
-        ZenWake.holdWhile(
-          () => handleDoorFrame(frame),
-          tag: _keepHoldTag,
-          limit: _keepHoldLimit,
-        ),
+        handleDoorFrame(frame),
         context: 'A door frame for the locked inbox failed',
       ),
     );
@@ -1029,6 +1075,22 @@ final class LockedReceiver {
     while (_kept.length > _maxKeptIds) {
       _kept.remove(_kept.first);
     }
+    // Kept and rung (a knock): the phone stays awake until done. Only now:
+    // anyone can knock, and what is dropped above holds nothing.
+    await ZenWake.holdWhile(
+      () => _keepDoorFrame(frame, record, id, from, type),
+      tag: _keepHoldTag,
+      limit: _keepHoldLimit,
+    );
+  }
+
+  Future<void> _keepDoorFrame(
+    SignalTransportFrame frame,
+    Uint8List record,
+    String id,
+    String from,
+    String type,
+  ) async {
     if (!await _inbox.append(record, sender: from, stranger: true)) {
       _kept.remove(id);
       return;
@@ -1435,16 +1497,23 @@ final class LockedReceiver {
     }
   }
 
-  /// Whether a contact's ping at [at] gets a pong ([pongEvery]; a ping
-  /// from a Zen that just started, [freshPongEvery]), noting it when so.
-  /// A clock set back answers at once.
-  bool _answersPing(String from, int at, Map<String, dynamic> payload) {
+  /// Whether a contact's ping at [at] gets a pong ([pongEvery]; a
+  /// [friend]'s (or own device's) ping from a Zen that just started,
+  /// [freshPongEvery]: a group member's word that its Zen started gets no
+  /// answer sooner, or it could have one every 20 s for nothing), noting it
+  /// when so. A clock set back answers at once.
+  bool _answersPing(
+    String from,
+    int at,
+    Map<String, dynamic> payload, {
+    required bool friend,
+  }) {
     bool lately(Map<String, int> answered, Duration every) {
       final int? last = answered[from];
       return last != null && at >= last && at - last < every.inMilliseconds;
     }
 
-    final bool fresh = payload[kPresenceFreshKey] == true;
+    final bool fresh = friend && payload[kPresenceFreshKey] == true;
     if (lately(_pongedAt, pongEvery) &&
         (!fresh || lately(_freshPongedAt, freshPongEvery))) {
       return false;
@@ -1458,6 +1527,22 @@ final class LockedReceiver {
       _freshPongedAt[from] = at;
     }
     return true;
+  }
+
+  /// The contacts named to the node in this run ([SignalSenderAdmission]).
+  final Set<String> _admitted = <String>{};
+
+  /// Names [from], a contact, to the node once: a locked phone's node
+  /// counts the signals of senders nobody named against a small hourly
+  /// budget, and it knows only the friends and own devices the app named.
+  void _admit(String from) {
+    final SignalTransport transport = _transport;
+    if (transport is! SignalSenderAdmission ||
+        _admitted.length >= _maxPresencePeers ||
+        !_admitted.add(from)) {
+      return;
+    }
+    (transport as SignalSenderAdmission).admitSender(from);
   }
 
   /// Sends [payload] to [to]; false when it could not go.
@@ -1485,7 +1570,20 @@ final class LockedReceiver {
       return;
     }
     final bool contact = kind != BackgroundContactKind.stranger;
-    if (_mailboxSet.contains(from)) {
+    final bool mailbox = _mailboxSet.contains(from);
+    if (kind == BackgroundContactKind.friend || mailbox) {
+      // Someone this phone listens to: it stays awake a moment so the frame
+      // is read and answered (its node hands frames over without that,
+      // YggdrasilSignalTransport.holdOnArrival). Anyone else's frame holds
+      // the phone only for what it sets to work (kept, rung, a mailbox's
+      // duty), while that runs: a stranger, a former friend or a group
+      // member sending one frame after another must not keep it awake.
+      ZenWake.signalArrived();
+    }
+    if (contact) {
+      _admit(from);
+    }
+    if (mailbox) {
       _mailboxAnswered = true;
     }
     // Friends' confirmations and answers, and mailboxes (possibly strangers
@@ -1499,7 +1597,13 @@ final class LockedReceiver {
     }
     if (type == 'ping') {
       final int at = _now();
-      if (contact && _answersPing(from, at, frame.payload)) {
+      if (contact &&
+          _answersPing(
+            from,
+            at,
+            frame.payload,
+            friend: kind == BackgroundContactKind.friend,
+          )) {
         final bool sent = await _sendQuietly(frame.from, <String, dynamic>{
           'type': 'pong',
           if (kind == BackgroundContactKind.friend)
@@ -1526,19 +1630,11 @@ final class LockedReceiver {
       if (mailbox != null && LockedMailbox.dutyTypes.contains(type)) {
         // From friends' senders too, who need not be contacts here: the
         // mailbox checks who may leave what.
-        await ZenWake.holdWhile(
-          () => mailbox.handle(frame),
-          tag: _keepHoldTag,
-          limit: _keepHoldLimit,
-        );
+        await _holdingFor(from, kind, () => mailbox.handle(frame));
         return;
       }
       if (contact && type == 'rly_mail') {
-        await ZenWake.holdWhile(
-          () => _keepMail(frame, from, kind),
-          tag: _keepHoldTag,
-          limit: _keepHoldLimit,
-        );
+        await _holdingFor(from, kind, () => _keepMail(frame, from, kind));
         return;
       }
       if (contact && _keptRelayTypes.contains(type)) {
@@ -1595,19 +1691,62 @@ final class LockedReceiver {
   }
 
   /// Keeps [frame] in the inbox (and tells about it): the phone stays
-  /// awake until that is done, then may sleep (a frame that is dropped
-  /// costs only the short hold of its arrival).
+  /// awake until that is done ([_holdingFor]), then may sleep (a frame that
+  /// is dropped holds it at most a moment, a friend's only).
   Future<void> _keep(
     SignalTransportFrame frame,
     String from,
     String type,
     BackgroundContactKind kind, {
     required String? rid,
-  }) => ZenWake.holdWhile(
+  }) => _holdingFor(
+    from,
+    kind,
     () => _keepHeld(frame, from, type, kind, rid: rid),
-    tag: _keepHoldTag,
-    limit: _keepHoldLimit,
   );
+
+  /// Runs [work] that a frame from [from] set off, holding the phone awake
+  /// until it is done: always for a friend (or own device) and a mailbox;
+  /// for anyone else ([kLockedWorkHoldsPerHour]) at most so many times an
+  /// hour, after that without a hold. Nothing is dropped for it: the work
+  /// runs while the phone is awake anyway, and what is left of it when the
+  /// phone falls asleep runs on its next wake. A group member, or a sender
+  /// a friend's mailbox here takes deposits from, sending one frame after
+  /// another cannot keep the phone awake.
+  Future<T> _holdingFor<T>(
+    String from,
+    BackgroundContactKind kind,
+    Future<T> Function() work,
+  ) {
+    if (kind == BackgroundContactKind.friend ||
+        _mailboxSet.contains(from) ||
+        _workHoldLeft(from)) {
+      return ZenWake.holdWhile(work, tag: _keepHoldTag, limit: _keepHoldLimit);
+    }
+    return work();
+  }
+
+  /// Work holds taken this hour per sender who is not a friend:
+  /// (hour started at, holds).
+  final Map<String, (int, int)> _workHolds = <String, (int, int)>{};
+
+  bool _workHoldLeft(String from) {
+    final int now = _now();
+    final (int, int)? had = _workHolds[from];
+    final bool sameHour =
+        had != null && now >= had.$1 && now - had.$1 < _hourMs;
+    final int used = sameHour ? had.$2 : 0;
+    if (used >= kLockedWorkHoldsPerHour) {
+      return false;
+    }
+    if (!sameHour && _workHolds.length >= _maxPresencePeers) {
+      _workHolds.clear();
+    }
+    _workHolds[from] = (sameHour ? had.$1 : now, used + 1);
+    return true;
+  }
+
+  static const int _hourMs = 60 * 60 * 1000;
 
   static const String _keepHoldTag = 'locked-keep';
   static const Duration _keepHoldLimit = Duration(seconds: 20);
@@ -1781,6 +1920,16 @@ final class LockedReceiver {
     }
   }
 
+  /// What mail worth a notice can be: a message, a group's message or a
+  /// mention, a missed call, an invitation.
+  static const Set<NoticeKind> _mailKinds = <NoticeKind>{
+    NoticeKind.message,
+    NoticeKind.groupMessage,
+    NoticeKind.mention,
+    NoticeKind.call,
+    NoticeKind.invitation,
+  };
+
   /// Mail a mailbox handed over, from [senders]: sealed for the relay key,
   /// so what it is cannot be told here, only from whom (the envelope says
   /// it). Nothing when none of them is a contact (a removed friend, a
@@ -1792,7 +1941,10 @@ final class LockedReceiver {
       for (final String s in senders)
         if (_capability.kindOf(s) != BackgroundContactKind.stranger) s,
     ];
-    if (contacts.isEmpty) {
+    // Sealed mail may be any of these: with every one of them switched off
+    // (or no kit, [LockedNoticeKit.quiet]) the mail tells of nothing the
+    // person wants to hear about.
+    if (contacts.isEmpty || _mailKinds.every(_noticeKit.muted.contains)) {
       return;
     }
     final String? name = contacts.length == 1
@@ -2101,11 +2253,13 @@ final class LockedReceiver {
       return;
     }
     if (_ringEndTypes.contains(type) && _ringingFrom == from) {
-      await _ringEnded();
+      // Answered or declined on another device of this account: the ring
+      // stops, and nothing was missed.
+      await _ringEnded(missed: payload[kCallElsewhereKey] != true);
     }
   }
 
-  Future<void> _ringEnded() async {
+  Future<void> _ringEnded({bool missed = true}) async {
     _ringTimer?.cancel();
     _ringTimer = null;
     if (_ringingFrom == null) {
@@ -2116,7 +2270,9 @@ final class LockedReceiver {
     await hideIncomingCallPopup();
     try {
       await _notices.dismissSlot(kLockedCallSlot);
-      await _postMissedCall();
+      if (missed) {
+        await _postMissedCall();
+      }
     } finally {
       unawaited(
         ZenWake.release(tag: 'ring', after: const Duration(seconds: 1)),

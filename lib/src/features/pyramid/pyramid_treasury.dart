@@ -13,12 +13,22 @@ const int kPyrLedgerSyncEveryMs = 30 * 60 * 1000;
 /// does not concern them.
 const int kPyrHandoverMs = 30 * 24 * 3600 * 1000;
 
-/// About how much of the ledger one sealed frame carries.
+/// About how much of the ledger one sealed frame carries (sealed, it grows
+/// by a third: well within [kPyrMaxFrameBytes]).
 const int kPyrLedgerFrameBytes = 900 * 1024;
 
+/// The biggest sealed frame sent: a signal's limit, less room for what
+/// the transport adds around it.
+const int kPyrMaxFrameBytes = kRuntimeSignalMaxBytes - 64 * 1024;
+
 /// Operations a statement carries in full (the newest; the others only by
-/// id).
+/// id), each with a majority of signatures, within [kPyrLedgerFrameBytes].
 const int kPyrStatementOps = 50;
+
+/// How long after a payment to this person came in its wallet keeps
+/// asking the treasurers for a statement that lists it, and how often.
+const int kPyrConfirmForMs = 24 * 3600 * 1000;
+const int kPyrConfirmEveryMs = 10 * 60 * 1000;
 
 /// How long after an era of the treasurers ended its seal is signed: the
 /// treasurers' ledgers meet in between ([kPyrLedgerSyncEveryMs]), so they
@@ -43,6 +53,10 @@ abstract final class _Priv {
 
   /// A treasurer's signature back to whoever ordered.
   static const String sig = 'tsig';
+
+  /// A treasurer's refusal back to whoever ordered: why, and the time of
+  /// the newest change it counted on the payer's account.
+  static const String refuse = 'tno';
 
   /// Operations that count (or evidence), to treasurers and to those they
   /// concern.
@@ -96,6 +110,16 @@ final class _Treasury {
   /// it follows): its vote waits [kPyrReleaseWaitMs].
   final Map<String, int> _splitSeen = <String, int>{};
 
+  /// Refusals of this person's orders waiting: order → treasurer → why
+  /// ([PyrLedger.refusalCode]) and the time of the newest change it
+  /// counted on the account. Kept while the order waits (the orders go
+  /// out again, so do the refusals).
+  final Map<String, Map<String, (String, int)>> _refusals =
+      <String, Map<String, (String, int)>>{};
+
+  /// When a statement was last asked for to confirm payments that came in.
+  int _confirmAskedAt = 0;
+
   /// Bumped on every change of [ledger] or [statements].
   int _rev = 0;
   PyrLedgerView? _view;
@@ -117,6 +141,8 @@ final class _Treasury {
     statements.clear();
     _signedAt.clear();
     _splitSeen.clear();
+    _refusals.clear();
+    _confirmAskedAt = 0;
     _recoverAsk = false;
     _rev++;
     final List<int>? raw;
@@ -293,24 +319,99 @@ final class _Treasury {
   }
 
   /// Sends [json] sealed to member [to]; this person's own messages are
-  /// handled here at once.
-  Future<void> sendTo(String to, Map<String, dynamic> json) async {
+  /// handled here at once. False when it could not go: no address or key,
+  /// or a frame bigger than a signal may be ([kPyrMaxFrameBytes]) — then
+  /// the one who built it sends less.
+  Future<bool> sendTo(String to, Map<String, dynamic> json) async {
     final PyramidState? s = pyr.state;
     if (s == null) {
-      return;
+      return false;
     }
     if (to == pyr.myKey) {
       await _handle(json);
-      return;
+      return true;
     }
     final String addr = s.members[to]?.addr ?? '';
     if (addr.isEmpty) {
-      return;
+      return false;
     }
     final Map<String, dynamic>? frame = await seal(json, s, to);
-    if (frame != null) {
-      await pyr._send(addr, frame);
+    if (frame == null) {
+      return false;
     }
+    final int size = utf8.encode(jsonEncode(frame)).length;
+    if (size > kPyrMaxFrameBytes) {
+      logZenError(
+        'Pyramid: ${json['k']} frame of $size bytes',
+        StateError('over the signal limit of $kPyrMaxFrameBytes bytes'),
+        StackTrace.current,
+      );
+      return false;
+    }
+    await pyr._send(addr, frame);
+    return true;
+  }
+
+  /// Sends [ops] (with [rel], the releases they follow) to [to] as
+  /// [_Priv.done] frames of about [kPyrLedgerFrameBytes] each: a chain of
+  /// operations, each with a majority of signatures, fits in a signal
+  /// whatever the number of treasurers.
+  /// [ask] goes with the last frame: whose short statement the treasurer
+  /// sends back once it took the operations ('a', [_onAsk]).
+  Future<void> _sendDone(
+    String to,
+    List<Map<String, dynamic>> ops,
+    List<Map<String, dynamic>> rel, {
+    String? ask,
+  }) async {
+    final List<Map<String, dynamic>> frames = _frames(ops, rel);
+    for (int i = 0; i < frames.length; i++) {
+      await sendTo(to, <String, dynamic>{
+        'k': _Priv.done,
+        ...frames[i],
+        if (ask != null && i == frames.length - 1) ...<String, dynamic>{
+          'a': ask,
+          'l': true,
+        },
+      });
+    }
+  }
+
+  /// [ops] and [rel] packed into frames ('ops', 'rel') of about
+  /// [kPyrLedgerFrameBytes]; one frame (maybe empty) at least.
+  static List<Map<String, dynamic>> _frames(
+    List<Map<String, dynamic>> ops,
+    List<Map<String, dynamic>> rel,
+  ) {
+    final List<Map<String, dynamic>> out = <Map<String, dynamic>>[];
+    List<Map<String, dynamic>> o = <Map<String, dynamic>>[];
+    List<Map<String, dynamic>> r = <Map<String, dynamic>>[];
+    int bytes = 0;
+    void flush() {
+      out.add(<String, dynamic>{'ops': o, if (r.isNotEmpty) 'rel': r});
+      o = <Map<String, dynamic>>[];
+      r = <Map<String, dynamic>>[];
+      bytes = 0;
+    }
+
+    // The operations before the releases: a phone that keeps only its own
+    // takes the releases of the slots it has operations of.
+    for (final (List<Map<String, dynamic>>, bool) part
+        in <(List<Map<String, dynamic>>, bool)>[(ops, true), (rel, false)]) {
+      for (final Map<String, dynamic> j in part.$1) {
+        final int size = jsonEncode(j).length;
+        if ((o.isNotEmpty || r.isNotEmpty) &&
+            bytes + size > kPyrLedgerFrameBytes) {
+          flush();
+        }
+        (part.$2 ? o : r).add(j);
+        bytes += size;
+      }
+    }
+    if (o.isNotEmpty || r.isNotEmpty || out.isEmpty) {
+      flush();
+    }
+    return out;
   }
 
   // ---- reading ----
@@ -347,9 +448,32 @@ final class _Treasury {
   PyrStatement? agreed(PyramidState s) =>
       pyrAgreedStatement(statements, s.treasurers);
 
-  /// This person's balance: from the ledger here when it counted all the
-  /// statement most treasurers signed did (always so for a treasurer in
-  /// sync); otherwise that statement, with what came since.
+  /// What came on this phone since statement [st] (none: everything): the
+  /// operations it lists, and those dated before what it lists, change no
+  /// balance. On a phone that keeps only its own operations, what would
+  /// credit [me] waits ([PyrLedgerView.held]) until a statement most
+  /// treasurers signed lists it: only the treasurers know whether the
+  /// payer had the money and the number at the payment's time.
+  PyrLedgerView _sinceView(PyramidState s, String me, PyrStatement? st) {
+    final bool whole = _keeps(s);
+    final Object key = (s, s.revision, _rev, me, whole, st?.by, st?.at);
+    final PyrLedgerView? had = _since;
+    if (had != null && _sinceKey == key) {
+      return had;
+    }
+    _sinceKey = key;
+    return _since = ledger.compute(
+      s,
+      skip: st?.ids.toSet() ?? const <String>{},
+      skipBefore: st?.from ?? 0,
+      hold: whole ? null : me,
+    );
+  }
+
+  /// This person's balance: from the ledger here when this phone keeps the
+  /// whole ledger and counted all the statement most treasurers signed did
+  /// (always so for a treasurer in sync); otherwise that statement, with
+  /// what came since — money that came in only once a statement lists it.
   int balanceOf(String me) {
     final PyramidState? s = pyr.state;
     if (s == null) {
@@ -357,16 +481,35 @@ final class _Treasury {
     }
     final PyrLedgerView v = view(s);
     final PyrStatement? st = agreed(s);
-    if (st == null || v.counted.containsAll(st.ids)) {
+    if (_keeps(s) && (st == null || v.counted.containsAll(st.ids))) {
       return v.balanceOf(me);
     }
-    final Object key = (s, s.revision, _rev, st.by, st.at);
-    PyrLedgerView? since = _since;
-    if (since == null || _sinceKey != key) {
-      _sinceKey = key;
-      since = _since = ledger.compute(s, skip: st.ids.toSet());
+    return (st?.balance ?? 0) + _sinceView(s, me, st).balanceOf(me);
+  }
+
+  /// Operations that would pay [me] (or wait for [me]'s word) which no
+  /// statement most treasurers signed lists yet: shown as waiting for
+  /// confirmation, never as money. Always empty for a whole ledger.
+  Set<String> awaiting(String me) {
+    final PyramidState? s = pyr.state;
+    if (s == null || _keeps(s)) {
+      return const <String>{};
     }
-    return st.balance + since.balanceOf(me);
+    return _sinceView(s, me, agreed(s)).held;
+  }
+
+  /// Whether operation [id] counts for the treasurers: on a whole ledger,
+  /// when it counts here; otherwise when the statement most treasurers
+  /// signed lists it.
+  bool confirmed(String id) {
+    final PyramidState? s = pyr.state;
+    if (s == null) {
+      return false;
+    }
+    if (_keeps(s)) {
+      return view(s).counted.contains(id);
+    }
+    return agreed(s)?.ids.contains(id) ?? false;
   }
 
   /// The number this person's next order takes.
@@ -378,6 +521,22 @@ final class _Treasury {
     return max(agreed(s)?.seq ?? 0, view(s).seqOf(me)) + 1;
   }
 
+  /// The time this person's next order carries: now, but after every
+  /// change this phone counted on the account — a clock a little behind
+  /// (within [kPyrMaxSkewMs]) never dates an order before the money it
+  /// spends, which the treasurers would not count. At most [after] + 1
+  /// when given (a treasurer's refusal named a later change), never past
+  /// the skew a treasurer accepts.
+  int orderAt(String me, {int after = 0}) {
+    final int now = pyr._now();
+    final PyramidState? s = pyr.state;
+    final int last = max(
+      after,
+      s == null || pyr.orderTimeFromClock ? 0 : (view(s).lastAt[me] ?? 0),
+    );
+    return min(max(now, last + 1), now + kPyrMaxSkewMs);
+  }
+
   /// The release an operation for [slot] follows now (null for the first
   /// span): what a new order or settlement names.
   String? relFor(String slot) {
@@ -387,15 +546,23 @@ final class _Treasury {
   }
 
   /// The releases that count of the slots of [ops], to go with them: a
-  /// phone that counts an operation of a later span needs them.
+  /// phone that counts an operation of a later span needs them. Each with
+  /// the votes of a majority only: a release counts with those.
   List<Map<String, dynamic>> _chainsOf(
+    Iterable<PyramidRecord> ops,
+    PyramidState s,
+  ) => _chainsIn(ledger, ops, s);
+
+  static List<Map<String, dynamic>> _chainsIn(
+    PyrLedger ledger,
     Iterable<PyramidRecord> ops,
     PyramidState s,
   ) => <Map<String, dynamic>>[
     for (final String slot in <String>{
       for (final PyramidRecord op in ops) PyrLedger.slotOf(op),
     })
-      for (final PyramidRecord r in ledger.chainOf(slot, s)) r.toJson(),
+      for (final PyramidRecord r in ledger.chainOf(slot, s))
+        PyrLedger.majorityOnly(r, s).toJson(),
   ];
 
   // ---- ordering ----
@@ -538,16 +705,13 @@ final class _Treasury {
           if (ledger.ops[slot.substring(2)] case final PyramidRecord paid)
             ...PyrLedger.partiesOf(paid),
       }..remove(me);
-      final Map<String, dynamic> msg = <String, dynamic>{
-        'k': _Priv.done,
-        'ops': const <Map<String, dynamic>>[],
-        'rel': <Map<String, dynamic>>[
-          for (final PyramidRecord x in ledger.chainOf(slot, s)) x.toJson(),
-        ],
-      };
+      final List<Map<String, dynamic>> chain = <Map<String, dynamic>>[
+        for (final PyramidRecord x in ledger.chainOf(slot, s))
+          PyrLedger.majorityOnly(x, s).toJson(),
+      ];
       for (final String k in to.toList()..sort()) {
         if (s.members.containsKey(k)) {
-          await sendTo(k, msg);
+          await _sendDone(k, const <Map<String, dynamic>>[], chain);
         }
       }
     }
@@ -591,7 +755,7 @@ final class _Treasury {
       final String rel = v.releases[PyrLedger.slotOf(r)] ?? '';
       final Map<String, dynamic> body = <String, dynamic>{
         ...r.body,
-        'at': now,
+        'at': orderAt(me.id),
         'nc': pyr._newId(24),
       };
       if (rel.isEmpty) {
@@ -629,7 +793,7 @@ final class _Treasury {
     if (await _takeReleases(json['rel'], s)) {
       await _afterReleases(s, before);
     }
-    await _consider(op, s, me);
+    await _consider(op, s, me, answer: true);
   }
 
   /// Signs [op] when an honest treasurer may: one operation per span of a
@@ -641,12 +805,16 @@ final class _Treasury {
   /// can reach a majority is freed by a release most treasurers vote for
   /// ([_tidy]), never by one treasurer moving on alone. An operation
   /// refused for its span is kept as evidence when a treasurer of its time
-  /// signed it.
+  /// signed it. One this treasurer would not count ([PyrLedger.problem])
+  /// is refused; with [answer] (it came from its payer) the payer hears
+  /// why, and the time of the newest change counted on the account: an
+  /// order dated before it can go out again dated after.
   Future<void> _consider(
     PyramidRecord op,
     PyramidState s,
-    LedgerKeyPair me,
-  ) async {
+    LedgerKeyPair me, {
+    bool answer = false,
+  }) async {
     final int now = pyr._now();
     final String payer = op.type == PyrT.transfer ? op.str('from') : '';
     final List<int> times = <int>[
@@ -662,13 +830,11 @@ final class _Treasury {
       }
       final String slot = PyrLedger.slotOf(op);
       if (v.releases.containsKey(slot) && op.signers.isNotEmpty) {
-        await sendTo(op.signers.first, <String, dynamic>{
-          'k': _Priv.done,
-          'ops': const <Map<String, dynamic>>[],
-          'rel': <Map<String, dynamic>>[
-            for (final PyramidRecord r in ledger.chainOf(slot, s)) r.toJson(),
-          ],
-        });
+        await _sendDone(
+          op.signers.first,
+          const <Map<String, dynamic>>[],
+          _chainsIn(ledger, <PyramidRecord>[op], s),
+        );
       }
       return;
     }
@@ -685,10 +851,26 @@ final class _Treasury {
     }
     // The same order again (its signature lost on the way) is signed
     // again, not counted twice.
-    if (already != op.id &&
-        PyrLedger.problem(op, s, view(s), now, signedToday: times.length) !=
-            null) {
-      return;
+    if (already != op.id) {
+      final String? why = ledger.problem(
+        op,
+        s,
+        now,
+        signedToday: times.length,
+        current: v,
+      );
+      if (why != null) {
+        if (answer && op.signers.isNotEmpty) {
+          await sendTo(op.signers.first, <String, dynamic>{
+            'k': _Priv.refuse,
+            'id': op.id,
+            'by': me.id,
+            'why': PyrLedger.refusalCode(why),
+            'after': v.lastAt[PyrLedger.payerOf(op)] ?? 0,
+          });
+        }
+        return;
+      }
     }
     // An order after its number's release is the same payment again: one
     // against the day's limit.
@@ -699,7 +881,7 @@ final class _Treasury {
             .any((PyramidRecord o) => o.tsigs.containsKey(me.id))) {
       _signedAt[payer] = <int>[...times, now];
     }
-    pyr._signedOrders[span] = op.id;
+    pyr._markSigned(span, op.id, op.at);
     final String sig = b64(await me.sign(PyramidRecord.treasurerBytes(op.id)));
     ledger.merge(op.withTreasurerSig(me.id, sig));
     await save();
@@ -749,11 +931,105 @@ final class _Treasury {
     if (PyrLedger.isFinal(more, s) && !view(s).leftBehind(more, s)) {
       pyr._payments.remove(order.id);
       pyr._resentAt.remove(order.id);
+      _refusals.remove(order.id);
       ledger.merge(more);
       await save();
       await _spreadDone(more, s);
     }
     await pyr._save();
+    pyr._changed();
+  }
+
+  /// A treasurer's refusal of an order waiting here (from that treasurer's
+  /// own device, or this phone's own when this person is the treasurer).
+  /// Once so many treasurers of its time refused it that it can never
+  /// count, and none signed it, an order dated before a change they
+  /// counted on the account goes out again dated after it ([_redate]): a
+  /// clock behind, or money that came with a later time, does not leave
+  /// the number stuck. Otherwise the wallet shows why
+  /// ([refusalOf]).
+  Future<void> _onRefuse(Map<String, dynamic> json, String? from) async {
+    final Object? id = json['id'];
+    final Object? k = json['by'];
+    final Object? why = json['why'];
+    final Object? after = json['after'];
+    final PyramidRecord? order = id is String ? pyr._payments[id] : null;
+    final PyramidState? s = pyr.state;
+    if (order == null ||
+        s == null ||
+        k is! String ||
+        why is! String ||
+        why.length > 16 ||
+        after is! int ||
+        !s.treasurersAt(order.at).contains(k) ||
+        !(from == null ? k == pyr.myKey : _sentBy(s, k, from))) {
+      return;
+    }
+    // A time ahead of any clock a treasurer accepts names nothing real.
+    final int when = min(after, pyr._now() + kPyrMaxSkewMs);
+    (_refusals[order.id] ??= <String, (String, int)>{})[k] = (why, when);
+    pyr._changed();
+    final List<String> t = s.treasurersAt(order.at);
+    final Map<String, (String, int)> no = _refusals[order.id]!;
+    final int later = no.values.fold(
+      0,
+      (int a, (String, int) b) => max(a, b.$2),
+    );
+    if (order.tsigs.isEmpty &&
+        no.keys.where(t.contains).length > t.length - (t.length ~/ 2 + 1) &&
+        later >= order.at) {
+      await _redate(order, s, later);
+    }
+  }
+
+  /// Why most treasurers refused order [id] waiting here ([PyrLedger.
+  /// refusalCode]), once so many did that it cannot count; null otherwise.
+  String? refusalOf(String id) {
+    final PyramidRecord? order = pyr._payments[id];
+    final PyramidState? s = pyr.state;
+    final Map<String, (String, int)>? no = _refusals[id];
+    if (order == null || s == null || no == null) {
+      return null;
+    }
+    final List<String> t = s.treasurersAt(order.at);
+    final Map<String, int> by = <String, int>{};
+    for (final MapEntry<String, (String, int)> e in no.entries) {
+      if (t.contains(e.key)) {
+        by[e.value.$1] = (by[e.value.$1] ?? 0) + 1;
+      }
+    }
+    if (by.values.fold(0, (int a, int b) => a + b) <=
+        t.length - (t.length ~/ 2 + 1)) {
+      return null;
+    }
+    return (by.entries.toList()..sort(
+          (MapEntry<String, int> a, MapEntry<String, int> b) =>
+              b.value.compareTo(a.value),
+        ))
+        .first
+        .key;
+  }
+
+  /// Order [old] (none signed it, it cannot count) goes out again as it
+  /// was, dated after [after] — the same number, payee, amount and release.
+  Future<void> _redate(PyramidRecord old, PyramidState s, int after) async {
+    final LedgerKeyPair? me = pyr._signer;
+    if (me == null ||
+        !old.signers.contains(me.id) ||
+        !await TamperGuard.allowsSensitive()) {
+      return;
+    }
+    pyr._payments.remove(old.id);
+    pyr._resentAt.remove(old.id);
+    _refusals.remove(old.id);
+    final PyramidRecord again = await PyramidRecord(
+      body: <String, dynamic>{
+        ...old.body,
+        'at': orderAt(me.id, after: after),
+        'nc': pyr._newId(24),
+      },
+    ).signedBy(me);
+    await toTreasurers(again);
     pyr._changed();
   }
 
@@ -784,16 +1060,14 @@ final class _Treasury {
       for (final PyramidRecord x in chain) ...PyrLedger.partiesOf(x),
     }..remove(pyr.myKey);
     final List<Map<String, dynamic>> rel = _chainsOf(chain, s);
-    final Map<String, dynamic> msg = <String, dynamic>{
-      'k': _Priv.done,
-      'ops': <Map<String, dynamic>>[
-        for (final PyramidRecord x in chain) x.toJson(),
-      ],
-      if (rel.isNotEmpty) 'rel': rel,
-    };
+    // Every signature goes along (a treasurer who signed two is shown so):
+    // the frames are packed instead.
+    final List<Map<String, dynamic>> ops = <Map<String, dynamic>>[
+      for (final PyramidRecord x in chain) x.toJson(),
+    ];
     for (final String k in to.toList()..sort()) {
       if (s.members.containsKey(k)) {
-        await sendTo(k, msg);
+        await _sendDone(k, ops, rel);
       }
     }
   }
@@ -852,7 +1126,13 @@ final class _Treasury {
       return;
     }
     if (!keeper) {
-      await _publish(s, me, ops);
+      // What came in for this person waits until the treasurers' agreed
+      // statement lists it: asked for with the payment itself (a treasurer
+      // answers once it took it), and again while it waits ([duties]).
+      final bool waits = awaiting(me).isNotEmpty;
+      if (!await _publish(s, me, ops, ask: waits) && waits) {
+        await _askToConfirm(s, me);
+      }
     }
     await _tellPaid(s, me, <String>{for (final PyramidRecord op in ops) op.id});
     // Market messages waiting for their payment.
@@ -863,11 +1143,14 @@ final class _Treasury {
   /// their time and of now, once each: an order final through a signature
   /// a treasurer kept from the others reaches them before its number can
   /// be released, so it counts and that treasurer is shown signing two.
-  Future<void> _publish(
+  /// With [ask], each treasurer is asked for this person's short
+  /// statement with them. Whether anything went.
+  Future<bool> _publish(
     PyramidState s,
     String me,
-    List<PyramidRecord> ops,
-  ) async {
+    List<PyramidRecord> ops, {
+    bool ask = false,
+  }) async {
     final List<PyramidRecord> paid = <PyramidRecord>[
       for (final PyramidRecord op in ops)
         if (PyrLedger.payerOf(op) != me &&
@@ -877,31 +1160,35 @@ final class _Treasury {
           op,
     ];
     if (paid.isEmpty) {
-      return;
+      return false;
     }
-    final Map<String, dynamic> msg = <String, dynamic>{
-      'k': _Priv.done,
-      'ops': <Map<String, dynamic>>[
-        for (final PyramidRecord op in paid) op.toJson(),
-      ],
-      'rel': _chainsOf(paid, s),
-    };
+    if (ask) {
+      _confirmAskedAt = pyr._now();
+    }
+    final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[
+      for (final PyramidRecord op in paid) op.toJson(),
+    ];
+    final List<Map<String, dynamic>> rel = _chainsOf(paid, s);
     for (final String k in <String>{
       for (final PyramidRecord op in paid) ...s.treasurersAt(op.at),
       ...s.treasurers,
     }.toList()..sort()) {
       if (k != me) {
-        await sendTo(k, msg);
+        await _sendDone(k, sent, rel, ask: ask ? me : null);
       }
     }
+    return true;
   }
 
   /// Notifications of what came in for this person with operations
-  /// [fresh] (each told once).
+  /// [fresh] (each told once): only once it counts for the treasurers
+  /// ([awaiting]: until then it is no money).
   Future<void> _tellPaid(PyramidState s, String me, Set<String> fresh) async {
     final PyrLedgerView v = view(s);
+    final Set<String> waits = awaiting(me);
     for (final PyrLedgerEntry e in v.entries) {
       if (!fresh.contains(e.id) ||
+          waits.contains(e.id) ||
           e.to != me ||
           e.from == me ||
           (e.kind != PyrEntryKind.payment &&
@@ -1022,9 +1309,23 @@ final class _Treasury {
     }
   }
 
-  /// A treasurer's statement of [account] as its ledger has it, signed:
-  /// the balance, the number, the operations counted (the newest of them
-  /// in full) and the emission notes for it. Sealed to [account] alone.
+  /// Asks the treasurers for a short statement (no operations in full):
+  /// whether they count what came in for this person ([awaiting]).
+  Future<void> _askToConfirm(PyramidState s, String me) async {
+    if (!s.isMember(me)) {
+      return;
+    }
+    _confirmAskedAt = pyr._now();
+    for (final String k in s.treasurers) {
+      if (k != me) {
+        await sendTo(k, <String, dynamic>{'k': _Priv.ask, 'a': me, 'l': true});
+      }
+    }
+  }
+
+  /// A treasurer's statement of [account] as its ledger has it, signed
+  /// ([statementFrame]). Sealed to [account] alone; should the frame still
+  /// not go (bigger than counted), half the operations go, down to none.
   Future<void> _onAsk(Map<String, dynamic> json) async {
     final LedgerKeyPair? me = pyr._identity;
     final PyramidState? s = pyr.state;
@@ -1036,48 +1337,150 @@ final class _Treasury {
         !s.treasurers.contains(me.id)) {
       return;
     }
-    final PyrLedgerView v = view(s);
-    final List<PyramidRecord> mine = ledger.concerning(a);
+    final Map<String, dynamic> frame = await statementFrame(
+      ledger,
+      view(s),
+      s,
+      a,
+      me,
+      pyr._now(),
+      short: json['l'] == true,
+    );
+    final List<Map<String, dynamic>> ops =
+        (frame['ops'] as List<Map<String, dynamic>>?) ??
+        const <Map<String, dynamic>>[];
+    int take = ops.length;
+    while (true) {
+      final Map<String, dynamic> part = take == ops.length
+          ? frame
+          : <String, dynamic>{
+              'k': _Priv.statement,
+              'st': frame['st'],
+              'ops': ops.take(take).toList(),
+              'rel': _chainsIn(ledger, <PyramidRecord>[
+                for (final Map<String, dynamic> j in ops.take(take))
+                  ?PyramidRecord.fromJson(j),
+              ], s),
+              'notes': take == 0
+                  ? const <Map<String, dynamic>>[]
+                  : frame['notes'],
+            };
+      if (await sendTo(a, part) || take == 0) {
+        return;
+      }
+      take ~/= 2;
+    }
+  }
+
+  /// The statement of [account] by treasurer [me] whose (whole) [ledger]
+  /// counts [v], at [now], as the frame that carries it: the balance, the
+  /// number, the operations counted ([PyrStatement.window]: the newest by
+  /// id), the newest of them in full ([kPyrStatementOps] at most) with a
+  /// majority of signatures each and the releases they follow, and the
+  /// emission notes for it — within [kPyrLedgerFrameBytes], whatever the
+  /// number of treasurers or the account's history. A [short] one carries
+  /// no operations nor notes.
+  static Future<Map<String, dynamic>> statementFrame(
+    PyrLedger ledger,
+    PyrLedgerView v,
+    PyramidState s,
+    String account,
+    LedgerKeyPair me,
+    int now, {
+    bool short = false,
+  }) async {
+    final List<PyramidRecord> mine = ledger.concerning(account);
     final List<PyrEmitNote> notes = <PyrEmitNote>[
       for (final PyrEmitNote n in ledger.notes.values)
-        if (n.to == a) n,
+        if (n.to == account) n,
     ];
-    final Set<String> emitted = <String>{
-      for (final PyrEmission e in s.emissions.values)
-        if (notes.any((PyrEmitNote n) => n.rc == e.rc)) 'e:${e.id}',
+    final Map<String, int> noteAt = <String, int>{
+      for (final PyrEmission e in s.emissions.values) e.rc: e.effectiveAt,
     };
-    final List<String> ids = <String>[
+    final Map<String, int> emitted = <String, int>{
+      for (final PyrEmission e in s.emissions.values)
+        if (notes.any((PyrEmitNote n) => n.rc == e.rc))
+          'e:${e.id}': e.effectiveAt,
+    };
+    final (List<String> ids, int from) = PyrStatement.window(<String, int>{
       for (final PyramidRecord op in mine)
-        if (v.counted.contains(op.id)) op.id,
-      ...emitted.where(v.counted.contains),
-    ];
+        if (v.counted.contains(op.id)) op.id: op.at,
+      for (final MapEntry<String, int> e in emitted.entries)
+        if (v.counted.contains(e.key)) e.key: e.value,
+    });
     final PyrStatement unsigned = PyrStatement(
       pyramid: s.id,
-      account: a,
-      balance: v.balanceOf(a),
-      seq: v.seqOf(a),
-      at: pyr._now(),
+      account: account,
+      balance: v.balanceOf(account),
+      seq: v.seqOf(account),
+      at: now,
       ids: ids,
+      from: from,
       by: me.id,
       sig: '',
     );
-    final String sig = b64(await me.sign(unsigned.signedBytes));
-    final List<PyramidRecord> newest = <PyramidRecord>[
-      for (final PyramidRecord op in mine.reversed.take(kPyrStatementOps))
-        if (v.counted.contains(op.id)) op,
-    ];
-    final List<Map<String, dynamic>> rel = _chainsOf(newest, s);
-    await sendTo(a, <String, dynamic>{
+    final Map<String, dynamic> st = <String, dynamic>{
+      ...unsigned.toJson(),
+      'sig': b64(await me.sign(unsigned.signedBytes)),
+    };
+    if (short) {
+      return <String, dynamic>{'k': _Priv.statement, 'st': st};
+    }
+    int bytes = jsonEncode(st).length;
+    // The notes of the emissions it lists (or not counted yet), newest
+    // first, in a quarter of the frame at most.
+    final List<Map<String, dynamic>> noteJson = <Map<String, dynamic>>[];
+    notes.sort(
+      (PyrEmitNote x, PyrEmitNote y) =>
+          (noteAt[y.rc] ?? 0).compareTo(noteAt[x.rc] ?? 0),
+    );
+    for (final PyrEmitNote n in notes) {
+      final Map<String, dynamic> j = n.toJson();
+      final int size = jsonEncode(j).length;
+      if ((noteAt[n.rc] ?? from) < from ||
+          bytes + size > kPyrLedgerFrameBytes ~/ 4) {
+        continue;
+      }
+      noteJson.add(j);
+      bytes += size;
+    }
+    // The newest operations in full while they fit.
+    final List<PyramidRecord> newest = <PyramidRecord>[];
+    List<Map<String, dynamic>> rel = <Map<String, dynamic>>[];
+    int relBytes = 2;
+    for (final PyramidRecord op in mine.reversed) {
+      if (newest.length >= kPyrStatementOps) {
+        break;
+      }
+      if (!v.counted.contains(op.id)) {
+        continue;
+      }
+      final PyramidRecord slim = PyrLedger.majorityOnly(op, s);
+      final List<Map<String, dynamic>> moreRel = _chainsIn(
+        ledger,
+        <PyramidRecord>[...newest, slim],
+        s,
+      );
+      final int moreRelBytes = jsonEncode(moreRel).length;
+      final int size =
+          jsonEncode(slim.toJson()).length + moreRelBytes - relBytes;
+      if (bytes + size > kPyrLedgerFrameBytes) {
+        break;
+      }
+      newest.add(slim);
+      rel = moreRel;
+      relBytes = moreRelBytes;
+      bytes += size;
+    }
+    return <String, dynamic>{
       'k': _Priv.statement,
-      'st': <String, dynamic>{...unsigned.toJson(), 'sig': sig},
+      'st': st,
       'ops': <Map<String, dynamic>>[
         for (final PyramidRecord op in newest) op.toJson(),
       ],
       if (rel.isNotEmpty) 'rel': rel,
-      'notes': <Map<String, dynamic>>[
-        for (final PyrEmitNote n in notes) n.toJson(),
-      ],
-    });
+      'notes': noteJson,
+    };
   }
 
   /// A treasurer's statement of this person's account: kept when its
@@ -1105,6 +1508,9 @@ final class _Treasury {
         )) {
       return;
     }
+    // What waited here for the treasurers before: told once a statement
+    // most of them signed lists it.
+    final Set<String> waited = Set<String>.of(awaiting(me));
     final PyrStatement? had = statements[st.by];
     if (had == null || had.at < st.at) {
       statements[st.by] = st;
@@ -1136,6 +1542,15 @@ final class _Treasury {
       await _afterReleases(s, before);
     }
     pyr._changed();
+    final Set<String> now = awaiting(me);
+    final Set<String> come = <String>{
+      for (final String id in waited)
+        if (!now.contains(id) && confirmed(id)) id,
+    };
+    if (come.isNotEmpty) {
+      await _tellPaid(s, me, come);
+      await pyr._retryHeld();
+    }
   }
 
   // ---- the treasurers' sync ----
@@ -1452,7 +1867,7 @@ final class _Treasury {
           (ledger.releases[bare.id]?.tsigs.containsKey(me.id) ?? false)) {
         continue;
       }
-      pyr._signedOrders[once] = bare.id;
+      pyr._markSigned(once, bare.id, bare.at);
       ledger.mergeRelease(
         bare.withTreasurerSig(
           me.id,
@@ -1473,16 +1888,18 @@ final class _Treasury {
     if (voted.isEmpty) {
       return;
     }
-    final Map<String, dynamic> msg = <String, dynamic>{
-      'k': _Priv.ops,
-      'ops': const <Map<String, dynamic>>[],
-      'rel': <Map<String, dynamic>>[
+    // In frames of [kPyrLedgerFrameBytes]: many spans may be split at once.
+    final List<Map<String, dynamic>> frames = _frames(
+      const <Map<String, dynamic>>[],
+      <Map<String, dynamic>>[
         for (final PyramidRecord r in voted) ledger.releases[r.id]!.toJson(),
       ],
-    };
+    );
     for (final String k in s.treasurers) {
       if (k != me.id) {
-        await sendTo(k, msg);
+        for (final Map<String, dynamic> f in frames) {
+          await sendTo(k, <String, dynamic>{'k': _Priv.ops, ...f});
+        }
       }
     }
     // [before] already has this vote: what came to count with it is told
@@ -1624,8 +2041,14 @@ final class _Treasury {
         await _onOrder(json);
       case _Priv.sig:
         await _onSig(json);
+      case _Priv.refuse:
+        await _onRefuse(json, from);
       case _Priv.done:
         await _onDone(json);
+        // A member asks for its short statement with what it passed on.
+        if (json['a'] is String && json['l'] == true) {
+          await _onAsk(<String, dynamic>{'a': json['a'], 'l': true});
+        }
       case _Priv.note:
         await _onNote(json);
       case _Priv.ask:
@@ -1692,9 +2115,28 @@ final class _Treasury {
     _signedAt.removeWhere(
       (String _, List<int> at) => at.every((int x) => x <= now - kPyrDayMs),
     );
+    _refusals.removeWhere(
+      (String id, Map<String, (String, int)> _) =>
+          !pyr._payments.containsKey(id),
+    );
     await _askIfHere();
     if (!s.treasurers.contains(me)) {
       await askStatements();
+      // Payments that came in and still wait for the treasurers: asked
+      // again for a day after the newest of them.
+      final Set<String> waits = awaiting(me);
+      final int newest = <int>[
+        for (final PyrLedgerEntry e in view(s).entries)
+          if (waits.contains(e.id)) e.at,
+      ].fold(0, max);
+      if (waits.isNotEmpty &&
+          now - newest < kPyrConfirmForMs &&
+          now - _confirmAskedAt >= kPyrConfirmEveryMs) {
+        await _askToConfirm(s, me);
+      }
+    }
+    if (pyr._pruneSigned(s, _keeps(s) ? view(s) : null)) {
+      await pyr._save();
     }
     await syncDuty();
     await _sealDuty();
@@ -1740,6 +2182,20 @@ final class _Treasury {
         changes: era.changes,
       ),
     );
+    // A seal that would not fit a record (or a signal) is never taken by
+    // anybody: said so, and its era is not marked as sealed by this
+    // account.
+    if (bare.signedBytes.length > kPyrMaxRecordBytes ||
+        utf8.encode(jsonEncode(bare.toJson())).length > kPyrMaxFrameBytes) {
+      logZenError(
+        'Pyramid: seal of era ${era.n}',
+        StateError(
+          '${(bare.body['ops'] as List<Object?>).length} operations do not fit',
+        ),
+        StackTrace.current,
+      );
+      return;
+    }
     await pyr._signOnce('seal|${era.n}|${era.prev}', bare, me);
   }
 }

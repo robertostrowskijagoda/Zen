@@ -175,12 +175,39 @@ class PasswordImportReportDialog extends StatelessWidget {
       PasswordImportSkip.noName => t('Bez nazwy i adresu: {n}', v),
       PasswordImportSkip.notLogin => t('Nie loginy (karty, notatki): {n}', v),
       PasswordImportSkip.deleted => t('Z kosza: {n}', v),
+      PasswordImportSkip.archived => t('Zarchiwizowane: {n}', v),
       PasswordImportSkip.tooLong => t('Za długie pola: {n}', v),
       PasswordImportSkip.malformed => t('Uszkodzone wiersze: {n}', v),
       PasswordImportSkip.duplicate => t('Już były w Zen: {n}', v),
       PasswordImportSkip.full => t('Brak miejsca: {n}', v),
       PasswordImportSkip.tooMany => t('Ponad 10 000 wierszy: {n}', v),
     };
+  }
+
+  /// Where the damaged rows are, in words: the lines of each (the first
+  /// few), and from which line on the file could not be read at all.
+  static String? _damage(List<PasswordCsvDamage> damaged) {
+    if (damaged.isEmpty) {
+      return null;
+    }
+    const int shown = 5;
+    final List<String> lines = <String>[
+      for (final PasswordCsvDamage d in damaged.take(shown))
+        if (d.to != null) d.to == d.from ? '${d.from}' : '${d.from}–${d.to}',
+    ];
+    final List<String> parts = <String>[
+      if (lines.isNotEmpty)
+        t('Wiersze pliku: {lines}{more}', <String, Object?>{
+          'lines': lines.join(', '),
+          'more': damaged.length > shown ? ', …' : '',
+        }),
+      if (damaged.last.to == null)
+        t(
+          'Pliku nie dało się odczytać od wiersza {line} do końca.',
+          <String, Object?>{'line': damaged.last.from},
+        ),
+    ];
+    return parts.join(' ');
   }
 
   @override
@@ -248,6 +275,15 @@ class PasswordImportReportDialog extends StatelessWidget {
                       style: reason,
                     ),
                   ),
+              if (_damage(report.damaged) case final String where)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 24),
+                  child: Text(
+                    where,
+                    key: const Key('password-import-damaged'),
+                    style: reason,
+                  ),
+                ),
             ],
           ],
           const SizedBox(height: 4),

@@ -67,14 +67,17 @@ enum PasswordImportSkip {
   /// Not a login (a card, a note, an identity in Bitwarden).
   notLogin,
 
-  /// In KeePassXC's recycle bin.
+  /// In KeePassXC's recycle bin (whatever language named it).
   deleted,
+
+  /// Archived in 1Password (its `Archived` column).
+  archived,
 
   /// A field longer than this app keeps (a password is never cut short).
   tooLong,
 
   /// A broken row: more cells than the header, a quote never closed, a
-  /// cell far too long.
+  /// cell far too long ([PasswordCsvParse.damaged] says where).
   malformed,
 
   /// The same name or address, login and password as an entry already in
@@ -102,6 +105,26 @@ final class PasswordCsvRow {
   String toString() => 'PasswordCsvRow(line $line)';
 }
 
+/// Lines of a file that could not be read as rows: [from] to [to], or to
+/// the end of the file when [to] is null.
+@immutable
+final class PasswordCsvDamage {
+  const PasswordCsvDamage(this.from, this.to);
+
+  final int from;
+  final int? to;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PasswordCsvDamage && other.from == from && other.to == to;
+
+  @override
+  int get hashCode => Object.hash(from, to);
+
+  @override
+  String toString() => 'PasswordCsvDamage($from-${to ?? 'end'})';
+}
+
 /// A file read: whose it is, the rows taken, the rows left out and why.
 @immutable
 final class PasswordCsvParse {
@@ -111,6 +134,7 @@ final class PasswordCsvParse {
     this.read = 0,
     this.rows = const <PasswordCsvRow>[],
     this.skipped = const <PasswordImportSkip, int>{},
+    this.damaged = const <PasswordCsvDamage>[],
   });
 
   final PasswordCsvLayout? layout;
@@ -120,6 +144,10 @@ final class PasswordCsvParse {
   final int read;
   final List<PasswordCsvRow> rows;
   final Map<PasswordImportSkip, int> skipped;
+
+  /// Where the file's damaged rows are ([PasswordImportSkip.malformed]),
+  /// in the order of the file.
+  final List<PasswordCsvDamage> damaged;
 
   @override
   String toString() =>
@@ -181,9 +209,22 @@ String? _utf16(Uint8List bytes, int start, {required bool littleEndian}) {
 final class _Record {
   _Record(this.line);
 
+  /// The line it starts on.
   final int line;
   final List<String> cells = <String>[];
+
+  /// More columns than any export has, or a cell far too long.
   bool broken = false;
+
+  /// A quote still open where the text ends.
+  bool open = false;
+
+  /// Text right after a closing quote (neither a separator nor a line end):
+  /// the quote was not where a cell ends.
+  bool stray = false;
+
+  /// A quoted cell held a line break.
+  bool spans = false;
 
   bool get blank => cells.every((String c) => c.isEmpty);
 }
@@ -212,129 +253,165 @@ String _separatorOf(String text) {
   return best;
 }
 
-/// The records of [text] (RFC 4180: cells in quotes may hold the
-/// separator, line breaks and doubled quotes; CRLF, LF and CR all end a
-/// line; a line break inside a cell is kept as LF). Past [keep] records
-/// that are not blank, records are only counted ([_Records.more]), not
-/// kept. A quote left open at the end makes the last record broken.
-_Records _records(String text, String sep, int keep) {
-  final _Records out = _Records();
-  int kept = 0;
+/// Reads the records of a text one by one (RFC 4180: cells in quotes may
+/// hold the separator, line breaks and doubled quotes; CRLF, LF and CR all
+/// end a line; a line break inside a cell is kept as LF).
+final class _Lexer {
+  _Lexer(this.text, this.sep);
+
+  final String text;
+  final String sep;
+
+  /// Where the next record starts, and on which line.
+  int pos = 0;
   int line = 1;
-  _Record record = _Record(line);
-  final StringBuffer cell = StringBuffer();
-  bool quoted = false;
-  bool wasQuoted = false;
-  bool cellStarted = false;
 
-  void endCell() {
-    if (record.cells.length >= _maxColumns) {
-      record.broken = true;
-    } else if (kept < keep) {
-      record.cells.add(cell.toString());
-    } else {
-      record.cells.add(cell.isEmpty ? '' : '-');
-    }
-    cell.clear();
-    wasQuoted = false;
-    cellStarted = false;
-  }
+  bool get done => pos >= text.length;
 
-  void endRecord() {
-    endCell();
-    if (!record.blank || record.broken) {
-      if (kept < keep) {
-        kept++;
-        out.records.add(record);
+  /// The record at [pos], which then moves past it. With [keep] false its
+  /// cells are only marked as empty or not ('-'), not kept.
+  _Record read({required bool keep}) {
+    final _Record record = _Record(line);
+    final StringBuffer cell = StringBuffer();
+    bool quoted = false;
+    bool wasQuoted = false;
+    bool closed = false;
+    bool cellStarted = false;
+
+    void endCell() {
+      if (record.cells.length >= _maxColumns) {
+        record.broken = true;
+      } else if (keep) {
+        record.cells.add(cell.toString());
       } else {
-        out.more++;
+        record.cells.add(cell.isEmpty ? '' : '-');
       }
+      cell.clear();
+      wasQuoted = false;
+      closed = false;
+      cellStarted = false;
     }
-    record = _Record(line);
-  }
 
-  void put(String c) {
-    if (kept >= keep) {
-      // Only counted: a mark that the cell is not empty is enough.
-      if (cell.isEmpty) {
-        cell.write('-');
+    void put(String c) {
+      if (!keep) {
+        // Only counted: a mark that the cell is not empty is enough.
+        if (cell.isEmpty) {
+          cell.write('-');
+        }
+        return;
       }
-      return;
+      if (cell.length >= _maxCellChars) {
+        record.broken = true;
+        return;
+      }
+      cell.write(c);
     }
-    if (cell.length >= _maxCellChars) {
-      record.broken = true;
-      return;
-    }
-    cell.write(c);
-  }
 
-  int i = 0;
-  while (i < text.length) {
-    final String c = text[i];
-    if (quoted) {
-      if (c == '"') {
-        if (i + 1 < text.length && text[i + 1] == '"') {
-          put('"');
-          i += 2;
+    while (pos < text.length) {
+      final String c = text[pos];
+      if (quoted) {
+        if (c == '"') {
+          if (pos + 1 < text.length && text[pos + 1] == '"') {
+            put('"');
+            pos += 2;
+            continue;
+          }
+          quoted = false;
+          closed = true;
+          pos++;
           continue;
         }
-        quoted = false;
-        i++;
+        if (c == '\r' || c == '\n') {
+          if (c == '\r' && pos + 1 < text.length && text[pos + 1] == '\n') {
+            pos++;
+          }
+          put('\n');
+          record.spans = true;
+          line++;
+          pos++;
+          continue;
+        }
+        put(c);
+        pos++;
+        continue;
+      }
+      if (c == '"' && !cellStarted && !wasQuoted) {
+        quoted = true;
+        wasQuoted = true;
+        cellStarted = true;
+        pos++;
+        continue;
+      }
+      if (c == sep) {
+        endCell();
+        pos++;
         continue;
       }
       if (c == '\r' || c == '\n') {
-        if (c == '\r' && i + 1 < text.length && text[i + 1] == '\n') {
-          i++;
+        if (c == '\r' && pos + 1 < text.length && text[pos + 1] == '\n') {
+          pos++;
         }
-        put('\n');
+        pos++;
         line++;
-        i++;
-        continue;
+        endCell();
+        return record;
       }
-      put(c);
-      i++;
-      continue;
-    }
-    if (c == '"' && !cellStarted && !wasQuoted) {
-      quoted = true;
-      wasQuoted = true;
+      if (closed) {
+        record.stray = true;
+      }
+      // Anything after a closing quote, or a quote inside an unquoted cell,
+      // is taken as it is (exports are not always strict).
       cellStarted = true;
-      i++;
-      continue;
+      put(c);
+      pos++;
     }
-    if (c == sep) {
-      endCell();
-      i++;
-      continue;
-    }
-    if (c == '\r' || c == '\n') {
-      if (c == '\r' && i + 1 < text.length && text[i + 1] == '\n') {
-        i++;
-      }
-      i++;
-      line++;
-      endRecord();
-      continue;
-    }
-    // Anything after a closing quote, or a quote inside an unquoted cell,
-    // is taken as it is (exports are not always strict).
-    cellStarted = true;
-    put(c);
-    i++;
-  }
-  if (cellStarted || cell.isNotEmpty || record.cells.isNotEmpty || quoted) {
     if (quoted) {
-      record.broken = true;
+      record.open = true;
     }
-    endRecord();
+    endCell();
+    return record;
   }
-  return out;
-}
 
-/// The records kept, and how many more there were.
-final class _Records {
-  final List<_Record> records = <_Record>[];
-  int more = 0;
+  /// Moves to the first line after [from] (where a record began) that is a
+  /// whole record of [width] cells on a line of its own; false when no
+  /// line is, and the text has nothing more to read.
+  bool resumeAfter(int from, int fromLine, int width) {
+    int at = from;
+    int atLine = fromLine;
+    while (true) {
+      final int end = _lineEnd(at);
+      if (end >= text.length) {
+        pos = text.length;
+        return false;
+      }
+      at =
+          end +
+          (text[end] == '\r' && end + 1 < text.length && text[end + 1] == '\n'
+              ? 2
+              : 1);
+      atLine++;
+      if (at >= text.length) {
+        pos = text.length;
+        return false;
+      }
+      final _Lexer one = _Lexer(text.substring(at, _lineEnd(at)), sep);
+      final _Record r = one.read(keep: false);
+      if (!r.open && !r.spans && !r.broken && r.cells.length == width) {
+        pos = at;
+        line = atLine;
+        return true;
+      }
+    }
+  }
+
+  /// Where the line holding [from] ends (its line break, or the end).
+  int _lineEnd(int from) {
+    int i = from;
+    while (i < text.length && text[i] != '\n' && text[i] != '\r') {
+      i++;
+    }
+    return i;
+  }
 }
 
 /// The column of each field in a header, and whose export it is.
@@ -371,6 +448,7 @@ const Map<String, List<String>> _synonyms = <String, List<String>>{
   'note': <String>['note', 'notes', 'comments', 'comment', 'extra'],
   'type': <String>['type'],
   'group': <String>['group'],
+  'archived': <String>['archived'],
 };
 
 _Columns? _columnsOf(List<String> header) {
@@ -429,33 +507,61 @@ PasswordCsvParse parsePasswordCsv(Uint8List bytes) {
 }
 
 /// [parsePasswordCsv] of the file's text.
+///
+/// A record that runs over several lines because of a quote that was not
+/// meant as one (a password starting with `"`, cut short by an export)
+/// would swallow the rest of the file: one that ends with the quote still
+/// open, has text right after a closing quote, or has another number of
+/// cells than the header is taken as damaged, and reading goes on from
+/// the next line that is a whole record by itself. The lines between are
+/// reported ([PasswordCsvParse.damaged]); when no such line comes, the
+/// file could not be read from that record on, and the report says so.
 PasswordCsvParse parsePasswordCsvText(String text) {
   final String body = text.startsWith('﻿') ? text.substring(1) : text;
-  // The header and at most [kMaxPasswordCsvRows] rows; blank lines are
-  // not rows.
-  final _Records all = _records(
-    body,
-    _separatorOf(body),
-    kMaxPasswordCsvRows + 1,
-  );
-  if (all.records.isEmpty) {
-    return const PasswordCsvParse(error: PasswordCsvError.unknownLayout);
+  final _Lexer lexer = _Lexer(body, _separatorOf(body));
+  _Record? header;
+  while (!lexer.done && header == null) {
+    final _Record r = lexer.read(keep: true);
+    if (!r.blank || r.broken || r.open) {
+      header = r;
+    }
   }
-  final _Record header = all.records.first;
-  final _Columns? columns = header.broken ? null : _columnsOf(header.cells);
+  final _Columns? columns = header == null || header.broken || header.open
+      ? null
+      : _columnsOf(header.cells);
   if (columns == null) {
     return const PasswordCsvParse(error: PasswordCsvError.unknownLayout);
   }
-  final int width = header.cells.length;
+  final int width = header!.cells.length;
   final List<PasswordCsvRow> rows = <PasswordCsvRow>[];
   final Map<PasswordImportSkip, int> skipped = <PasswordImportSkip, int>{};
+  final List<PasswordCsvDamage> damaged = <PasswordCsvDamage>[];
   void skip(PasswordImportSkip why, [int n = 1]) =>
       skipped[why] = (skipped[why] ?? 0) + n;
   int read = 0;
-  for (final _Record r in all.records.skip(1)) {
+  int more = 0;
+  while (!lexer.done) {
+    final int start = lexer.pos;
+    final bool keep = read < kMaxPasswordCsvRows;
+    final _Record r = lexer.read(keep: keep);
+    if (r.blank && !r.broken && !r.open) {
+      continue;
+    }
+    if (!keep) {
+      // Past the limit: only counted.
+      more++;
+      continue;
+    }
     read++;
-    if (r.broken || r.cells.length > width) {
+    if (r.spans && (r.open || r.stray || r.cells.length != width)) {
       skip(PasswordImportSkip.malformed);
+      final bool resumed = lexer.resumeAfter(start, r.line, width);
+      damaged.add(PasswordCsvDamage(r.line, resumed ? lexer.line - 1 : null));
+      continue;
+    }
+    if (r.broken || r.open || r.cells.length > width) {
+      skip(PasswordImportSkip.malformed);
+      damaged.add(PasswordCsvDamage(r.line, r.line));
       continue;
     }
     String cell(String field) {
@@ -470,9 +576,12 @@ PasswordCsvParse parsePasswordCsvText(String text) {
         continue;
       }
     }
-    if (columns.layout == PasswordCsvLayout.keepassxc &&
-        cell('group').split('/').any((String g) => g.trim() == 'Recycle Bin')) {
+    if (_inRecycleBin(cell('group'))) {
       skip(PasswordImportSkip.deleted);
+      continue;
+    }
+    if (_truthy.contains(cell('archived').trim().toLowerCase())) {
+      skip(PasswordImportSkip.archived);
       continue;
     }
     String address = cell('address').trim();
@@ -507,14 +616,61 @@ PasswordCsvParse parsePasswordCsvText(String text) {
     }
     rows.add(PasswordCsvRow(r.line, fields));
   }
-  if (all.more > 0) {
-    read += all.more;
-    skip(PasswordImportSkip.tooMany, all.more);
+  if (more > 0) {
+    read += more;
+    skip(PasswordImportSkip.tooMany, more);
   }
   return PasswordCsvParse(
     layout: columns.layout,
     read: read,
     rows: rows,
     skipped: skipped,
+    damaged: damaged,
   );
+}
+
+/// The values of a column such as 1Password's `Archived` that mean yes.
+const Set<String> _truthy = <String>{'true', 'yes', '1'};
+
+/// Names KeePassXC gives its recycle bin, which it names in the language it
+/// runs in when it makes it (a group right under the root).
+const Set<String> _recycleBins = <String>{
+  'recycle bin',
+  'kosz',
+  'papierkorb',
+  'corbeille',
+  'papelera',
+  'papelera de reciclaje',
+  'cestino',
+  'prullenbak',
+  'lixeira',
+  'reciclagem',
+  'koš',
+  'kôš',
+  'papírkosár',
+  'papperskorg',
+  'papirkurv',
+  'roskakori',
+  'çöp kutusu',
+  'корзина',
+  'кошик',
+  'кош',
+  'κάδος ανακύκλωσης',
+  'סל המחזור',
+  'سلة المحذوفات',
+  'ごみ箱',
+  '回收站',
+  '資源回收筒',
+  '휴지통',
+};
+
+/// Whether [group] (KeePassXC's `Group` column: `Root/Kosz/…`) is in the
+/// recycle bin: its first group under the root, or a group named
+/// "Recycle Bin" anywhere, as KeePassXC names it in English.
+bool _inRecycleBin(String group) {
+  final List<String> path = <String>[
+    for (final String g in group.split('/')) g.trim().toLowerCase(),
+  ];
+  return path.contains('recycle bin') ||
+      (path.length >= 2 && _recycleBins.contains(path[1]));
 }

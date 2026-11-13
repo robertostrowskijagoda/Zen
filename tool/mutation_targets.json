@@ -416,6 +416,31 @@
     ]
   },
   {
+    "file": "lib/src/features/passwords/password_setup.dart",
+    "tests": [
+      "test/password_manager_setup_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/presentation/password_setup_screen.dart",
+    "tests": [
+      "test/password_manager_setup_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/security/sensitive_access.dart",
+    "tests": [
+      "test/password_autofill_test.dart",
+      "test/security_hardening_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/settings/presentation/first_run_setup.dart",
+    "tests": [
+      "test/onboarding_first_run_setup_test.dart"
+    ]
+  },
+  {
     "file": "lib/src/features/runtime/android_background_runtime.dart",
     "tests": [
       "test/android_background_runtime_test.dart"
@@ -583,6 +608,38 @@
     "tests": [
       "test/account_recovery_friends_test.dart",
       "test/privacy_levels_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/account/account_holdings.dart",
+    "tests": [
+      "test/account_replace_rule_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/ledger/ledger_fold.dart",
+    "tests": [
+      "test/ledger_fold_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/media/outgoing_media.dart",
+    "tests": [
+      "test/outgoing_media_metadata_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/passwords/public_suffix.dart",
+    "tests": [
+      "test/password_public_suffix_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/social/block_book.dart",
+    "tests": [
+      "test/block_book_test.dart",
+      "test/blocked_everywhere_test.dart",
+      "test/dating_block_everywhere_test.dart"
     ]
   }
 ]

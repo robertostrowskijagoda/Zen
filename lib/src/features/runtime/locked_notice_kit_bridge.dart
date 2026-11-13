@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
@@ -6,6 +7,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/account/multi/desktop_background.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/ios_background.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
@@ -14,7 +16,6 @@ import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
-import 'package:zen/src/features/settings/notice_kind.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -29,6 +30,7 @@ String lockedNoticeKitSignature(SocialHubState state) {
     for (final String address in state.book.removedAddresses) 'x:$address',
     for (final GroupProfile group in state.groups.values)
       'g:${group.id}:${group.isInvitePending}:${group.name}:'
+          '${group.createdById}:${speaksInGroup(group, group.createdById)}:'
           '${group.memberAddresses.join(',')}',
     for (final MapEntry<String, NotificationPrivacy> e
         in state.notificationPrivacy.entries)
@@ -41,13 +43,21 @@ String lockedNoticeKitSignature(SocialHubState state) {
   return parts.join('|');
 }
 
-/// Keeps the [LockedNoticeKit] in step on Android and on an iPhone while
-/// the app is unlocked: the notification privacy level, the conversations'
-/// own levels and the names the locked background receiver may show in a
-/// message's notice, and the notification switches (the kinds of news that
-/// are off, the notification sounds). Written again whenever any of it
-/// changes; only once the friends were read, so a kit without them never
-/// replaces the stored one.
+/// Keeps the [LockedNoticeKit] of the account open in the app in step,
+/// wherever a background runner reads it: on Android (the service runs the
+/// default account and the additional ones, each from the kit in its own
+/// folder), on an iPhone, and on a computer while this account receives in
+/// the background (its tray node). It holds the notification privacy
+/// level, the conversations' own levels and the names the locked
+/// background receiver may show in a message's notice, the notification
+/// switches (the kinds of news that are off, the notification sounds) and
+/// who speaks in which group. Written again whenever any of it changes,
+/// when the app leaves the screen, and every [_refreshEvery] (a friend's
+/// devices come from the ledger, which says nothing when it learns one);
+/// only while unlocked and once the friends were read, so a kit without
+/// them never replaces the stored one. An additional account's kit goes
+/// into that account's folder, sealed with its background key: nothing of
+/// it is written where the default account's files are.
 class LockedNoticeKitBridge extends ConsumerStatefulWidget {
   const LockedNoticeKitBridge({required this.child, super.key});
 
@@ -59,15 +69,44 @@ class LockedNoticeKitBridge extends ConsumerStatefulWidget {
 }
 
 class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
+  static const Duration _refreshEvery = Duration(minutes: 15);
+
   String? _written;
   Future<void> _writing = Future<void>.value();
+  Timer? _refresh;
+
+  @override
+  void dispose() {
+    _refresh?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     if (!ref.watch(androidBackgroundRuntimeBridgeEnabledProvider) &&
-        !ref.watch(iosBackgroundBridgeEnabledProvider)) {
+        !ref.watch(iosBackgroundBridgeEnabledProvider) &&
+        !ref.watch(desktopReceivesInBackgroundProvider)) {
+      _refresh?.cancel();
+      _refresh = null;
+      // Turned on again later: written then, whatever was written before.
+      _written = null;
       return widget.child;
     }
+    _refresh ??= Timer.periodic(_refreshEvery, (_) {
+      if (mounted) {
+        _write();
+      }
+    });
+    ref.watch(
+      runtimeNodeSnapshotProvider.select(
+        (RuntimeTransportSnapshot snapshot) => snapshot.localAddress,
+      ),
+    );
+    ref.watch(
+      socialHubControllerProvider.select(
+        (SocialHubState state) => state.lifecycle.visibility,
+      ),
+    );
     ref.watch(
       appSettingsControllerProvider.select(
         (AppSettings settings) => settings.notificationPrivacy,
@@ -105,19 +144,10 @@ class _LockedNoticeKitBridgeState extends ConsumerState<LockedNoticeKitBridge> {
         state.snapshotUnreadable) {
       return;
     }
-    final AppSettings settings = ref.read(appSettingsControllerProvider);
-    final LockedNoticeKit kit = lockedNoticeKitOf(
+    final LockedNoticeKit kit = lockedNoticeKitFor(
       state,
-      privacy: settings.notificationPrivacy,
+      settings: ref.read(appSettingsControllerProvider),
       directory: ref.read(accountDirectoryHolderProvider).directory,
-      muted: <NoticeKind>{
-        for (final NoticeKind kind in NoticeKind.values)
-          if (settings.mutes(kind)) kind,
-      },
-      sounds: settings.notificationSounds,
-      inviteToken: settings.inviteToken,
-      kindLevels: settings.noticePrivacy,
-      groupMentionsOnly: settings.groupMentionsOnly,
       self: ref.read(runtimeNodeSnapshotProvider).localAddress,
     );
     final Map<String, dynamic> json = kit.toJson();

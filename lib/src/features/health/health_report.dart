@@ -30,7 +30,7 @@ class HealthItem {
   });
 
   /// Stable name: `network`, `peers`, `background`, `notifications`,
-  /// `battery`, `clock`, `storage`, `contacts`.
+  /// `battery`, `clock`, `storage`, `contacts`, `friend_logs`.
   final String id;
   final HealthLevel level;
   final String title;
@@ -66,6 +66,8 @@ class HealthInputs {
     this.clockPeers = 0,
     this.storage,
     this.contactsBackupFailing = false,
+    this.friendLogsFull = 0,
+    this.contactsBackupTrimmed = 0,
   });
 
   final HealthNetState net;
@@ -93,6 +95,14 @@ class HealthInputs {
   /// The newest backup of friends and groups could not be saved with
   /// friends (`ContactsBackupNotice`).
   final bool contactsBackupFailing;
+
+  /// Friends whose posts or reactions this phone takes no more of: it keeps
+  /// as much of each friend as its limits allow (`LedgerRoomNotice`).
+  final int friendLogsFull;
+
+  /// Friends or groups saved without some of what they hold, or left out,
+  /// to fit the newest backup (`ContactsBackupNotice.trimmed`).
+  final int contactsBackupTrimmed;
 }
 
 @immutable
@@ -141,7 +151,11 @@ HealthReport buildHealthReport(HealthInputs i) {
     if (i.isAndroid) _battery(i),
     _clock(i),
     _storage(i),
-    if (i.contactsBackupFailing) _contactsBackup(),
+    if (i.contactsBackupFailing)
+      _contactsBackup()
+    else if (i.contactsBackupTrimmed > 0)
+      _contactsBackupTrimmed(i.contactsBackupTrimmed),
+    if (i.friendLogsFull > 0) _friendLogsFull(i.friendLogsFull),
   ]);
 }
 
@@ -299,6 +313,16 @@ HealthItem _notifications(HealthInputs i) {
 HealthItem _battery(HealthInputs i) {
   final String title = t('Oszczędzanie baterii');
   final bool? ok = i.permissions?[ZenPermission.battery];
+  // Android 12 and later, exact alarms not allowed (Android 14's default):
+  // the locked phone's wakes keep to the friends' ten-minute marks only as
+  // closely as Android's late windows let them.
+  final String? exact = i.permissions?[ZenPermission.exactAlarms] == false
+      ? t(
+          'Z zezwoleniem na „Dokładne alarmy” zablokowany telefon budzi się '
+          'równo z telefonami znajomych, co pomaga baterii.',
+        )
+      : null;
+  String withExact(String detail) => exact == null ? detail : '$detail $exact';
   if (ok == null) {
     return HealthItem(
       id: 'battery',
@@ -312,15 +336,17 @@ HealthItem _battery(HealthInputs i) {
           id: 'battery',
           level: HealthLevel.ok,
           title: title,
-          detail: t('Android nie usypia Zen.'),
+          detail: withExact(t('Android nie usypia Zen.')),
         )
       : HealthItem(
           id: 'battery',
           level: HealthLevel.warn,
           title: title,
-          detail: t(
-            'Android może usypiać Zen przy zgaszonym ekranie, wtedy '
-            'wiadomości i alarmy się spóźniają.',
+          detail: withExact(
+            t(
+              'Android może usypiać Zen przy zgaszonym ekranie, wtedy '
+              'wiadomości i alarmy się spóźniają.',
+            ),
           ),
           fix: HealthFix.permissions,
         );
@@ -414,6 +440,48 @@ HealthItem _contactsBackup() => HealthItem(
   detail: t(
     'Nie udało się zapisać u znajomych kopii listy znajomych i grup. '
     'Zen spróbuje znowu przy następnej zmianie listy.',
+  ),
+);
+
+HealthItem _friendLogsFull(int friends) => HealthItem(
+  id: 'friend_logs',
+  level: HealthLevel.warn,
+  title: t('Wpisy znajomych'),
+  detail: tn(
+    friends,
+    one:
+        'Wpisy {n} znajomego zajęły całe miejsce, jakie telefon na nie '
+        'daje: jego nowe posty i reakcje tu nie docierają. To, co już jest, '
+        'zostaje. Zwykle pomaga, gdy ta osoba zaktualizuje Zen.',
+    few:
+        'Wpisy {n} znajomych zajęły całe miejsce, jakie telefon na nie '
+        'daje: ich nowe posty i reakcje tu nie docierają. To, co już jest, '
+        'zostaje. Zwykle pomaga, gdy te osoby zaktualizują Zen.',
+    many:
+        'Wpisy {n} znajomych zajęły całe miejsce, jakie telefon na nie '
+        'daje: ich nowe posty i reakcje tu nie docierają. To, co już jest, '
+        'zostaje. Zwykle pomaga, gdy te osoby zaktualizują Zen.',
+  ),
+);
+
+HealthItem _contactsBackupTrimmed(int n) => HealthItem(
+  id: 'contacts',
+  level: HealthLevel.warn,
+  title: t('Kopia listy znajomych'),
+  detail: tn(
+    n,
+    one:
+        'Kopia listy znajomych i grup u znajomych jest zapisana, ale {n} '
+        'pozycja była za duża: zapisano ją bez nazw członków, opisu albo '
+        'listy osób, które odeszły (lub pominięto).',
+    few:
+        'Kopia listy znajomych i grup u znajomych jest zapisana, ale {n} '
+        'pozycje były za duże: zapisano je bez nazw członków, opisu albo '
+        'listy osób, które odeszły (lub pominięto).',
+    many:
+        'Kopia listy znajomych i grup u znajomych jest zapisana, ale {n} '
+        'pozycji było za dużych: zapisano je bez nazw członków, opisu albo '
+        'listy osób, które odeszły (lub pominięto).',
   ),
 );
 

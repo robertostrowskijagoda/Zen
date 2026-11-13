@@ -11,6 +11,7 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/health/health_report.dart';
 import 'package:zen/src/features/ledger/contacts_backup.dart';
+import 'package:zen/src/features/ledger/ledger_fold.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -128,6 +129,8 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
         clockPeers: clock.peerCount,
         storage: _storage,
         contactsBackupFailing: ContactsBackupNotice.instance.failing,
+        friendLogsFull: LedgerRoomNotice.instance.full,
+        contactsBackupTrimmed: ContactsBackupNotice.instance.trimmed,
       ),
     );
   }
@@ -187,6 +190,7 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
             listenable: Listenable.merge(<Listenable>[
               clock,
               ContactsBackupNotice.instance,
+              LedgerRoomNotice.instance,
             ]),
             builder: (BuildContext context, Widget? _) {
               final HealthReport report = _report(shell, clock);

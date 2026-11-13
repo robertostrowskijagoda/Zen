@@ -308,12 +308,22 @@ final class PyrEmitChange {
   bool get pending => !cancelled && !done;
 }
 
+/// The most friends a verdict read outside the pyramid keeps as passing it
+/// on ([PyrOutsideVerdict.by]).
+const int kPyrVerdictSources = 32;
+
 /// A verdict as somebody outside the pyramid reads it: the verdict signed
 /// by its court's cards (a [PyrT.verdict], or the [PyrT.appealAnswer] of a
-/// higher level that gave it), passed on by a friend who is a member, with the
-/// address records the accused signed (where it shows) and, when it was
-/// overturned, the accused's appeal and the answer that accepted it.
-/// What only the friend says (the pseudonym) is not signed.
+/// higher level that gave it), passed on by friends who are members, with
+/// the address records the accused signed (where it shows) and, when it
+/// was overturned, the accused's appeal and the answer that accepted it.
+///
+/// A phone outside the pyramid holds none of its records: it cannot tell
+/// the court's one-time cards from any key, nor the accused's key from a
+/// made-up one — that takes the whole pyramid. So a verdict here is the
+/// word of the friends who passed it on ([by]), and shows as theirs; a
+/// friend's word that it was overturned takes back only that friend's
+/// word, never another's ([overturnedBy]).
 @immutable
 final class PyrOutsideVerdict {
   const PyrOutsideVerdict({
@@ -321,7 +331,8 @@ final class PyrOutsideVerdict {
     required this.name,
     this.addrRecords = const <PyramidRecord>[],
     this.overturn = const <PyramidRecord>[],
-    this.from = '',
+    this.by = const <String, int>{},
+    this.overturnedBy = const <String>{},
   });
 
   final PyramidRecord record;
@@ -333,9 +344,17 @@ final class PyrOutsideVerdict {
   /// records, checked on arrival).
   final List<PyramidRecord> addrRecords;
 
-  /// [appeal, answer] when overturned (checked on arrival).
+  /// [appeal, answer] of the first overturning passed on (checked on
+  /// arrival).
   final List<PyramidRecord> overturn;
-  final String from;
+
+  /// The friends (device addresses, normalized) who passed it on → the
+  /// newest change each of them sent. Only this phone writes it: what a
+  /// frame says about it is never read.
+  final Map<String, int> by;
+
+  /// Those of [by] who passed on its overturning.
+  final Set<String> overturnedBy;
 
   String get id => record.id;
   String get pyramid => record.pyramid;
@@ -347,6 +366,12 @@ final class PyrOutsideVerdict {
       record.body['until'] is int ? record.integer('until') : null;
   bool get overturned => overturn.length == 2;
 
+  /// The friends of [by] who still say it stands.
+  List<String> get standing => <String>[
+    for (final String k in by.keys)
+      if (!overturnedBy.contains(k)) k,
+  ]..sort();
+
   /// Every address it shows at: those the verdict names and those the
   /// accused signed since.
   Set<String> get addresses => <String>{
@@ -355,7 +380,9 @@ final class PyrOutsideVerdict {
     for (final PyramidRecord x in addrRecords) x.str('addr'),
   };
 
-  bool activeAt(int now) => !overturned && (until == null || now < until!);
+  /// Whether it is in force at [now] by its own time; who stands by it
+  /// decides the rest ([standing]).
+  bool activeAt(int now) => until == null || now < until!;
 
   /// The newest change it carries (the verdict, an address since, or its
   /// overturning).
@@ -376,13 +403,16 @@ final class PyrOutsideVerdict {
       'ov': <Map<String, dynamic>>[
         for (final PyramidRecord r in overturn) r.toJson(),
       ],
-    if (from.isNotEmpty) 'f': from,
+    if (by.isNotEmpty) 'by': by,
+    if (overturnedBy.isNotEmpty) 'ob': overturnedBy.toList()..sort(),
   };
 
   /// Parses one (signatures are checked by the service); null for
   /// anything but a verdict-giving record with its accused. Address
-  /// records other than the accused's own are dropped.
-  static PyrOutsideVerdict? fromJson(Object? json, {String? from}) {
+  /// records other than the accused's own are dropped. Who passed it on
+  /// ([by], [overturnedBy]) is read only with [stored] (this phone's own
+  /// file): a frame from a friend never says who else stands by it.
+  static PyrOutsideVerdict? fromJson(Object? json, {bool stored = false}) {
     if (json is! Map) {
       return null;
     }
@@ -400,8 +430,33 @@ final class PyrOutsideVerdict {
       if (ov is List)
         for (final Object? x in ov.take(2)) ?PyramidRecord.fromJson(x),
     ];
-    final Object? f = json['f'];
     final String accused = r.str('k');
+    final Map<String, int> by = <String, int>{};
+    final Set<String> down = <String>{};
+    if (stored) {
+      final Object? b = json['by'];
+      if (b is Map) {
+        for (final MapEntry<dynamic, dynamic> e in b.entries.take(
+          kPyrVerdictSources,
+        )) {
+          if (e.key is String && e.value is int) {
+            by[e.key as String] = e.value as int;
+          }
+        }
+      }
+      final Object? ob = json['ob'];
+      if (ob is List) {
+        down.addAll(ob.whereType<String>().where(by.containsKey));
+      }
+      // Kept before friends were told apart: the one friend it came from.
+      final Object? f = json['f'];
+      if (by.isEmpty && f is String && f.isNotEmpty) {
+        by[f] = r.at;
+        if (overturn.length == 2) {
+          down.add(f);
+        }
+      }
+    }
     return PyrOutsideVerdict(
       record: r,
       name: n is String ? String.fromCharCodes(n.runes.take(40)) : '',
@@ -418,13 +473,14 @@ final class PyrOutsideVerdict {
               ad,
       ],
       overturn: overturn.length == 2 ? overturn : const <PyramidRecord>[],
-      from: from ?? (f is String ? f : ''),
+      by: by,
+      overturnedBy: down,
     );
   }
 }
 
 /// A verdict as a profile shows it, from the records (a member) or from
-/// what member friends passed on (anybody else).
+/// what member friends passed on, as their word (anybody else).
 @immutable
 final class PyrVerdictView {
   const PyrVerdictView({
@@ -434,6 +490,7 @@ final class PyrVerdictView {
     required this.at,
     required this.name,
     this.until,
+    this.by = const <String>[],
   });
 
   final String id;
@@ -444,4 +501,8 @@ final class PyrVerdictView {
   /// The accused's pseudonym in the pyramid.
   final String name;
   final int? until;
+
+  /// Outside the pyramid: the names of the friends whose word it is (this
+  /// phone cannot check it). Empty for a member, who reads the records.
+  final List<String> by;
 }

@@ -3,7 +3,12 @@ import 'dart:typed_data';
 
 /// Whether [address] can be reached from the internet: not loopback, not
 /// a home or company network (RFC 1918, IPv6 ULA), not link-local, not the
-/// carrier's shared space (CGNAT, 100.64.0.0/10), not multicast.
+/// carrier's shared space (CGNAT, 100.64.0.0/10), not multicast, not an
+/// IPv6 tunnel (6to4, Teredo) or documentation range.
+///
+/// The IPv4 documentation ranges (192.0.2/24, 198.51.100/24, 203.0.113/24)
+/// pass: nothing on the internet answers there, so a probe goes nowhere and
+/// a bridge there never gets confirmed.
 ///
 /// Used both ways: a bridge is only announced on such an address, and a
 /// probe is only ever sent to one (so nobody can make us knock on doors in
@@ -24,12 +29,28 @@ bool isPublicAddress(InternetAddress address) {
   if (mapped) {
     return isPublicIpv4(b.sublist(12));
   }
-  // Only global unicast (2000::/3) counts.
+  // Only global unicast (2000::/3) counts: unique local (fc00::/7),
+  // link-local (fe80::/10), NAT64 (64:ff9b::/96, which names an IPv4
+  // address that may be a home one) and the rest lie outside it.
   if ((b[0] & 0xE0) != 0x20) {
     return false;
   }
-  // 2001:db8::/32 documentation, 2002::/16 6to4 relays.
-  if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0D && b[3] == 0xB8) {
+  if (b[0] == 0x20 && b[1] == 0x01) {
+    // 2001::/23 is the IETF's special-purpose block (Teredo 2001::/32,
+    // benchmarking, ORCHID): tunnel ends and test networks, nothing to
+    // announce; 2001:db8::/32 is documentation.
+    if ((b[2] & 0xFE) == 0 || (b[2] == 0x0D && b[3] == 0xB8)) {
+      return false;
+    }
+  }
+  // 2002::/16 6to4: the next 4 bytes are an IPv4 address the packet is
+  // tunnelled to, which may be a home one (2002:c0a8:101:: is
+  // 192.168.1.1), and 6to4 relays are deprecated (RFC 7526).
+  if (b[0] == 0x20 && b[1] == 0x02) {
+    return false;
+  }
+  // 3fff::/20 documentation (RFC 9637).
+  if (b[0] == 0x3F && b[1] == 0xFF && (b[2] & 0xF0) == 0) {
     return false;
   }
   return true;
