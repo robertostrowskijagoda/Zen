@@ -1103,9 +1103,11 @@ final class LedgerNode {
     _ready = true;
     // Logs whose writer started them over while this device was closed.
     _dropReadyRebases();
-    // This device's own logs as an earlier build left them.
-    for (final String kind in kFoldedSpaceKinds) {
-      _scheduleFold(kind);
+    // This device's own logs as an earlier build left them; a node that
+    // starts suspended looks once it has the ledger back ([resume]): until
+    // then it writes nothing, and a look made meanwhile would be lost.
+    if (!_suspended) {
+      _scheduleOwnFolds();
     }
     _settle();
     if (!_openedChanges.isClosed) {
@@ -1290,6 +1292,7 @@ final class LedgerNode {
       // Suspended again (or stopped) while catching up.
       return;
     }
+    _scheduleOwnFolds();
     if (_online) {
       _listen();
       _startSyncTimer();
@@ -1481,6 +1484,12 @@ final class LedgerNode {
 
   final Map<String, Timer> _foldTimers = <String, Timer>{};
   Future<void> _folding = Future<void>.value();
+
+  void _scheduleOwnFolds() {
+    for (final String kind in kFoldedSpaceKinds) {
+      _scheduleFold(kind);
+    }
+  }
 
   void _scheduleFold(String spaceKind) {
     if (_foldTimers.containsKey(spaceKind) || _stopped) {
