@@ -1021,9 +1021,16 @@ jobs:
               echo "::error::The draft of $TAG could not be made (gh's own message is above). If a published release of this tag was deleted, the tag's name is used up: release under the next version."
               exit 1
             }
+            # The list may not show a draft the moment it was made (1.17.1:
+            # the job stopped here and attached the files on a re-run).
             found=$(lookup)
+            for wait in 5 10 20 40; do
+              [ -n "$found" ] && break
+              sleep "$wait"
+              found=$(lookup)
+            done
             if [ -z "$found" ]; then
-              echo "::error::The draft of $TAG was made and is not in the list of releases."
+              echo "::error::The draft of $TAG was made and is not in the list of releases (run this job again: it attaches to that draft)."
               exit 1
             fi
           fi
