@@ -289,5 +289,7 @@ void main() {
       kReliableIdKey: 'later',
     });
     expect(holds.tagged('locked-keep'), kLockedWorkHoldsPerHour + 101);
-  });
+    // 701 messages sealed and written to the disk: a few seconds alone,
+    // over the 30 a test has beside the heavy ones on a busy computer.
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }
