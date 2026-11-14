@@ -371,7 +371,7 @@ final class LedgerArchive {
   static String _certPrint(Iterable<DeviceCertificate> certs) {
     final List<String> parts = <String>[
       for (final DeviceCertificate c in certs)
-        '${c.device}:${c.signature.hashCode}',
+        '${c.device}:${c.signature.hashCode}:${c.co?.signature.hashCode}',
     ]..sort();
     return parts.join(',');
   }
@@ -399,10 +399,30 @@ final class LedgerArchive {
         for (final Object? json in _list(file.$1['c']))
           ?DeviceCertificate.fromJson(json),
       ];
+      final Object? account = file.$1['a'];
+      final Object? seen = file.$1['seen'];
+      if (account is String && seen is Map) {
+        // Before the certificates: those without it count as seen with
+        // the first contact.
+        store.directory.restoreSeen(
+          account,
+          firstContact: file.$1['fc'] is int ? file.$1['fc'] as int : null,
+          seen: <String, DeviceSeen>{
+            for (final MapEntry<dynamic, dynamic> e in seen.entries)
+              if (e.key is String &&
+                  e.value is List &&
+                  (e.value as List).length == 2 &&
+                  (e.value as List)[0] is int)
+                e.key as String: DeviceSeen(
+                  (e.value as List)[0] as int,
+                  firstContact: (e.value as List)[1] == 1,
+                ),
+          },
+        );
+      }
       for (final DeviceCertificate cert in certs) {
         store.directory.trustCertificate(cert);
       }
-      final Object? account = file.$1['a'];
       if (account is String && certificatesKeyOf(account).endsWith(name)) {
         _savedCertificates[account] = _certPrint(certs);
       }
@@ -449,8 +469,8 @@ final class LedgerArchive {
     }
     await _loadCertificates(store, index);
     // Checked when they first came (and kept within the limits).
-    for (final DeviceRevocation r in await _readRevocations()) {
-      store.directory.trustRevocation(r);
+    for (final (DeviceRevocation r, int got) in await _readRevocations()) {
+      store.directory.trustRevocation(r, receivedAt: got);
     }
     _savedRevocations = store.directory.revocationRevision;
     for (final Object? a in _list(index['blocked'])) {
@@ -552,19 +572,21 @@ final class LedgerArchive {
     }
   }
 
-  /// The revocations on disk (none when the file is missing or damaged).
-  Future<List<DeviceRevocation>> _readRevocations() async {
+  /// The revocations on disk with when each was taken (`got`, 0 when not
+  /// said); none when the file is missing or damaged.
+  Future<List<(DeviceRevocation, int)>> _readRevocations() async {
     final Uint8List? raw = await readOrSetAsideOn(disk, revocationsKey);
     if (raw == null) {
-      return const <DeviceRevocation>[];
+      return const <(DeviceRevocation, int)>[];
     }
     try {
-      return <DeviceRevocation>[
+      return <(DeviceRevocation, int)>[
         for (final Object? json in _list(jsonDecode(utf8.decode(raw))))
-          ?DeviceRevocation.fromJson(json),
+          if (DeviceRevocation.fromJson(json) case final DeviceRevocation r)
+            (r, json is Map && json['got'] is int ? json['got'] as int : 0),
       ];
     } on FormatException {
-      return const <DeviceRevocation>[];
+      return const <(DeviceRevocation, int)>[];
     }
   }
 
@@ -635,7 +657,12 @@ final class LedgerArchive {
         revocationsKey,
         _jsonBytes(<Map<String, dynamic>>[
           for (final DeviceRevocation r in store.directory.revocations)
-            r.toJson(),
+            <String, dynamic>{
+              ...r.toJson(),
+              // When this phone took it: whether it came in time to answer
+              // another, or while its device still waited (a veto).
+              'got': store.directory.receivedAtOf(r) ?? 0,
+            },
         ]),
       );
       _savedRevocations = revocations;
@@ -677,6 +704,7 @@ final class LedgerArchive {
           .toList();
       final String print = _certPrint(certs);
       if (_savedCertificates[account] != print) {
+        final int? firstContact = directory.firstContactOf(account);
         await disk.write(
           certificatesKeyOf(account),
           _jsonBytes(<String, dynamic>{
@@ -685,6 +713,14 @@ final class LedgerArchive {
             'c': <Map<String, dynamic>>[
               for (final DeviceCertificate c in certs) c.toJson(),
             ],
+            // When each device was first seen here: a device without a
+            // co-signature counts a day after that.
+            'fc': ?firstContact,
+            'seen': <String, List<int>>{
+              for (final MapEntry<String, DeviceSeen> e
+                  in directory.seenOf(account).entries)
+                e.key: <int>[e.value.at, if (e.value.firstContact) 1 else 0],
+            },
           }),
         );
         _savedCertificates[account] = print;
@@ -809,7 +845,7 @@ final class LedgerArchive {
       final Map<dynamic, dynamic>? index = (await _readIndex()).index;
       if (index != null) {
         await _loadCertificates(store, index);
-        for (final DeviceRevocation r in await _readRevocations()) {
+        for (final (DeviceRevocation r, int _) in await _readRevocations()) {
           if (!store.directory.knowsRevocation(r)) {
             await store.applyRevocation(r);
           }

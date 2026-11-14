@@ -606,8 +606,19 @@ final class LedgerReplicator {
     }
     for (final Object? json in items.take(certificatesPerMessage)) {
       final DeviceCertificate? cert = DeviceCertificate.fromJson(json);
-      if (cert != null && store.awaitsCertificate(cert.account, cert.device)) {
+      if (cert == null) {
+        continue;
+      }
+      if (store.awaitsCertificate(cert.account, cert.device)) {
         await store.addCertificate(cert);
+      } else if (cert.account == store.ownAccount ||
+          (cert.co != null &&
+              store.directory.certificateOf(cert.account, cert.device) !=
+                  null)) {
+        // A device of this account friends saw waiting (the person may
+        // veto it), or a co-signature of a device known here (it may count
+        // now).
+        await store.directory.addCertificate(cert);
       }
     }
   }

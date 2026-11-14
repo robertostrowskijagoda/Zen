@@ -232,7 +232,10 @@ final class LedgerStore {
     this.maxBoundedBytes = kMaxUnknownBytes,
   }) : directory = directory ?? AccountDirectory(),
        clock = clock ?? HlcClock(),
-       _policies = policies ?? defaultSpacePolicy;
+       _policies = policies ?? defaultSpacePolicy {
+    // Whether a device waited its day is judged on this store's clock.
+    this.directory.now = this.clock.wallMillis;
+  }
 
   final AccountDirectory directory;
   final HlcClock clock;
@@ -402,14 +405,16 @@ final class LedgerStore {
     if (carried != null && !await directory.addCertificate(carried)) {
       return const IngestResult(IngestStatus.rejected, 'zły certyfikat');
     }
+    // The certificate kept here (a device keeps its first one, with what
+    // co-signed it since), not the one the entry carried.
     final DeviceCertificate? cert =
-        carried ?? directory.certificateOf(received.account, received.device);
+        directory.certificateOf(received.account, received.device) ?? carried;
     if (cert == null) {
       return _awaitCertificate(received);
     }
-    final LogEntry entry = carried == null
-        ? received.withCertificate(cert)
-        : received;
+    final LogEntry entry = identical(cert, carried)
+        ? received
+        : received.withCertificate(cert);
     if (!await entry.verifySignature()) {
       return const IngestResult(IngestStatus.rejected, 'zły podpis');
     }
@@ -844,13 +849,13 @@ final class LedgerStore {
         return false;
       }
       final DeviceCertificate? cert =
-          carried ?? directory.certificateOf(received.account, received.device);
+          directory.certificateOf(received.account, received.device) ?? carried;
       if (cert == null) {
         return false;
       }
-      final LogEntry entry = carried == null
-          ? received.withCertificate(cert)
-          : received;
+      final LogEntry entry = identical(cert, carried)
+          ? received
+          : received.withCertificate(cert);
       if (!await entry.verifySignature()) {
         return false;
       }
@@ -997,24 +1002,42 @@ final class LedgerStore {
       return -1;
     }
     int removed = 0;
+    // Every device of the account, not only the one named: in an account
+    // that co-signs, a cut-off also leaves out what its signer does not
+    // keep, and one cut-off may undo another.
     for (final MapEntry<String, Map<String, _WriterLog>> space
         in _logs.entries) {
       for (final MapEntry<String, _WriterLog> e in space.value.entries) {
         final _WriterLog log = e.value;
-        if (log.account != revocation.account ||
-            log.device != revocation.device) {
+        bool allows(int seq) => directory.allowsEntry(
+          account: log.account,
+          device: log.device,
+          writer: e.key,
+          seq: seq,
+          space: space.key,
+        );
+        if (log.account != revocation.account || allows(log.head + 1)) {
           continue;
         }
-        final int keep =
-            revocation.cutoffs[cutoffKey(e.key, space.key)] ??
-            revocation.cutoffs[e.key] ??
-            0;
-        if (log.head > keep) {
-          final int before = log.entries.length;
-          log.truncate(keep);
-          removed += before - log.entries.length;
-        }
         log.clearPending();
+        if (log.head == log.base || allows(log.head)) {
+          continue;
+        }
+        // What a cut-off allows is a start of the log: the last entry
+        // allowed is found by halves.
+        int low = log.base;
+        int high = log.head - 1;
+        while (low < high) {
+          final int mid = (low + high + 1) ~/ 2;
+          if (allows(mid)) {
+            low = mid;
+          } else {
+            high = mid - 1;
+          }
+        }
+        final int before = log.entries.length;
+        log.truncate(low);
+        removed += before - log.entries.length;
       }
     }
     _full.toList().forEach(_recheckFull);
