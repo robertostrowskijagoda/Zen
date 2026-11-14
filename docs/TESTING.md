@@ -408,7 +408,10 @@ main dialogs on 320 × 568 with a 260 dp keyboard in Polish, German and
 Arabic at text 100% and 130%, and guards that every `AlertDialog` scrolls
 and that feature code uses direction-aware paddings and alignments;
 `test/call_compact_test.dart` checks the small call window and
-picture-in-picture sizes.
+picture-in-picture sizes; `test/call_screen_awake_test.dart` which calls keep
+the screen on (video, loudspeaker or headset, from the first ring of an
+outgoing call, not at the ear) and that it is asked of the platform once
+per change and released when the call ends.
 
 ### 4.1 Pictures for the user guide (`tool/ui_tour/docs_screens_test.dart`)
 
@@ -931,7 +934,8 @@ pinned, a browser without a confirmed one is filled like any other app),
 who signs an APK as Android verified it, with its lineage (`ApkSignersTest`),
 the window of an inexact alarm that ends on the ten-minute grid
 (`InexactAlarmWindowTest`) and a call camera's frame-rate ranges read in
-frames a second whatever unit the camera reports in (`CallCameraRangesTest`). The CI job
+frames a second whatever unit the camera reports in (`CallCameraRangesTest`), and
+the screen kept on for a running call after its ringing ends (`CallScreenKeepOnTest`). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
 

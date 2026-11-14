@@ -77,7 +77,10 @@ object ZenCallBridge {
                     result.success(canUseFullScreenIntent(context))
                 }
                 "setCallKeepScreenOn" -> {
-                    keepOn.call = call.arguments as? Boolean ?: false
+                    // Calls run only in the app's engine, on its window.
+                    if (context is Activity) {
+                        keepOn.call = call.arguments as? Boolean ?: false
+                    }
                     result.success(applyKeepScreenOn(context))
                 }
                 "setRingingCallActive" -> {
@@ -643,8 +646,12 @@ object ZenCallBridge {
         if (active) {
             wakeUpScreen(context)
         }
-        keepOn.ringing = active
-        applyKeepScreenOn(context)
+        if (context is Activity) {
+            // Only the app's window: the background service's engine has
+            // none, and its word must not undo the app's.
+            keepOn.ringing = active
+            applyKeepScreenOn(context)
+        }
         if (context is Activity) {
             // MainActivity contains sensitive user conversations and must never be displayed
             // over the keyguard without unlocking. Only IncomingCallActivity is shown

@@ -781,6 +781,20 @@ back, and for the picture coming in its frames a second and freezes; a
 `Call camera` line says what the camera was asked for and which frame-rate
 range it offered, ran at and was pinned to.
 
+**The screen during a call** (since 1.17.5, `call_screen_awake.dart`,
+`CallScreenKeepOn.kt`): the app's window keeps the screen on
+(`FLAG_KEEP_SCREEN_ON`) while a 1:1 or group call is a video call (its kind
+or this side's camera) or is heard out loud (loudspeaker, or a headset,
+which shows as the loudspeaker), from the first ring of an outgoing call
+(and from the answer of an incoming one) to its end. It is decided above
+the call screen, the call bar and picture-in-picture, so none of them takes
+it away; the flag is kept apart from the incoming ringing's own (whose end
+used to clear it) and put back on every new window of the app. A voice call
+at the ear does not keep it on: Zen has no proximity handling, so there the
+phone's own timeout applies. The technical log says `Call screen kept on
+(reason)` and `Call screen keep-on released`, with whether the app's window
+took it then. Up to 1.17.1 only a ringing incoming call kept the screen on.
+
 **Group calls** (`groupId` and `callId` mandatory): `group_call_invite`,
 `group_call_join`, `group_call_state`, `group_call_leave`, `group_call_decline`,
 `gc_offer`, `gc_answer` with `groupName`, `kind`, `participants` (address list),

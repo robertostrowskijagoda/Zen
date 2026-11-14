@@ -324,6 +324,16 @@ darker or grainier rather than slow. The picture also starts sharp instead
 of taking several seconds. On a weak connection the frames keep coming at a
 smaller size: a soft picture rather than a frozen one.
 
+The screen stays on for the whole of a video call, and of a voice call on
+the loudspeaker or a headset, from the first ring of a call you make to its
+end, however the call was answered (in the app, on the lock screen, from the
+notification) and whatever shows it (the call screen, the call bar over the
+app, the small window over other apps). It goes back to the phone's usual
+timeout when the call ends. A voice call held at the ear is left to the
+phone's own screen timeout, as before. Before, only a call that was still
+ringing kept the screen on, and on most phones a call went dark after the
+screen timeout when nobody touched it.
+
 **Busy and missed calls.** A call that comes while another one rings (in
 or out) or is under way gets *busy*: the caller sees *{name} is busy*, the
 call shows as missed for you, and the call already there goes on. A ring
