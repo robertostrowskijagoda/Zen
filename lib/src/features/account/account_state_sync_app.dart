@@ -189,7 +189,8 @@ final class RelayMailboxSyncDomain extends _PokedDomain {
 }
 
 /// The dating profile and its settings (with the photos).
-final class DatingSyncDomain extends _PokedDomain {
+final class DatingSyncDomain extends _PokedDomain
+    implements AccountSyncMarkedDeletions {
   DatingSyncDomain(this.ref, this.disk);
 
   final Ref ref;
@@ -244,6 +245,14 @@ final class StoredStateSyncDomain extends _PokedDomain {
     await disk.write(key, _bytes(state));
     await reload();
   }
+}
+
+/// A stored state of meetings and circles ([kSyncedMeetKeys]): kept with no
+/// deletion markers of its own, so its deletions go over every start of
+/// the log ([AccountSyncMarkedDeletions]).
+final class MeetStateSyncDomain extends StoredStateSyncDomain
+    implements AccountSyncMarkedDeletions {
+  MeetStateSyncDomain(super.key, super.disk, super.reload);
 }
 
 /// A copy kept for a recovery: the newest state of the device that uses
@@ -310,7 +319,8 @@ Future<Map<String, Object?>?> heldAccountState(
 
 /// The profile: name, status, about, visibility, nationalities and the
 /// photos (as files sealed for the account's devices).
-final class ProfileSyncDomain extends _PokedDomain {
+final class ProfileSyncDomain extends _PokedDomain
+    implements AccountSyncMarkedDeletions {
   ProfileSyncDomain(this.ref, this.node, {this.policy});
 
   final Ref ref;
@@ -709,11 +719,11 @@ final class AccountDevicesKeeper {
         () => ref.read(circleServiceProvider).load(),
       ),
     };
-    final List<StoredStateSyncDomain> meet = <StoredStateSyncDomain>[
+    final List<MeetStateSyncDomain> meet = <MeetStateSyncDomain>[
       for (final String key in kSyncedMeetKeys)
-        StoredStateSyncDomain(key, disk, services[key]!.$2),
+        MeetStateSyncDomain(key, disk, services[key]!.$2),
     ];
-    for (final StoredStateSyncDomain d in meet) {
+    for (final MeetStateSyncDomain d in meet) {
       _listen(services[d.key]!.$1(), d);
     }
     // "Notatki dla siebie": the same notes on every device, merged note by
