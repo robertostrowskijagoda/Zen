@@ -149,6 +149,21 @@ const int kDatingMatchNearPerFriend = 1;
 /// the test.
 const int kDatingMatchFarPerFriend = 40;
 
+/// The same match test asked again (with the same key, the same way: an
+/// answer lost, asked again, or a copy that came twice) gets the same
+/// answer again, at most this many more times. It tells nothing new and
+/// opens only for the asker, and it does not count against the limits
+/// above, so a lost answer does not cost the two people their match.
+const int kDatingMatchRepeats = 2;
+
+/// A question about a lantern (its keys, then the match test) that got no
+/// answer goes again after this long, as long as the lantern is asked
+/// about at all (3 days)…
+const Duration kDatingAskAgainAfter = Duration(hours: 12);
+
+/// …and is sent this many times in all, at most.
+const int kDatingAskTries = 3;
+
 /// Match tests answered for a lantern made for an introduction (only the
 /// one introduced asks).
 const int _introAnswers = 2;
@@ -1325,6 +1340,7 @@ final class DatingService extends ChangeNotifier {
       return;
     }
     await _shareKeys();
+    await _askAgain(t);
     final bool due = t - _publishedAt >= kDatingPublishEvery.inMilliseconds;
     if (!force && !due) {
       return;
@@ -3042,15 +3058,120 @@ final class DatingService extends ChangeNotifier {
     }
     asked
       ..['lx'] = base64Url.encode(x)
-      ..['lq'] = base64Url.encode(pq);
+      ..['lq'] = base64Url.encode(pq)
+      // The match test is a question of its own ([_askAgain]).
+      ..['st'] = _now()
+      ..['tr'] = 1;
+    await _save();
+    await _askMatch(id, mark, x, pq);
+  }
+
+  /// Sends the match test of the lantern [id] (keys [x], [pq]) to [mark].
+  Future<void> _askMatch(
+    String id,
+    String mark,
+    Uint8List x,
+    Uint8List pq,
+  ) async {
+    final RelayIdentity? identity = _identity;
+    if (identity == null) {
+      return;
+    }
     final Map<String, String> box = await DatingBox.seal(
       me: identity,
       recipient: x,
       recipientPq: pq,
       payload: <String, dynamic>{'k': 'match', 'id': id, 'pq': myPq},
     );
-    await _save();
     await _route(id, mark, box, from: null);
+  }
+
+  /// Questions about lanterns that got no answer for [kDatingAskAgainAfter]
+  /// (an answer, or the keys, lost on the way) go again, the same question
+  /// to the same mark, [kDatingAskTries] times in all: the holder answers
+  /// the same question with the same answer, so asking twice costs
+  /// nothing. Every phone asks alike, with dating on or off.
+  Future<void> _askAgain(int t) async {
+    bool changed = false;
+    for (final MapEntry<String, Map<String, dynamic>> e
+        in _asked.entries.toList()) {
+      final Map<String, dynamic> asked = e.value;
+      final Object? mark = asked['m'];
+      final Object? sent = asked['st'] ?? asked['at'];
+      final Object? tries = asked['tr'] ?? 1;
+      if (mark is! String ||
+          sent is! int ||
+          tries is! int ||
+          tries >= kDatingAskTries ||
+          t - sent < kDatingAskAgainAfter.inMilliseconds) {
+        continue;
+      }
+      asked
+        ..['st'] = t
+        ..['tr'] = tries + 1;
+      changed = true;
+      final Uint8List? x = decodeRelayKey(asked['lx']);
+      final Uint8List? pq = decodeHybridPublicKey(asked['lq']);
+      if (x == null || pq == null) {
+        await _route(e.key, mark, const <String, dynamic>{'lk': 1}, from: null);
+      } else {
+        await _askMatch(e.key, mark, x, pq);
+      }
+    }
+    if (changed) {
+      await _save();
+    }
+  }
+
+  /// The match test of the lantern [id] asked again with the key
+  /// [senderKey] the same way ([slot]) as one this phone answered and whose
+  /// answer was not used yet: the same answer goes again (sealed anew, for
+  /// that key only), at most [kDatingMatchRepeats] times. Whether it did.
+  Future<bool> _answerAgain(
+    String id,
+    String slot,
+    String senderKey,
+    String? mark,
+    _OwnLantern lantern,
+  ) async {
+    String? answerId;
+    for (final MapEntry<String, Map<String, dynamic>> e in _answers.entries) {
+      if (e.value['l'] == id &&
+          e.value['sl'] == slot &&
+          e.value['k'] == senderKey) {
+        answerId = e.key;
+        break;
+      }
+    }
+    final Map<String, dynamic>? had = answerId == null
+        ? null
+        : _answers[answerId];
+    if (had == null || mark == null) {
+      return false;
+    }
+    final int repeats = had['rp'] is int ? had['rp'] as int : 0;
+    final Uint8List? sender = decodeRelayKey(senderKey);
+    final Uint8List? askerPq = decodeHybridPublicKey(had['pq']);
+    if (repeats >= kDatingMatchRepeats || sender == null || askerPq == null) {
+      // Answered as often as it may be: nothing, and not a new answer
+      // either.
+      return true;
+    }
+    had['rp'] = repeats + 1;
+    final Map<String, String> box = await DatingBox.seal(
+      me: lantern.box,
+      recipient: sender,
+      recipientPq: askerPq,
+      payload: <String, dynamic>{
+        'k': 'match_re',
+        'id': had['r'],
+        'a': answerId,
+        'o': had['o'],
+        'n': had['n'],
+      },
+    );
+    await _route(mark, null, box, from: null);
+    return true;
   }
 
   /// Someone runs the match test with this phone's lantern [lantern]. The
@@ -3088,6 +3209,9 @@ final class DatingService extends ChangeNotifier {
       return;
     }
     final String slot = lantern.intro ? 'x' : '${d == 1 ? 'n' : 'f'}|$from';
+    if (await _answerAgain(id, slot, senderKey, mark, lantern)) {
+      return;
+    }
     final int used = lantern.asks[slot] ?? 0;
     final int limit = lantern.intro
         ? _introAnswers
@@ -3149,6 +3273,9 @@ final class DatingService extends ChangeNotifier {
       'pq': pq,
       'n': nonce,
       'at': _now(),
+      // What [_answerAgain] gives the same question again.
+      'sl': slot,
+      'o': offer,
     };
     while (_answers.length > _answersMax) {
       _answers.remove(_answers.keys.first);

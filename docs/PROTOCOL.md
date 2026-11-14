@@ -952,6 +952,21 @@ messages and no matches: one rule decides wherever a match can reach it. The
 hide list holds against friends; the sealed match test (`match`, `match_re`)
 holds only against apps that follow the rules.
 
+Answers to a lantern: per lantern, a friend asking from one step away is
+answered once (`kDatingMatchNearPerFriend`) and questions that come through
+one friend from further 40 times (`kDatingMatchFarPerFriend`), so several
+people asking through one friend, and another device of an account asking
+through a mutual friend, are each answered. A question that got no answer
+(the keys `lk` or the match test) goes again, the same question to the same
+mark, after 12 hours (`kDatingAskAgainAfter`), 3 times in all
+(`kDatingAskTries`), only while the lantern is asked about (3 days), with
+dating on or off alike. The holder answers the same question (the same key,
+the same way, its answer not used for a profile yet) with the same answer,
+`a`, `o` and `n` unchanged and sealed anew for that key, at most 2 more
+times (`kDatingMatchRepeats`), outside the limits above: a lost answer no
+longer costs a match, and a repeated or replayed question gives nobody
+anything new.
+
 ### 2.9 Relay mailboxes (`rly_*`)
 
 See 3.2. Types: `rly_ack`, `rly_announce`, `rly_announce_ack`, `rly_deposit`,
