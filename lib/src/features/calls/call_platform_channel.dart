@@ -312,6 +312,26 @@ Future<Map<String, bool>> checkAllPermissions() async {
   }
 }
 
+/// Keeps the screen on ([on]) for a running call, or lets it go
+/// (CallScreenKeepOn.kt, apart from the ringing's flag). Whether the app's
+/// window took it now (false: no window at the moment, it is set when one
+/// shows); null off Android.
+Future<bool?> setCallKeepScreenOn(bool on) async {
+  if (!Platform.isAndroid) {
+    return null;
+  }
+  try {
+    return await zenCallPlatformChannel.invokeMethod<bool>(
+          'setCallKeepScreenOn',
+          on,
+        ) ??
+        false;
+  } catch (error, stackTrace) {
+    logZenError('Keeping the screen on for the call failed', error, stackTrace);
+    return false;
+  }
+}
+
 /// Pins the auto-exposure of the call camera behind the video track
 /// [trackId] to the steadiest frame-rate range the camera offers
 /// ([chooseCameraFrameRateRange]; ZenCallCamera.kt): in poor light the

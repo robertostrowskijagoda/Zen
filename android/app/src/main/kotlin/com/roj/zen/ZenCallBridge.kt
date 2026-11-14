@@ -59,6 +59,9 @@ object ZenCallBridge {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var appContext: Context? = null
 
+    /** The ringing's and the running call's wish for the screen to stay on. */
+    private val keepOn = CallScreenKeepOn()
+
     fun register(flutterEngine: FlutterEngine, context: Context) {
         appContext = context.applicationContext
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
@@ -72,6 +75,10 @@ object ZenCallBridge {
                 }
                 "canUseFullScreenIntent" -> {
                     result.success(canUseFullScreenIntent(context))
+                }
+                "setCallKeepScreenOn" -> {
+                    keepOn.call = call.arguments as? Boolean ?: false
+                    result.success(applyKeepScreenOn(context))
                 }
                 "setRingingCallActive" -> {
                     val active = call.arguments as? Boolean ?: false
@@ -636,12 +643,9 @@ object ZenCallBridge {
         if (active) {
             wakeUpScreen(context)
         }
+        keepOn.ringing = active
+        applyKeepScreenOn(context)
         if (context is Activity) {
-            if (active) {
-                context.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                context.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
             // MainActivity contains sensitive user conversations and must never be displayed
             // over the keyguard without unlocking. Only IncomingCallActivity is shown
             // over the lock screen.
@@ -671,6 +675,24 @@ object ZenCallBridge {
                 }
             }
         }
+    }
+
+    /**
+     * The window of [context] (an Activity) keeps the screen on while the
+     * ringing or the running call wants it ([CallScreenKeepOn]). False when
+     * there is no window to set.
+     */
+    fun applyKeepScreenOn(context: Context): Boolean {
+        val activity = context as? Activity ?: return false
+        if (activity.isFinishing || activity.isDestroyed) {
+            return false
+        }
+        if (keepOn.wanted) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        return true
     }
 
     fun showOverLockWithoutUnlock(activity: Activity) {
