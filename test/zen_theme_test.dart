@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -392,10 +393,21 @@ void main() {
       expect(ZenMotion.clockRunning, isTrue);
 
       // A computer's window behind others (or the app in the background).
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      expect(ZenMotion.clockRunning, isFalse);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      expect(ZenMotion.clockRunning, isTrue);
+      // On a phone an inactive window is still on screen and the clock
+      // goes on (test/zen_motion_unfocused_test.dart).
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.inactive,
+        );
+        expect(ZenMotion.clockRunning, isFalse);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        expect(ZenMotion.clockRunning, isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
