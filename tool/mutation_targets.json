@@ -304,6 +304,12 @@
     ]
   },
   {
+    "file": "lib/src/features/calls/call_tones.dart",
+    "tests": [
+      "test/call_tones_test.dart"
+    ]
+  },
+  {
     "file": "lib/src/features/calls/call_screen_awake.dart",
     "tests": [
       "test/call_screen_awake_test.dart"

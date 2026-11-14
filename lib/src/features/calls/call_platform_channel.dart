@@ -312,22 +312,55 @@ Future<Map<String, bool>> checkAllPermissions() async {
   }
 }
 
-/// Keeps the screen on ([on]) for a running call, or lets it go
-/// (CallScreenKeepOn.kt, apart from the ringing's flag). Whether the app's
-/// window took it now (false: no window at the moment, it is set when one
-/// shows); null off Android.
-Future<bool?> setCallKeepScreenOn(bool on) async {
+/// Plays the call tone [tone] (call_tones.dart) on the call's audio
+/// (ZenCallTones.kt): a dialler tone, or Zen's chime [asset]. Whether it
+/// started; false off Android.
+Future<bool> playCallTone(String tone, {String? asset}) async {
+  if (!Platform.isAndroid) {
+    return false;
+  }
+  try {
+    return await zenCallPlatformChannel.invokeMethod<bool>(
+          'playCallTone',
+          <String, Object?>{'tone': tone, 'asset': asset},
+        ) ??
+        false;
+  } catch (error, stackTrace) {
+    logZenError('Playing the call tone failed', error, stackTrace);
+    return false;
+  }
+}
+
+/// Stops the call tone that plays (the ringback).
+Future<void> stopCallTone() async {
+  if (!Platform.isAndroid) {
+    return;
+  }
+  try {
+    await zenCallPlatformChannel.invokeMethod<void>('stopCallTone');
+  } catch (error, stackTrace) {
+    logZenError('Stopping the call tone failed', error, stackTrace);
+  }
+}
+
+/// What the screen does for a running call ([mode]: `normal`, `keepOn`,
+/// `proximity`; call_screen_awake.dart): the window flag kept apart from
+/// the ringing's (CallScreenKeepOn.kt) and the proximity wake lock
+/// (ZenCallProximity.kt). Whether it took: for `keepOn` whether the app's
+/// window had it now (false: set when one shows), for `proximity` whether
+/// the phone has the sensor for it; null off Android.
+Future<bool?> setCallScreenMode(String mode) async {
   if (!Platform.isAndroid) {
     return null;
   }
   try {
     return await zenCallPlatformChannel.invokeMethod<bool>(
-          'setCallKeepScreenOn',
-          on,
+          'setCallScreenMode',
+          mode,
         ) ??
         false;
   } catch (error, stackTrace) {
-    logZenError('Keeping the screen on for the call failed', error, stackTrace);
+    logZenError('Setting the call screen failed', error, stackTrace);
     return false;
   }
 }

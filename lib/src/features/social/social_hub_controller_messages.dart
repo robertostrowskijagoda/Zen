@@ -1023,6 +1023,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         if (!_isTeardownForCurrentCall(signal)) {
           return;
         }
+        // The call made here goes no further: the busy tone.
+        ref.read(callTonesProvider).busy();
         await _closeCallMediaSession();
         await _dismissCallNotification(signal.sender);
         state = state.copyWith(
@@ -1045,6 +1047,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         if (!_isTeardownForCurrentCall(signal)) {
           return;
         }
+        // The call made here goes no further: the busy tone.
+        ref.read(callTonesProvider).busy();
         await _closeCallMediaSession();
         await _dismissCallNotification(signal.sender);
         state = state.copyWith(
