@@ -1898,6 +1898,14 @@ A signed, append-only, per-device **log** for each **space**.
   password, a deleted note) leaves the log within about that time. A device
   away longer than 30 days gets the state as it is now; deletion markers
   inside the passwords and notes keep a deleted entry from coming back.
+  The dating profile, the profile and the meetings `meet/*` keep no
+  markers of their own: their deletions are written again after every
+  checkpoint also past those 30 days, the newest (by clock) first, up to
+  24 KiB of them per state (`kAccountSyncMarkerBytes`, as much as the
+  removed friends and groups carried over a start of the private log), so
+  a device away longer takes them instead of keeping, and passing on, what
+  was deleted (a dating profile switched off, a photo, a plan). A thing made
+  again after its deletion has a higher clock and is never undone by one.
   Changes opened from other devices are forgotten when Zen locks and
   opened again at unlock. A device that never had notes or passwords
   stores an empty set, so the others' arrive there. A Zen of 1.16.4 keeps

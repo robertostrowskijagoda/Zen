@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -43,6 +44,63 @@ final class _Domain implements AccountSyncDomain {
 
   @override
   Stream<void> get changes => _changes.stream;
+}
+
+/// A state whose deletions go over every start of the log.
+final class _MarkedDomain extends _Domain
+    implements AccountSyncMarkedDeletions {
+  _MarkedDomain(super.id, super.state);
+}
+
+/// One device's log, in memory, that starts over.
+final class _LogChannel implements AccountSyncChannel, AccountSyncLog {
+  final List<Map<String, dynamic>> log = <Map<String, dynamic>>[];
+
+  @override
+  String get device => 'dev-a';
+
+  @override
+  bool get hasOtherDevices => true;
+
+  @override
+  Iterable<Map<String, dynamic>> existing() => const <Map<String, dynamic>>[];
+
+  @override
+  Stream<Map<String, dynamic>> get incoming =>
+      const Stream<Map<String, dynamic>>.empty();
+
+  @override
+  Stream<void> get devicesChanged => const Stream<void>.empty();
+
+  @override
+  Future<bool> publish(Map<String, dynamic> body) async {
+    log.add(jsonDecode(jsonEncode(body)) as Map<String, dynamic>);
+    return true;
+  }
+
+  @override
+  Future<Object?> startOver() async => log.length;
+
+  @override
+  Future<int> dropBefore(Object start) async {
+    log.removeRange(0, start as int);
+    return start;
+  }
+
+  @override
+  void close() {}
+
+  @override
+  Future<void> reopen() async {}
+
+  /// The deletions in the log of [domain].
+  Map<String, Object?> deletions(String domain) => <String, Object?>{
+    for (final Map<String, dynamic> body in log)
+      if (body['d'] == domain)
+        for (final MapEntry<String, dynamic> u
+            in (body['u'] as Map<String, dynamic>).entries)
+          if ((u.value as Map<String, dynamic>)['x'] == 1) u.key: u.value,
+  };
 }
 
 /// The account's devices, reaching each other at once.
@@ -329,6 +387,84 @@ void main() {
     expect(a.settings.state['extra'], 7, reason: 'the default did not win');
     await a.sync.stop();
     await updated.stop();
+  });
+
+  test('a flood of deletions: those written again at a start of the log '
+      'after their 30 days are the newest within the bound, and only for a '
+      'state that keeps no markers of its own', () async {
+    int now = 1000000;
+    final List<String> ids = <String>[
+      for (int i = 0; i < 3000; i++) 'plan-${i.toString().padLeft(5, '0')}',
+    ];
+    final _MarkedDomain plans = _MarkedDomain('meet/plans', <String, Object?>{
+      'plans': <Object?>[
+        for (final String id in ids) <String, Object?>{'id': id},
+      ],
+    });
+    final _Domain settings = _Domain('settings', <String, Object?>{
+      'old': 1,
+      'recent': 2,
+      'kept': 3,
+    });
+    final _LogChannel channel = _LogChannel();
+    final AccountStateSync sync = AccountStateSync(
+      channel: channel,
+      disk: MemoryLedgerDisk(),
+      domains: <AccountSyncDomain>[plans, settings],
+      delay: const Duration(hours: 1),
+      scanEvery: const Duration(hours: 1),
+      now: () => now,
+    );
+    await sync.start();
+    await sync.flush();
+    // Deleted a hundred at a time, the first ones first; one plan stays.
+    settings.state.remove('old');
+    while ((plans.state['plans']! as List<Object?>).length > 1) {
+      final List<Object?> had = plans.state['plans']! as List<Object?>;
+      plans.state = <String, Object?>{
+        'plans': had.skip(min(100, had.length - 1)).toList(),
+      };
+      await sync.flush();
+    }
+    expect(sync.rebased, 0);
+
+    // Long after, one more deletion, and the log starts over.
+    now += const Duration(days: 40).inMilliseconds;
+    settings.state.remove('recent');
+    await sync.flush();
+    expect(sync.rebased, 1);
+    final Map<String, Object?> carried = channel.deletions('meet/plans');
+    // Counted as the sync counts them: each deletion on its own.
+    int bytes = 0;
+    carried.forEach((String key, Object? value) {
+      bytes += utf8.encode(jsonEncode(<String, Object?>{key: value})).length;
+    });
+    expect(bytes, lessThanOrEqualTo(kAccountSyncMarkerBytes));
+    expect(bytes, greaterThan(kAccountSyncMarkerBytes - 200), reason: 'full');
+    expect(carried.length, lessThan(ids.length - 1));
+    String unit(String id) => flattenAccountState(<String, Object?>{
+      'plans': <Object?>[
+        <String, Object?>{'id': id},
+      ],
+    }).keys.single;
+    // The newest deletions go, the oldest do not.
+    final List<String> deleted = ids.sublist(0, ids.length - 1);
+    final int kept = carried.length;
+    for (final String id in deleted.sublist(deleted.length - kept)) {
+      expect(carried.containsKey(unit(id)), isTrue, reason: id);
+    }
+    for (final String id in deleted.sublist(0, deleted.length - kept)) {
+      expect(carried.containsKey(unit(id)), isFalse, reason: id);
+    }
+    // A state with markers of its own: its old deletion is not written
+    // again, a recent one is.
+    expect(channel.deletions('settings').keys, <String>[
+      flattenAccountState(<String, Object?>{'recent': 0}).keys.single,
+    ]);
+    // What is still there goes as it is.
+    expect(jsonEncode(channel.log), contains(ids.last));
+    expect(jsonEncode(channel.log), contains('kept'));
+    await sync.stop();
   });
 
   test('the periodic scan waits while the states cannot be read', () async {
