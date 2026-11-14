@@ -129,8 +129,9 @@ double _warp(double t, double s1, double s2) {
 /// The shared clock of the perpetual animations: elapsed seconds (wrapping
 /// every hour), moved by a timer at [ZenMotion.framesPerSecond] — not by a
 /// ticker at the display's 60-120 frames a second — and only while some
-/// animation listens and the window is shown and active. A window behind
-/// others (inactive on a computer) or in the background draws nothing.
+/// animation listens and the window can be seen (on a phone also without
+/// the focus). A window behind others (inactive on a computer) or in the
+/// background draws nothing.
 final class _LowRateClock extends ChangeNotifier with WidgetsBindingObserver {
   _LowRateClock._();
 
@@ -157,10 +158,23 @@ final class _LowRateClock extends ChangeNotifier with WidgetsBindingObserver {
     _sync();
   }
 
+  /// Whether the window can be seen. On a phone "inactive" is still on
+  /// screen: Flutter on Android says it whenever the window loses the focus
+  /// (a system dialog or the notification shade over it, split screen, an
+  /// overlay window of another app), so a call's "Łączenie…" dots stood
+  /// still for as long as anything else had the focus. On a computer it is
+  /// a window behind others, which draws nothing.
   bool get _shown {
     final AppLifecycleState? state = WidgetsBinding.instance.lifecycleState;
-    return state == null || state == AppLifecycleState.resumed;
+    return state == null ||
+        state == AppLifecycleState.resumed ||
+        (state == AppLifecycleState.inactive && _inactiveIsShown);
   }
+
+  static bool get _inactiveIsShown => switch (defaultTargetPlatform) {
+    TargetPlatform.android || TargetPlatform.iOS => true,
+    _ => false,
+  };
 
   void _sync() {
     if (_clients > 0 && !_observing) {
