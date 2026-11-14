@@ -214,6 +214,15 @@ still exists:
 >    off and on during the call. The log of each phone has the
 >    `Call video codec: VP8 both ways` line and the `Call video:` lines of
 >    the first camera frame and the first remote frame on the screen.
+>    In a dim room, waving a hand in front of the camera, the picture stays
+>    smooth: the `Call camera` line says `pinned to` (or `already at`) a
+>    range, and the `Call stats` lines show `camera … captured at` 15 fps or
+>    more and `video out … 1280x720` with no `held back` of many seconds.
+>    With the phone's screen timeout at 30 seconds and nothing touched, the
+>    screen stays on through a video call, also one answered from the lock
+>    screen and one shrunk to the small window, and goes dark as usual after
+>    the call; the log has `Call screen kept on` and `Call screen keep-on
+>    released`.
 > 8. A GIF from the gallery as the profile photo keeps moving on both
 >    phones; a HEIC photo (an iPhone's, copied over) is taken as the profile
 >    photo and in a post.

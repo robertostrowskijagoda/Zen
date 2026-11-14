@@ -59,6 +59,9 @@ object ZenCallBridge {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var appContext: Context? = null
 
+    /** The ringing's and the running call's wish for the screen to stay on. */
+    private val keepOn = CallScreenKeepOn()
+
     fun register(flutterEngine: FlutterEngine, context: Context) {
         appContext = context.applicationContext
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
@@ -72,6 +75,29 @@ object ZenCallBridge {
                 }
                 "canUseFullScreenIntent" -> {
                     result.success(canUseFullScreenIntent(context))
+                }
+                "playCallTone" -> {
+                    result.success(
+                        ZenCallTones.play(
+                            context,
+                            call.argument<String>("tone") ?: "",
+                            call.argument<String>("asset"),
+                        ),
+                    )
+                }
+                "stopCallTone" -> {
+                    ZenCallTones.stop()
+                    result.success(null)
+                }
+                "setCallScreenMode" -> {
+                    val mode = call.arguments as? String ?: "normal"
+                    // Calls run only in the app's engine, on its window.
+                    if (context is Activity) {
+                        keepOn.call = mode == "keepOn"
+                    }
+                    val window = applyKeepScreenOn(context)
+                    val proximity = ZenCallProximity.hold(context, mode == "proximity")
+                    result.success(if (mode == "proximity") proximity else window)
                 }
                 "setRingingCallActive" -> {
                     val active = call.arguments as? Boolean ?: false
@@ -189,6 +215,16 @@ object ZenCallBridge {
                     val video = args?.get("video") as? Boolean ?: false
                     (context as? MainActivity)?.setPipCall(active, video)
                     result.success(null)
+                }
+                "callCameraFrameRates" -> {
+                    val trackId = call.argument<String>("trackId") ?: ""
+                    ZenCallCamera.frameRates(trackId) { result.success(it) }
+                }
+                "pinCallCameraFrameRate" -> {
+                    val trackId = call.argument<String>("trackId") ?: ""
+                    val min = call.argument<Int>("min") ?: 0
+                    val max = call.argument<Int>("max") ?: 0
+                    ZenCallCamera.pinFrameRate(trackId, min, max) { result.success(it) }
                 }
                 else -> result.notImplemented()
             }
@@ -627,11 +663,12 @@ object ZenCallBridge {
             wakeUpScreen(context)
         }
         if (context is Activity) {
-            if (active) {
-                context.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                context.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
+            // Only the app's window: the background service's engine has
+            // none, and its word must not undo the app's.
+            keepOn.ringing = active
+            applyKeepScreenOn(context)
+        }
+        if (context is Activity) {
             // MainActivity contains sensitive user conversations and must never be displayed
             // over the keyguard without unlocking. Only IncomingCallActivity is shown
             // over the lock screen.
@@ -661,6 +698,24 @@ object ZenCallBridge {
                 }
             }
         }
+    }
+
+    /**
+     * The window of [context] (an Activity) keeps the screen on while the
+     * ringing or the running call wants it ([CallScreenKeepOn]). False when
+     * there is no window to set.
+     */
+    fun applyKeepScreenOn(context: Context): Boolean {
+        val activity = context as? Activity ?: return false
+        if (activity.isFinishing || activity.isDestroyed) {
+            return false
+        }
+        if (keepOn.wanted) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        return true
     }
 
     fun showOverLockWithoutUnlock(activity: Activity) {

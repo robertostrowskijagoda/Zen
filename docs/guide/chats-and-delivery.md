@@ -307,9 +307,42 @@ decoded; it is now bound once the system has the stream, and again if
 decoded frames never reach the screen. The microphone, loudspeaker and
 camera buttons work while the call rings, not only once it is active. These
 fixes need both sides on this version; a call with an older Zen keeps the
-old behaviour on that side. The technical log (**Diagnostics**) shows for each call which
+old behaviour on that side. Switching the camera off and on during a call
+keeps the call, sound and all, when one of the two phones has Zen 1.17.5 or
+later; before, the call ended when the other side's camera was on. The
+technical log (**Diagnostics**) shows for each call which
 codecs were offered and how many video frames went out, came in and were
 shown.
+
+The picture of a video call stays sharp and steady when it moves and in
+poor light, on a connection that carries about 1.5 Mbit/s each way: 1280 x
+720 at 24 frames a second. A phone's camera used to slow down in poor light
+to 5 or 6 frames a second, each blurred by any movement; on Android Zen now
+holds the camera to its steadiest frame rate (24, or at least 15 where the
+camera has nothing steadier). In poor light the picture is then a little
+darker or grainier rather than slow. The picture also starts sharp instead
+of taking several seconds. On a weak connection the frames keep coming at a
+smaller size: a soft picture rather than a frozen one.
+
+The screen stays on for the whole of a video call, and of a voice call on
+the loudspeaker or a headset, from the first ring of a call you make to its
+end, however the call was answered (in the app, on the lock screen, from the
+notification) and whatever shows it (the call screen, the call bar over the
+app, the small window over other apps). It goes back to the phone's usual
+timeout when the call ends. A voice call held at the ear on the earpiece
+turns the screen off and ignores touches while the phone is at the ear,
+and lights it again when you take it away (Android, where the phone has a
+proximity sensor).
+
+When you call someone you hear the ringing tone while their phone rings,
+and a busy tone if they decline, are busy or do not answer; a short signal
+when a call drops and Zen tries to bring it back; and the chimes when it
+connects and ends. These sounds belong to the call: they play on the call's
+volume and route (earpiece, loudspeaker or headset) also on a phone set to
+silent or vibrate. An incoming call's ringing and message sounds still
+follow silent mode and Zen's notification settings. Before, only a call that was still
+ringing kept the screen on, and on most phones a call went dark after the
+screen timeout when nobody touched it.
 
 **Busy and missed calls.** A call that comes while another one rings (in
 or out) or is under way gets *busy*: the caller sees *{name} is busy*, the

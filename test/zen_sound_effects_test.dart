@@ -100,11 +100,14 @@ void main() {
     expect(output.played, isEmpty);
   });
 
-  test('a device that keeps quiet silences the effects', () async {
+  test("a device that keeps quiet silences the effects, not a call's "
+      'own sounds', () async {
     quiet = true;
     final ZenSoundEffects sounds = effects(TargetPlatform.android);
-    expect(await sounds.play(ZenSound.callEnded), isFalse);
+    expect(await sounds.play(ZenSound.messageSent), isFalse);
     expect(output.played, isEmpty);
+    expect(await sounds.play(ZenSound.callEnded), isTrue);
+    expect(output.played, <String>['assets/sounds/zen_call_ended.wav']);
   });
 
   test('a broken settings read falls back to on', () async {

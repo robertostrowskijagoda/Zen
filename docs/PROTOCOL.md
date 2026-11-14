@@ -585,7 +585,7 @@ kept underneath and nothing is sent for them:
 
 | type | Fields | Notes |
 |---|---|---|
-| `message` | `msgId`, `senderName`, `text`, `messageType` (`text|image|file|voice|video`), `attachmentData` (base64), `attachmentEncoding`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs`, `createdAt` (sender clock, ms), `ttl` (seconds), `re` (reply: `{id, s?: sender, t?: start of its text <=200}`), `fwd` (true: forwarded) | Reliable. One of `text`, `attachmentData` required. GIFs travel as ordinary image attachments. Frames up to 48 KB can be mailbox-relayed (section 3.2); the signal limit is 2 MiB. A reply to a disappearing message carries no `t`. |
+| `message` | `msgId`, `senderName`, `text`, `messageType` (`text|image|file|voice|video`), `attachmentData` (base64), `attachmentEncoding`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs`, `mediaWidth` + `mediaHeight` (a photo's or GIF's size in pixels, upright, read from its header when it was attached), `createdAt` (sender clock, ms), `ttl` (seconds), `re` (reply: `{id, s?: sender, t?: start of its text <=200}`), `fwd` (true: forwarded) | Reliable. One of `text`, `attachmentData` required. GIFs travel as ordinary image attachments. The bubble takes its size from `mediaWidth`/`mediaHeight` before the picture is there or decoded, so the chat does not move when it comes; the pair is taken only as whole numbers from 1 to 65536 and the box only in proportions up to 8:1, at most the bubble's width and 320 high (without the pair, from a Zen before 1.17.5, the bubble waits for the picture as before). The mailboxes pass both on with a large file's other fields. Frames up to 48 KB can be mailbox-relayed (section 3.2); the signal limit is 2 MiB. A reply to a disappearing message carries no `t`. |
 | `message_placeholder` | as `message` plus `chunkCount`, `chunkIndex`, `attachmentTransferBytes` | Announces a large attachment sent in chunks. |
 | `message_chunk` | `msgId`, `chunkIndex`, `chunkCount`, `chunkData` (base64), + placeholder fields | Not reliable; has its own protocol. Never compressed (high-entropy). |
 | `message_chunk_ack` | `msgId`, `chunkIndex` | |
@@ -672,7 +672,7 @@ needs `groupId` (<=256 chars).
 |---|---|---|
 | `group_invite` | `groupId`, `groupName` (<=100), `description` (<=1000), `memberAddresses`, `memberNames?`, `avatarPreset`, `senderName`, `inviteId`, `added?`, `at?`, `left?` | Reliable. `inviteId` is a nonce: re-sends of the same invitation do not revive a declined group. Also a member-list update: one that adds a person names that address in `added`, stamped `at` (the adder's clock, ms) and lists only the adder and the newcomer, so the others take the newcomer even when the adder's list is a step behind. The members' list sent to someone who just joined carries `left`: who left and when (address → leaver's time, at most 256). Only the creator's list is taken whole; any other member brings in one person per update (from a Zen before 1.16.5, the one unseen address of its list; a list with more is taken from nobody). |
 | `group_invite_ack` | `groupId`, `joined?` (`true`: accepted, not only arrived) | Reliable. |
-| `group_message` | `groupId`, `groupName`, `msgId`, `text` (<=64k chars), `senderName`, `timestamp`, `ttl`, `re`, `fwd`; for a file also `messageType`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs` and either `attachmentData` + `attachmentEncoding` (inline, files <=64 KB, or <=1 MB while no block store runs) or `media` (`{id, k, n, mime}`: the reference of `lg_blob_*` blocks, files <=24 MB) | Reliable. A member fetches `media` blocks with `lg_blob_want` from the sender or any other member; a member's device answers such requests from non-friends too. A text longer than members keep (64k characters) is refused on the sender's phone, not cut. Members choose `msgId` themselves: a message whose id another member's message already holds here is kept under a key of the sender's own (`<msgId>#` + the first 16 hex of SHA-256 of the author's address), never dropped as a copy; only the same author's message under the id is a copy. |
+| `group_message` | `groupId`, `groupName`, `msgId`, `text` (<=64k chars), `senderName`, `timestamp`, `ttl`, `re`, `fwd`; for a file also `messageType`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs`, `mediaWidth` + `mediaHeight` (as in `message`) and either `attachmentData` + `attachmentEncoding` (inline, files <=64 KB, or <=1 MB while no block store runs) or `media` (`{id, k, n, mime}`: the reference of `lg_blob_*` blocks, files <=24 MB) | Reliable. A member fetches `media` blocks with `lg_blob_want` from the sender or any other member; a member's device answers such requests from non-friends too. A text longer than members keep (64k characters) is refused on the sender's phone, not cut. Members choose `msgId` themselves: a message whose id another member's message already holds here is kept under a key of the sender's own (`<msgId>#` + the first 16 hex of SHA-256 of the author's address), never dropped as a copy; only the same author's message under the id is a copy. |
 | `group_leave` | `groupId`, `at?` (the leaver's clock, ms) | Reliable. Only the leaver's own `group_leave` takes it out of a list. A leave stamped before the leaver was last added by name is an older one and changes nothing. A phone that left or declined a group answers a message of it from someone who still counts it as a member with its leave again (at most every 6 h per member and group, never to a blocked person, only for a group it was in or invited to). Leaving or declining removes the group's chat, files and notifications on the leaver's phone. |
 | `group_post` | `groupId`, a board post `{id, a author, n name, x text <=2000, t created, v version, d? removed, m? photo reference {id, k, n, mime}}` | Reliable. A new, edited or removed post; the newest `v` wins. Photos up to 8 MB as `lg_blob_*` blocks. At most 20 new posts per member and group an hour; a board keeps 300. |
 | `group_board_have` / `group_board_put` | `groupId`, post ids and versions / up to 50 posts | Real-time sync between members: what I have, and the asker's missing posts written by the one answering. |
@@ -740,10 +740,80 @@ platform has registered its stream (it was bound when the track was first
 reported, before that, so in some calls it stayed bound to nothing while
 frames were decoded), and bound again if decoded frames never reach the
 screen; the microphone, loudspeaker and camera controls are shown and work
-while the call rings, not only once it is active. The technical log names per call the codecs offered, whether
+while the call rings, not only once it is active. A camera switched off
+during a call is a new `offer` whose camera section is `recvonly`; the
+answer's camera section never asks for more than the offer allows (a side
+with its camera on answers `sendonly` then, not `sendrecv`), and since
+1.17.5 the offering side also cuts an answer that asks for more (as every
+Zen up to 1.17.1 sent) to what its offer allowed before applying it:
+WebRTC refuses such an answer, and the call ended.
+The technical log names per call the codecs offered, whether
 the camera's frames were sealed and opened, the video packets sent and
 received and the frames decoded and shown (`call_video_trace.dart`, lines
 `Call video`).
+
+**Picture** (since 1.17.5, `call_video_quality.dart`): the camera is asked
+for 1280 x 720 at 24 frames in plain numbers (flutter_webrtc on Android
+skips `{ideal: …}` maps, so it had opened every camera at its own default).
+On Android the camera's auto-exposure frame-rate range is pinned once the
+camera runs (`ZenCallCamera.kt`) to the steadiest range the camera offers:
+the highest floor from 15 up to 24 frames (24-24 where there is one), else
+the lowest floor above 24; WebRTC's own pick was the lowest floor (7-30 on
+most phones), and in poor light the camera then sent 5-6 frames, each
+smeared by movement. The camera sender keeps between 150 kbit/s and 2.5
+Mbit/s at up to 24 frames, and keeps its frames before its resolution when
+the path is tight (`MAINTAIN_FRAMERATE`); the estimate of the path starts at
+1 Mbit/s (`x-google-start-bitrate` added to the camera's VP8 and H.264
+formats of the other side's description before it is applied) instead of
+300 kbit/s. What is promised: on a path that carries 1.5 Mbit/s or more
+each way, a sharp 1280 x 720 picture at a steady 24 frames (15 at the least
+in poor light where the camera has no steady range of 24), also when it
+moves; on a worse path the frames keep coming at a lower resolution, and
+below 150 kbit/s the path's own losses decide. A camera sends VP8, in
+software where the phone's WebRTC has no VP8 encoder (the frame encryption
+leaves only VP8 and H.264 readable, and H.264 left pictures black); the
+log line `encoder` says which. The `Call stats` lines (4 s, 15 s and a
+minute after the media connect and after each offer or answer) give the
+camera's size and frames captured, the frames sent with the encoder's aim
+(`target`), its average quantizer (`qp`, above about 80 blocky), how often
+it changed the resolution and how long the processor or the path held it
+back, and for the picture coming in its frames a second and freezes; a
+`Call camera` line says what the camera was asked for and which frame-rate
+range it offered, ran at and was pinned to.
+
+**The screen during a call** (since 1.17.5, `call_screen_awake.dart`,
+`CallScreenKeepOn.kt`): the app's window keeps the screen on
+(`FLAG_KEEP_SCREEN_ON`) while a 1:1 or group call is a video call (its kind
+or this side's camera) or is heard out loud (loudspeaker, or a headset,
+which shows as the loudspeaker), from the first ring of an outgoing call
+(and from the answer of an incoming one) to its end. It is decided above
+the call screen, the call bar and picture-in-picture, so none of them takes
+it away; the flag is kept apart from the incoming ringing's own (whose end
+used to clear it) and put back on every new window of the app. A voice call
+on the earpiece holds the proximity sensor instead
+(`PROXIMITY_SCREEN_OFF_WAKE_LOCK`, where the phone has it,
+`ZenCallProximity.kt`): the screen goes dark and ignores touches at the
+ear and lights up away from it; released (once nothing is close) when the
+call ends, goes to the loudspeaker or a headset, or becomes a video call.
+One decision (`callScreenModeFor`) chooses between the two. The technical
+log says `Call screen kept on (reason)`, `Call screen keep-on released`,
+`Call screen dark at the ear` and `Call screen proximity released`, with
+whether the window or the sensor took it. Up to 1.17.1 only a ringing
+incoming call kept the screen on, and nothing used the proximity sensor.
+
+**Call tones** (since 1.17.5, `call_tones.dart`, `ZenCallTones.kt`): the
+sounds of a call only this side hears go to the call's audio (Android's
+voice-call stream, usage `VOICE_COMMUNICATION`, at the call's volume and on
+its route) and play whatever the ringer says: the ringback while the other
+phone rings (a call made here, not a group's), the busy tone when the call
+is declined, finds the other side busy or is not answered, a short signal
+when the media drop and the call reconnects, and Zen's chimes when the call
+connects and ends (these two still follow "Dźwięki w aplikacji"). The
+ringback, busy and reconnecting tones are the phone's own (`ToneGenerator`,
+in its country's cadence). The ringing of an incoming call and the message
+sounds follow silent mode and the notification settings as before. On a
+computer only the chimes play (no ringer to follow); on iOS none (as
+before). Each tone leaves a `Call tone` line in the technical log.
 
 **Group calls** (`groupId` and `callId` mandatory): `group_call_invite`,
 `group_call_join`, `group_call_state`, `group_call_leave`, `group_call_decline`,
@@ -1898,6 +1968,14 @@ A signed, append-only, per-device **log** for each **space**.
   password, a deleted note) leaves the log within about that time. A device
   away longer than 30 days gets the state as it is now; deletion markers
   inside the passwords and notes keep a deleted entry from coming back.
+  The dating profile, the profile and the meetings `meet/*` keep no
+  markers of their own: their deletions are written again after every
+  checkpoint also past those 30 days, the newest (by clock) first, up to
+  24 KiB of them per state (`kAccountSyncMarkerBytes`, as much as the
+  removed friends and groups carried over a start of the private log), so
+  a device away longer takes them instead of keeping, and passing on, what
+  was deleted (a dating profile switched off, a photo, a plan). A thing made
+  again after its deletion has a higher clock and is never undone by one.
   Changes opened from other devices are forgotten when Zen locks and
   opened again at unlock. A device that never had notes or passwords
   stores an empty set, so the others' arrive there. A Zen of 1.16.4 keeps

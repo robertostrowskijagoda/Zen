@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_location.dart';
+import 'package:zen/src/domain/messages/chat_media_size.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
@@ -156,6 +157,8 @@ const List<String> _keys = <String>[
   kGroupLeftKey,
   kGroupAddsKey,
   kCallElsewhereKey,
+  kMediaWidthKey,
+  kMediaHeightKey,
   // What a reading told to the account's other devices covers.
   'r',
 ];
@@ -250,8 +253,26 @@ Object? _value(Random r, int depth) {
 Map<String, dynamic> _payload(Random r) => <String, dynamic>{
   for (int i = 0; i < r.nextInt(8); i++)
     _keys[r.nextInt(_keys.length)]: _value(r, 0),
+  // Now and then a picture's size, mostly near or past its bounds.
+  if (r.nextInt(6) == 0) ...<String, dynamic>{
+    kMediaWidthKey: _side(r),
+    kMediaHeightKey: _side(r),
+  },
   'type': _types[r.nextInt(_types.length)],
 };
+
+/// A side of a picture as one is sent, or one no picture has.
+Object? _side(Random r) => <Object?>[
+  1,
+  0,
+  -1,
+  kMaxChatMediaSide,
+  kMaxChatMediaSide + 1,
+  1 + r.nextInt(5000),
+  1e12,
+  0.5,
+  _value(r, 3),
+][r.nextInt(9)];
 
 /// What the parser lets through as a poll or a location is one the app can
 /// show: answers it can number, a place on Earth, a sharing no longer
@@ -264,6 +285,13 @@ void _expectSaneExtras(Map<String, dynamic>? extras) {
     final ChatPoll? poll = ChatPoll.fromJson(extras[kPollKey]);
     expect(poll, isNotNull);
     expect(poll!.options.length, inInclusiveRange(2, kMaxPollOptions));
+  }
+  if (extras.containsKey(kMediaSizeKey)) {
+    // A picture's size the bubble can use: whole pixels within bounds.
+    final ChatMediaSize? size = ChatMediaSize.fromJson(extras[kMediaSizeKey]);
+    expect(size, isNotNull);
+    expect(size!.width, inInclusiveRange(1, kMaxChatMediaSide));
+    expect(size.height, inInclusiveRange(1, kMaxChatMediaSide));
   }
   if (extras.containsKey(kLocationKey)) {
     final ChatLocation? at = ChatLocation.fromJson(extras[kLocationKey]);

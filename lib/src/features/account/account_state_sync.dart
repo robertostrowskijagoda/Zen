@@ -89,6 +89,23 @@ abstract interface class AccountSyncLog {
 /// aside with its value.
 abstract interface class AccountSyncPruning {}
 
+/// A domain whose state keeps no deletion markers of its own (as the
+/// passwords and the notes do): its deletions are written again into the
+/// log at every start over, also after [kAccountSyncTombstoneLife], the
+/// newest first up to [kAccountSyncMarkerBytes]. A device away for longer
+/// than that life otherwise came back with what was deleted, kept it, and
+/// sent it on to a device linked later.
+abstract interface class AccountSyncMarkedDeletions {}
+
+/// Most bytes of the deletions older than [kAccountSyncTombstoneLife] a
+/// [AccountSyncMarkedDeletions] domain writes again at a start over (as
+/// JSON units, before sealing): as much as the removed friends and groups
+/// carried over a start of the private log, some 200 deletions, so a
+/// flood of them never makes a start over grow without end. Older
+/// deletions past it go (deleted longest ago: every device has had the
+/// longest time to take them).
+const int kAccountSyncMarkerBytes = 24 * 1024;
+
 /// How often, at most, a device starts its log of changes over: a
 /// checkpoint, every unit as it is now (and the deletions of the last
 /// [kAccountSyncTombstoneLife]) written again after it, and everything
@@ -103,7 +120,9 @@ const Duration kAccountSyncRebaseEvery = Duration(hours: 6);
 /// A device away for less than this gets the deletion itself; one away
 /// longer gets the state as it is now: a password's or a note's deletion
 /// is also a marker inside the state, which stays (up to the markers each
-/// keeps), so nothing deleted comes back; and every device keeps its own
+/// keeps), and the deletions of the dating profile, the profile and the
+/// meetings are written again for longer ([AccountSyncMarkedDeletions]),
+/// so nothing deleted comes back; and every device keeps its own
 /// record of each deletion (no value in it) for good, so a returning
 /// device's old units are never taken over newer deletions.
 const Duration kAccountSyncTombstoneLife = Duration(days: 30);
@@ -631,7 +650,9 @@ final class AccountStateSync {
   }
 
   /// Every unit of [d] as it is now, to write again: values (held ones
-  /// too) and the deletions of the last [tombstoneLife].
+  /// too) and the deletions of the last [tombstoneLife]; for an
+  /// [AccountSyncMarkedDeletions] domain also the older deletions, the
+  /// newest first, within [kAccountSyncMarkerBytes].
   Map<String, Object?> _allUnits(
     AccountSyncDomain d,
     Map<String, Object?> state,
@@ -643,15 +664,14 @@ final class AccountStateSync {
     );
     final int now = _now();
     final Map<String, Object?> all = <String, Object?>{};
+    final List<MapEntry<String, _Unit>> older = <MapEntry<String, _Unit>>[];
     for (final MapEntry<String, _Unit> u in known.entries) {
       final _Unit unit = u.value;
       if (unit.deleted) {
         if (unit.at == 0 || now - unit.at < tombstoneLife.inMilliseconds) {
-          all[u.key] = <String, Object?>{
-            'c': unit.clock,
-            'w': unit.writer,
-            'x': 1,
-          };
+          all[u.key] = _marker(unit);
+        } else if (d is AccountSyncMarkedDeletions) {
+          older.add(u);
         }
       } else if (unit.held && _heldOf(d.id).containsKey(u.key)) {
         all[u.key] = <String, Object?>{
@@ -667,8 +687,34 @@ final class AccountStateSync {
         };
       }
     }
+    // Newest first by their clocks, which every device orders the same
+    // way (a re-creation after a deletion has a higher one, so it is never
+    // undone by this); past the bound the oldest stay out.
+    older.sort((MapEntry<String, _Unit> a, MapEntry<String, _Unit> b) {
+      if (a.value.clock != b.value.clock) {
+        return b.value.clock.compareTo(a.value.clock);
+      }
+      final int byWriter = b.value.writer.compareTo(a.value.writer);
+      return byWriter != 0 ? byWriter : a.key.compareTo(b.key);
+    });
+    int bytes = 0;
+    for (final MapEntry<String, _Unit> u in older) {
+      final Map<String, Object?> marker = _marker(u.value);
+      bytes += utf8.encode(jsonEncode(<String, Object?>{u.key: marker})).length;
+      if (bytes > kAccountSyncMarkerBytes) {
+        break;
+      }
+      all[u.key] = marker;
+    }
     return all;
   }
+
+  /// A deletion as it travels.
+  static Map<String, Object?> _marker(_Unit unit) => <String, Object?>{
+    'c': unit.clock,
+    'w': unit.writer,
+    'x': 1,
+  };
 
   /// Starts this device's log over ([kAccountSyncRebaseEvery]) when it
   /// holds values no longer current: a checkpoint, every state as it is

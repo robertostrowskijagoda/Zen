@@ -42,10 +42,11 @@ enum ZenSound {
   /// Loud and urgent, unlike anything else: a friend's alarm.
   alarm('zen_alarm'),
 
-  /// Two quick rising notes: the call is on (in the app only).
+  /// Two quick rising notes: the call is on (in the app only; on Android
+  /// on the call's audio, call_tones.dart).
   callConnected('zen_call_connected'),
 
-  /// The same notes falling: the call is over (in the app only).
+  /// The same notes falling: the call is over (as [callConnected]).
   callEnded('zen_call_ended');
 
   const ZenSound(this.fileName);
@@ -80,6 +81,10 @@ enum ZenSound {
   /// A short effect inside the app, governed by "Dźwięki w aplikacji" (the
   /// notification sounds by "Dźwięk powiadomień").
   bool get isInAppEffect => !isNotificationSound;
+
+  /// Part of a call, heard by this side only (call_tones.dart): never
+  /// silenced by the device keeping quiet.
+  bool get isCallSound => this == callConnected || this == callEnded;
 }
 
 /// Plays a sound file; the platform part of [ZenSoundEffects].
@@ -230,7 +235,8 @@ final Provider<ZenSoundEffects> zenSoundEffectsProvider =
 ///   ignore a sound file), and while "Dźwięk powiadomień" is on. Elsewhere
 ///   the notification itself sounds.
 /// * Nothing plays while the device keeps quiet (silent mode, "Nie
-///   przeszkadzać"), except a friend's alarm, which always does; and the
+///   przeszkadzać"), except a friend's alarm, which always does, and the
+///   sounds of a call ([ZenSound.isCallSound], call_tones.dart); the
 ///   settings never silence an alarm or a ringing call.
 final class ZenSoundEffects {
   ZenSoundEffects({
@@ -292,7 +298,7 @@ final class ZenSoundEffects {
     if (sound != ZenSound.ringtone && !_settingOn(sound)) {
       return false;
     }
-    if (await _keepsQuiet()) {
+    if (!sound.isCallSound && await _keepsQuiet()) {
       logZenMessage('Sound ${sound.fileName} skipped: the device keeps quiet.');
       return false;
     }

@@ -87,6 +87,8 @@ const Set<String> _attachmentMetaKeys = <String>{
   'mimeType',
   'attachmentSizeBytes',
   'durationMs',
+  kMediaWidthKey,
+  kMediaHeightKey,
   'senderName',
 };
 

@@ -10,6 +10,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
+import 'package:zen/src/features/calls/call_tones.dart';
 import 'package:zen/src/features/runtime/notification_privacy.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -1487,11 +1488,7 @@ class RuntimeSystemNotificationsBridge extends ConsumerStatefulWidget {
 }
 
 /// What the call sounds follow: which call, in which state, which way.
-typedef _CallSoundState = ({
-  String? id,
-  CallSessionStatus? status,
-  bool incoming,
-});
+typedef _CallSoundState = CallToneState;
 
 _CallSoundState _callSoundStateOf(SocialHubState state) {
   final CallSession? call = state.activeCall;
@@ -1499,6 +1496,7 @@ _CallSoundState _callSoundStateOf(SocialHubState state) {
     id: call?.id,
     status: call?.status,
     incoming: call?.isIncoming ?? false,
+    group: call?.isGroup ?? false,
   );
 }
 
@@ -1586,24 +1584,12 @@ final class _RuntimeSystemNotificationsBridgeState
   /// An entry older than this is not news (it was read from storage).
   static const Duration _freshEntryWindow = Duration(seconds: 10);
 
-  /// A call that connects or ends gets its short sound; on Windows and
-  /// Linux an incoming call rings here for as long as it rings.
+  /// The call's own tones (ringback, connected, reconnecting, ended:
+  /// call_tones.dart); on Windows and Linux an incoming call rings here for
+  /// as long as it rings.
   void _onCallSoundState(_CallSoundState? previous, _CallSoundState next) {
     final ZenSoundEffects effects = ref.read(zenSoundEffectsProvider);
-    final bool wasOn = previous?.status == CallSessionStatus.active;
-    final bool isOn = next.status == CallSessionStatus.active;
-    final bool sameCall = previous?.id == next.id;
-    if (isOn && !(wasOn && sameCall)) {
-      unawaitedLogged(
-        effects.play(ZenSound.callConnected),
-        context: 'Playing the call sound failed',
-      );
-    } else if (wasOn && !(isOn && sameCall)) {
-      unawaitedLogged(
-        effects.play(ZenSound.callEnded),
-        context: 'Playing the call sound failed',
-      );
-    }
+    ref.read(callTonesProvider).onCall(next);
     if (!effects.playsNotificationSounds) {
       // Elsewhere the system rings (the notification, Android's call card).
       return;

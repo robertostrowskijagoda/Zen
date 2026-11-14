@@ -1,3 +1,8 @@
+// Each test runs days of two devices' sync: over the 30 seconds a test has
+// on a slower day (38 s for one of them on the release computer).
+@Timeout(Duration(minutes: 3))
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';

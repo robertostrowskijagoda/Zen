@@ -48,6 +48,12 @@
     ]
   },
   {
+    "file": "lib/src/domain/messages/chat_media_size.dart",
+    "tests": [
+      "test/chat_media_size_test.dart"
+    ]
+  },
+  {
     "file": "lib/src/features/chat/location_sharing.dart",
     "tests": [
       "test/location_sharing_test.dart"
@@ -299,7 +305,26 @@
   {
     "file": "lib/src/features/calls/call_video_trace.dart",
     "tests": [
-      "test/call_video_trace_test.dart"
+      "test/call_video_trace_test.dart",
+      "test/call_video_quality_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_tones.dart",
+    "tests": [
+      "test/call_tones_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_screen_awake.dart",
+    "tests": [
+      "test/call_screen_awake_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/calls/call_video_quality.dart",
+    "tests": [
+      "test/call_video_quality_test.dart"
     ]
   },
   {

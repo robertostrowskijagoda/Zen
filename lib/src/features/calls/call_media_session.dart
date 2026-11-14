@@ -10,11 +10,13 @@ import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_media_devices.dart';
 import 'package:zen/src/features/calls/call_media_e2ee.dart';
+import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_recorder.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/call_video_codecs.dart';
+import 'package:zen/src/features/calls/call_video_quality.dart';
 import 'package:zen/src/features/calls/call_video_trace.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -41,14 +43,6 @@ final class CallMediaDevice {
 typedef CallMediaStatusListener =
     void Function(String callId, CallMediaSessionLifecycle status);
 typedef CallMediaErrorListener = void Function(String? callId, Object error);
-
-/// The most a call's camera sends, in bits per second: a sharp 960 x 540
-/// (up to 1280 x 720) at 24 frames on a good connection. It is a ceiling,
-/// not a rate: WebRTC sends what the path carries, and on a tight one it
-/// lowers the resolution before the frames ([_tuneCameraSenders]). At
-/// 900 kbit/s and 640 x 360 the picture was soft even when both sides had
-/// a fast connection.
-const int kCallVideoMaxBitrate = 1800000;
 
 /// How often the other side's picture is checked while a call's media are
 /// connected and no frame of it reached the screen yet
@@ -1778,6 +1772,7 @@ final class WebRtcCallMediaSessionController
     }
     final MediaStreamTrack fresh = freshTracks.first;
     await localStream.addTrack(fresh);
+    _steadyCamera(fresh);
     RTCRtpSender? videoSender;
     try {
       final List<RTCRtpTransceiver> transceivers = await connection
@@ -1826,6 +1821,30 @@ final class WebRtcCallMediaSessionController
     await _freshKeyFrames(connection);
     _safeSetRendererSrcObject(_localRenderer, localStream);
     _notify();
+  }
+
+  /// On Android, the camera behind [track] kept from slowing down to a few
+  /// frames a second in poor light ([steadyCallCameraFrameRate]), with
+  /// what it was asked for and what it did in the technical log. The call
+  /// does not wait for it: the camera's session comes up a moment after
+  /// its track.
+  void _steadyCamera(MediaStreamTrack track) {
+    final String? id = track.id;
+    if (!Platform.isAndroid || id == null || id.isEmpty) {
+      return;
+    }
+    final Map<String, dynamic> asked = _buildVideoConstraints(
+      deviceId: _selectedCameraId,
+    );
+    unawaitedLogged(
+      steadyCallCameraFrameRate(id).then(
+        (String line) => logZenMessage(
+          'Call camera: asked ${asked['width']}x${asked['height']} at '
+          '${asked['frameRate']} fps; frame rate $line',
+        ),
+      ),
+      context: 'Steadying the call camera failed',
+    );
   }
 
   Future<void> _detachLocalVideoTracks() async {
@@ -2389,6 +2408,9 @@ final class WebRtcCallMediaSessionController
       throw StateError(t('Rozmowa została zamknięta w trakcie zestawiania.'));
     }
     _localStream = localStream;
+    for (final MediaStreamTrack track in localStream.getVideoTracks()) {
+      _steadyCamera(track);
+    }
     _safeSetRendererSrcObject(_localRenderer, localStream);
     _notify();
     if (!isIncoming) {
@@ -2718,8 +2740,15 @@ final class WebRtcCallMediaSessionController
     }
     RTCSessionDescription desc = original;
     if (_localCameraWanted) {
+      // An answer to an offer whose camera was switched off sends only: a
+      // `sendrecv` there is refused by the other side, and the call ends.
       desc = RTCSessionDescription(
-        forceCameraSectionSendRecv(desc.sdp ?? ''),
+        localCallSdpToSend(
+          sdp: desc.sdp ?? '',
+          type: desc.type,
+          cameraWanted: true,
+          remoteOffer: _lastRemoteOfferSdp,
+        ),
         desc.type,
       );
     }
@@ -2844,6 +2873,9 @@ final class WebRtcCallMediaSessionController
   static const List<Duration> _callStatsDelays = <Duration>[
     Duration(seconds: 4),
     Duration(seconds: 15),
+    // A minute in: whether the picture held up once the camera and the
+    // path settled (rate, quantizer, time held back).
+    Duration(seconds: 60),
   ];
 
   /// At most this many looks a call, so a long call with cameras switched
@@ -2934,10 +2966,11 @@ final class WebRtcCallMediaSessionController
     }
   }
 
-  /// The camera over the mesh: a steady picture rather than a sharp one
-  /// that stalls. Each camera sender is capped ([kCallVideoMaxBitrate], 24
-  /// frames) and gives up sharpness before frames when the path is tight.
-  /// The shared screen keeps its own settings (sharp text matters there).
+  /// The camera over the mesh: a steady picture, sharp while the path
+  /// allows ([tuneCallCameraParameters]: between [kCallVideoMinBitrate]
+  /// and [kCallVideoMaxBitrate] at up to [kCallVideoFrameRate] frames,
+  /// sharpness given up before frames when the path is tight). The shared
+  /// screen keeps its own settings (sharp text matters there).
   Future<void> _tuneCameraSenders(RTCPeerConnection connection) async {
     try {
       for (final RTCRtpSender sender in await connection.getSenders()) {
@@ -2948,17 +2981,9 @@ final class WebRtcCallMediaSessionController
           continue;
         }
         final RTCRtpParameters parameters = sender.parameters;
-        final List<RTCRtpEncoding> encodings =
-            parameters.encodings ?? const <RTCRtpEncoding>[];
-        if (encodings.isEmpty) {
+        if (!tuneCallCameraParameters(parameters)) {
           continue;
         }
-        for (final RTCRtpEncoding encoding in encodings) {
-          encoding.maxBitrate = kCallVideoMaxBitrate;
-          encoding.maxFramerate = 24;
-        }
-        parameters.degradationPreference =
-            RTCDegradationPreference.MAINTAIN_FRAMERATE;
         if (!await sender.setParameters(parameters)) {
           logZenWarning('Call video: the camera sender refused its cap');
         }
@@ -2987,7 +3012,27 @@ final class WebRtcCallMediaSessionController
     }
     // VP8 first whatever the other side listed first: this side sends the
     // first of its codecs (see call_video_codecs.dart).
-    final String applied = preferVp8InRemoteSdp(original.sdp ?? '');
+    // The estimate of the path starts where a sharp picture can
+    // (call_video_quality.dart), not at WebRTC's 300 kbit/s.
+    String applied = withCallVideoStartBitrate(
+      preferVp8InRemoteSdp(original.sdp ?? ''),
+    );
+    // An answer that asks for more than this side's offer allowed (a phone
+    // with its camera on answers `sendrecv` while the camera here was
+    // switched off, as up to 1.17.1) is cut to what the offer allowed:
+    // WebRTC refuses it as it came, and the call would end.
+    final Object? offered = _lastSentOfferDescription?['sdp'];
+    if (original.type == 'answer' && offered is String && offered.isNotEmpty) {
+      final String fitted = fitCameraAnswerToOffer(applied, offered);
+      if (fitted != applied) {
+        logZenMessage(
+          'Call SDP remote answer: camera '
+          '${cameraSectionDirection(applied)} cut to '
+          '${cameraSectionDirection(fitted)} to fit our offer',
+        );
+        applied = fitted;
+      }
+    }
     // Never the peer's original SDP: its candidates carry LAN/public
     // addresses, and ICE could then route the media around the mesh.
     await applyRemoteSdpViaLocalRelay(
@@ -3374,7 +3419,96 @@ final RegExp _hostCandidatePattern = RegExp(
 /// Forces the camera's video section (the first `m=video`) to `sendrecv`,
 /// leaving every other section — the screen slot among them — as WebRTC
 /// produced it.
-String forceCameraSectionSendRecv(String sdp) {
+String forceCameraSectionSendRecv(String sdp) =>
+    _setCameraSectionDirection(sdp, 'sendrecv');
+
+const Set<String> _sdpDirections = <String>{
+  'sendrecv',
+  'sendonly',
+  'recvonly',
+  'inactive',
+};
+
+/// The direction of the camera's video section (the first `m=video`) of
+/// [sdp]: `sendrecv`, `sendonly`, `recvonly` or `inactive`, and `sendrecv`
+/// for a section that names none (the SDP default). Null without a video
+/// section.
+String? cameraSectionDirection(String sdp) {
+  bool inCamera = false;
+  bool seenVideo = false;
+  for (final String raw in sdp.split(RegExp(r'\r?\n'))) {
+    final String line = raw.trim();
+    if (line.startsWith('m=')) {
+      if (inCamera) {
+        return 'sendrecv';
+      }
+      inCamera = !seenVideo && line.startsWith('m=video');
+      seenVideo = seenVideo || line.startsWith('m=video');
+      continue;
+    }
+    if (inCamera &&
+        line.startsWith('a=') &&
+        _sdpDirections.contains(line.substring(2))) {
+      return line.substring(2);
+    }
+  }
+  return inCamera ? 'sendrecv' : null;
+}
+
+/// [answer] with its camera section's direction cut to what the camera
+/// section of the [offer] it answers allows: the answering side sends only
+/// what the offering side receives, and receives only what it sends. The
+/// offering side's WebRTC refuses anything more ("Incompatible send
+/// direction"), and a refused answer ends the call: a `sendrecv` answer to
+/// an offer whose camera was switched off (`recvonly`) becomes `sendonly`.
+/// Every other section stays as it was.
+String fitCameraAnswerToOffer(String answer, String offer) {
+  final String? offered = cameraSectionDirection(offer);
+  final String? answered = cameraSectionDirection(answer);
+  if (offered == null || answered == null) {
+    return answer;
+  }
+  final bool send =
+      answered.startsWith('send') &&
+      (offered == 'sendrecv' || offered == 'recvonly');
+  final bool receive =
+      (answered == 'sendrecv' || answered == 'recvonly') &&
+      offered.startsWith('send');
+  final String fitted = send && receive
+      ? 'sendrecv'
+      : send
+      ? 'sendonly'
+      : receive
+      ? 'recvonly'
+      : 'inactive';
+  if (fitted == answered) {
+    return answer;
+  }
+  return _setCameraSectionDirection(answer, fitted);
+}
+
+/// The local description [sdp] of type [type] as it is set and sent. With
+/// the camera wanted, its section says `sendrecv` (a platform that left it
+/// receive-only would never send the camera); an answer then says no more
+/// than the other side's [remoteOffer] allows ([fitCameraAnswerToOffer]):
+/// with their camera switched off it sends only.
+String localCallSdpToSend({
+  required String sdp,
+  required String? type,
+  required bool cameraWanted,
+  String? remoteOffer,
+}) {
+  if (!cameraWanted) {
+    return sdp;
+  }
+  final String forced = forceCameraSectionSendRecv(sdp);
+  if (type != 'answer' || remoteOffer == null || remoteOffer.isEmpty) {
+    return forced;
+  }
+  return fitCameraAnswerToOffer(forced, remoteOffer);
+}
+
+String _setCameraSectionDirection(String sdp, String direction) {
   if (sdp.isEmpty) {
     return sdp;
   }
@@ -3388,7 +3522,7 @@ String forceCameraSectionSendRecv(String sdp) {
     final String line = raw.trim();
     if (line.startsWith('m=')) {
       if (inCamera && !foundDirection) {
-        result.add('a=sendrecv');
+        result.add('a=$direction');
       }
       inCamera = !seenVideo && line.startsWith('m=video');
       seenVideo = seenVideo || line.startsWith('m=video');
@@ -3397,18 +3531,16 @@ String forceCameraSectionSendRecv(String sdp) {
       continue;
     }
     if (inCamera &&
-        (line == 'a=recvonly' ||
-            line == 'a=sendonly' ||
-            line == 'a=inactive' ||
-            line == 'a=sendrecv')) {
-      result.add('a=sendrecv');
+        line.startsWith('a=') &&
+        _sdpDirections.contains(line.substring(2))) {
+      result.add('a=$direction');
       foundDirection = true;
       continue;
     }
     result.add(raw);
   }
   if (inCamera && !foundDirection) {
-    result.add('a=sendrecv');
+    result.add('a=$direction');
   }
   return result.join(separator);
 }
@@ -3595,36 +3727,15 @@ Map<String, dynamic> _buildAudioConstraints({String? deviceId}) {
   };
 }
 
-/// The camera for a call: 960 x 540 at 24 frames (up to 1280 x 720 at
-/// 30). The picture crosses the mesh through a relay and every frame is
-/// encrypted on its way: 720p at 30 frames with nothing to give way came
-/// through late and jerky, so the senders keep the frames and give up
-/// sharpness on a tight path ([kCallVideoMaxBitrate]); on a good one the
-/// picture stays sharp (640 x 360 was soft for everyone).
-Map<String, dynamic> _buildVideoConstraints({String? deviceId}) {
-  final bool isMobile = Platform.isAndroid || Platform.isIOS;
-  if (isMobile) {
-    return <String, dynamic>{
-      if (deviceId != null && deviceId.isNotEmpty)
-        'deviceId': deviceId
-      else
-        'facingMode': 'user',
-      'width': <String, dynamic>{'ideal': 960, 'max': 1280},
-      'height': <String, dynamic>{'ideal': 540, 'max': 720},
-      'frameRate': <String, dynamic>{'ideal': 24, 'max': 30},
-    };
-  }
-  return <String, dynamic>{
-    if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
-    if (deviceId != null && deviceId.isNotEmpty)
-      'optional': <Map<String, dynamic>>[
-        <String, dynamic>{'sourceId': deviceId},
-      ],
-    'width': 1280,
-    'height': 720,
-    'frameRate': 24,
-  };
-}
+/// The camera for a call ([callCameraConstraints]): 1280 x 720 at
+/// [kCallVideoFrameRate] frames, in plain numbers, the only form
+/// flutter_webrtc on Android reads (with `{'ideal': …}` maps every call
+/// opened the camera at the plugin's default instead).
+Map<String, dynamic> _buildVideoConstraints({String? deviceId}) =>
+    callCameraConstraints(
+      deviceId: deviceId,
+      mobile: Platform.isAndroid || Platform.isIOS,
+    );
 
 @visibleForTesting
 Map<String, dynamic> buildAudioConstraintsForTesting({String? deviceId}) =>

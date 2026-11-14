@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/domain/messages/chat_media_size.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';

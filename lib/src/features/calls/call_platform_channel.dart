@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/calls/call_video_quality.dart';
 
 /// Android-only hooks the call UI needs but Flutter does not expose.
 ///
@@ -308,5 +309,112 @@ Future<Map<String, bool>> checkAllPermissions() async {
   } catch (error, stackTrace) {
     logZenError('Checking all permissions failed', error, stackTrace);
     return <String, bool>{};
+  }
+}
+
+/// Plays the call tone [tone] (call_tones.dart) on the call's audio
+/// (ZenCallTones.kt): a dialler tone, or Zen's chime [asset]. Whether it
+/// started; false off Android.
+Future<bool> playCallTone(String tone, {String? asset}) async {
+  if (!Platform.isAndroid) {
+    return false;
+  }
+  try {
+    return await zenCallPlatformChannel.invokeMethod<bool>(
+          'playCallTone',
+          <String, Object?>{'tone': tone, 'asset': asset},
+        ) ??
+        false;
+  } catch (error, stackTrace) {
+    logZenError('Playing the call tone failed', error, stackTrace);
+    return false;
+  }
+}
+
+/// Stops the call tone that plays (the ringback).
+Future<void> stopCallTone() async {
+  if (!Platform.isAndroid) {
+    return;
+  }
+  try {
+    await zenCallPlatformChannel.invokeMethod<void>('stopCallTone');
+  } catch (error, stackTrace) {
+    logZenError('Stopping the call tone failed', error, stackTrace);
+  }
+}
+
+/// What the screen does for a running call ([mode]: `normal`, `keepOn`,
+/// `proximity`; call_screen_awake.dart): the window flag kept apart from
+/// the ringing's (CallScreenKeepOn.kt) and the proximity wake lock
+/// (ZenCallProximity.kt). Whether it took: for `keepOn` whether the app's
+/// window had it now (false: set when one shows), for `proximity` whether
+/// the phone has the sensor for it; null off Android.
+Future<bool?> setCallScreenMode(String mode) async {
+  if (!Platform.isAndroid) {
+    return null;
+  }
+  try {
+    return await zenCallPlatformChannel.invokeMethod<bool>(
+          'setCallScreenMode',
+          mode,
+        ) ??
+        false;
+  } catch (error, stackTrace) {
+    logZenError('Setting the call screen failed', error, stackTrace);
+    return false;
+  }
+}
+
+/// Pins the auto-exposure of the call camera behind the video track
+/// [trackId] to the steadiest frame-rate range the camera offers
+/// ([chooseCameraFrameRateRange]; ZenCallCamera.kt): in poor light the
+/// camera no longer slows to a few frames a second. Android only (the
+/// caller checks); never throws. Returns one line for the technical log:
+/// what was offered, what the camera ran at, what was pinned or why not.
+Future<String> steadyCallCameraFrameRate(
+  String trackId, {
+  MethodChannel channel = zenCallPlatformChannel,
+}) async {
+  try {
+    final Map<Object?, Object?>? found = await channel
+        .invokeMethod<Map<Object?, Object?>>(
+          'callCameraFrameRates',
+          <String, Object?>{'trackId': trackId},
+        );
+    final Object? error = found?['error'];
+    if (found == null || error != null) {
+      return 'not read (${error ?? 'no answer'})';
+    }
+    final List<CameraFrameRateRange> offered = cameraFrameRateRanges(
+      found['ranges'],
+    );
+    final List<CameraFrameRateRange> current = cameraFrameRateRanges(<Object?>[
+      found['current'],
+    ]);
+    final String was = current.isEmpty
+        ? '?'
+        : describeCameraFrameRateRange(current.first);
+    final String offers = offered.isEmpty
+        ? 'nothing'
+        : offered.map(describeCameraFrameRateRange).join(' ');
+    final CameraFrameRateRange? chosen = chooseCameraFrameRateRange(offered);
+    if (chosen == null) {
+      return 'kept at $was fps: no steady range among $offers';
+    }
+    if (current.isNotEmpty && current.first == chosen) {
+      return 'already at $was fps (offers $offers)';
+    }
+    final String? outcome = await channel.invokeMethod<String>(
+      'pinCallCameraFrameRate',
+      <String, Object?>{
+        'trackId': trackId,
+        'min': chosen.min,
+        'max': chosen.max,
+      },
+    );
+    return '${outcome == 'pinned' ? 'pinned to' : 'not pinned (${outcome ?? 'no answer'}) to'} '
+        '${describeCameraFrameRateRange(chosen)} fps, was $was (offers $offers)';
+  } on Object catch (error) {
+    return 'not pinned: $error';
   }
 }

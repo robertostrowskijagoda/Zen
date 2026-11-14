@@ -22,6 +22,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
       mimeType: message.mimeType,
       attachmentSizeBytes: attachmentSizeBytes,
       durationMs: message.durationMs,
+      mediaSize: message.mediaSize,
     );
     await transferStore.saveOutgoing(transfer);
     try {
@@ -138,6 +139,9 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
           attachmentSizeBytes:
               signal.attachmentSizeBytes ?? base.attachmentSizeBytes,
           durationMs: signal.durationMs ?? base.durationMs,
+          // The first size it was announced with stays: a box that changes
+          // would move the conversation.
+          mediaSize: base.mediaSize ?? _signalMediaSize(signal),
           deliveryState: base.hasAttachment
               ? base.deliveryState
               : ChatMessageDeliveryState.sending,
@@ -1015,6 +1019,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
           'mimeType': ?transfer.mimeType,
           'attachmentSizeBytes': ?transfer.attachmentSizeBytes,
           'durationMs': ?transfer.durationMs,
+          ...?transfer.mediaSize?.toPayload(),
         },
         totalBytes: transfer.transferBytes,
         chunkSize: transfer.chunkSizeBytes,
@@ -1159,6 +1164,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
             if (transfer.attachmentSizeBytes != null)
               'attachmentSizeBytes': transfer.attachmentSizeBytes,
             if (transfer.durationMs != null) 'durationMs': transfer.durationMs,
+            ...?transfer.mediaSize?.toPayload(),
             'attachmentTransferBytes': transfer.transferBytes,
             'chunkCount': transfer.chunkCount,
           },
@@ -1195,6 +1201,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
                 'attachmentSizeBytes': transfer.attachmentSizeBytes,
               if (transfer.durationMs != null)
                 'durationMs': transfer.durationMs,
+              ...?transfer.mediaSize?.toPayload(),
               'attachmentTransferBytes': transfer.transferBytes,
               'chunkIndex': chunkIndex,
               'chunkCount': transfer.chunkCount,

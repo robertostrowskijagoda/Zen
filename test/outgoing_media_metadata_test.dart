@@ -453,4 +453,85 @@ void main() {
       expect(sniffMediaKind(stored), MediaKind.audio);
     });
   });
+
+  group('pictureDisplaySize (the size a message carries)', () {
+    test('a GIF by its canvas, a PNG by its header', () {
+      expect(
+        pictureDisplaySize(img.encodeGif(img.Image(width: 30, height: 20))),
+        (width: 30, height: 20),
+      );
+      expect(
+        pictureDisplaySize(img.encodePng(img.Image(width: 12, height: 5))),
+        (width: 12, height: 5),
+      );
+      expect(pictureDisplaySize(_png()), (width: 4, height: 4));
+    });
+
+    test('a JPEG turned a quarter by its EXIF is as tall as it is shown', () {
+      for (final int orientation in <int>[1, 2, 3, 4]) {
+        expect(pictureDisplaySize(_phoneJpeg(orientation: orientation)), (
+          width: 8,
+          height: 4,
+        ), reason: 'orientation $orientation');
+      }
+      for (final int orientation in <int>[5, 6, 7, 8]) {
+        expect(pictureDisplaySize(_phoneJpeg(orientation: orientation)), (
+          width: 4,
+          height: 8,
+        ), reason: 'orientation $orientation');
+      }
+      // Cleaned for sending, the turn stays and so does the size.
+      expect(pictureDisplaySize(stripOutgoingMetadata(_phoneJpeg())), (
+        width: 4,
+        height: 8,
+      ));
+      // A JPEG with no EXIF at all.
+      expect(
+        pictureDisplaySize(img.encodeJpg(img.Image(width: 9, height: 3))),
+        (width: 9, height: 3),
+      );
+    });
+
+    test('the start of a picture is enough', () {
+      final Uint8List jpeg = _phoneJpeg();
+      expect(
+        pictureDisplaySize(Uint8List.sublistView(jpeg, 0, jpeg.length - 20)),
+        (width: 4, height: 8),
+      );
+    });
+
+    test('anything that is not a readable picture has no size', () {
+      expect(pictureDisplaySize(_phoneFilm()), isNull);
+      expect(
+        pictureDisplaySize(Uint8List.fromList(utf8.encode('zdjęcie'))),
+        isNull,
+      );
+      expect(pictureDisplaySize(Uint8List(0)), isNull);
+      // A GIF cut before its size, and one whose canvas is empty.
+      expect(
+        pictureDisplaySize(Uint8List.fromList(latin1.encode('GIF89a'))),
+        isNull,
+      );
+      expect(
+        pictureDisplaySize(
+          Uint8List.fromList(<int>[...latin1.encode('GIF89a'), 0, 0, 5, 0]),
+        ),
+        isNull,
+      );
+      expect(
+        pictureDisplaySize(
+          Uint8List.fromList(<int>[...latin1.encode('GIF89a'), 5, 0, 0, 0]),
+        ),
+        isNull,
+      );
+      // A JPEG whose segments do not add up is read as unturned or not at
+      // all, never as something else.
+      expect(
+        pictureDisplaySize(
+          Uint8List.fromList(<int>[0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xFF]),
+        ),
+        isNull,
+      );
+    });
+  });
 }

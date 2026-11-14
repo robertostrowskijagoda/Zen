@@ -38,6 +38,10 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onResume() {
         super.onResume()
         clearShowWhenLockedFlags()
+        // A new window of the app (answered from the lock screen or the
+        // card, recreated, back from the background) keeps the screen on
+        // when the call running in it wants that.
+        ZenCallBridge.applyKeepScreenOn(this)
         isResumed = true
     }
 

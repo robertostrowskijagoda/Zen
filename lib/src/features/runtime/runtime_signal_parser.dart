@@ -2,6 +2,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_location.dart';
+import 'package:zen/src/domain/messages/chat_media_size.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
@@ -156,6 +157,7 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         chunkCount: _readInt(payload['chunkCount']),
         chunkIndex: _readInt(payload['chunkIndex']),
         isPlaceholder: true,
+        chatExtras: _readMediaSizeExtras(payload),
       );
     case 'message_chunk':
       return ZenSignal(
@@ -173,6 +175,7 @@ ZenSignal? _signalFrom(String sender, Map<String, dynamic> payload) {
         chunkIndex: _readInt(payload['chunkIndex']),
         chunkCount: _readInt(payload['chunkCount']),
         chunkData: _readString(payload['chunkData']),
+        chatExtras: _readMediaSizeExtras(payload),
       );
     case 'message_chunk_ack':
       return ZenSignal(
@@ -574,8 +577,6 @@ Map<String, int> _readGroupStamps(Object? raw) {
   return stamps;
 }
 
-/// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`)
-/// mentions (`men`), a poll (`poll`) and a position (`loc`) a chat or group message carries; `null` when none.
 /// What an edit carries beside its text: a newer position of a shared one
 /// ([kLocationKey]) or the poll its author ended ([kPollKey]).
 Map<String, dynamic>? _editExtras(Map<String, dynamic> payload) {
@@ -588,6 +589,10 @@ Map<String, dynamic>? _editExtras(Map<String, dynamic> payload) {
   return out.isEmpty ? null : out;
 }
 
+/// The reply (`re`), forwarding (`fwd`), content-addressed file (`media`),
+/// mentions (`men`), a poll (`poll`), a position (`loc`) and the size of a
+/// picture ([kMediaSizeKey]) a chat or group message carries; `null` when
+/// none.
 Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
   final ChatReply? reply = ChatReply.fromJson(payload['re']);
   // A group file's reference is kept until the file arrives: only its
@@ -596,6 +601,7 @@ Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
   final List<Mention> mentions = mentionsFromJson(payload[kMentionsKey]);
   final ChatPoll? poll = ChatPoll.fromJson(payload[kPollKey]);
   final ChatLocation? location = ChatLocation.fromJson(payload[kLocationKey]);
+  final ChatMediaSize? mediaSize = _readMediaSize(payload);
   final Map<String, dynamic> out = <String, dynamic>{
     if (reply != null) 're': reply.toJson(),
     if (payload['fwd'] == true) 'fwd': true,
@@ -603,8 +609,24 @@ Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
     if (mentions.isNotEmpty) kMentionsKey: mentionsToJson(mentions),
     if (poll != null) kPollKey: poll.toJson(),
     if (location != null) kLocationKey: location.toJson(),
+    if (mediaSize != null) kMediaSizeKey: mediaSize.toJson(),
   };
   return out.isEmpty ? null : out;
+}
+
+/// The size of the picture a file's message, placeholder or chunk names ([kMediaWidthKey], [kMediaHeightKey]): whole
+/// pixels within [kMaxChatMediaSide], or none at all.
+ChatMediaSize? _readMediaSize(Map<String, dynamic> payload) => ChatMediaSize.of(
+  _readInt(payload[kMediaWidthKey]),
+  _readInt(payload[kMediaHeightKey]),
+);
+
+/// [_readMediaSize] as chat extras ([kMediaSizeKey]); `null` without one.
+Map<String, dynamic>? _readMediaSizeExtras(Map<String, dynamic> payload) {
+  final ChatMediaSize? mediaSize = _readMediaSize(payload);
+  return mediaSize == null
+      ? null
+      : <String, dynamic>{kMediaSizeKey: mediaSize.toJson()};
 }
 
 ChatMessageType _readMessageType(Object? value) {

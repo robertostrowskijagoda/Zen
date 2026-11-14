@@ -159,11 +159,13 @@ List<String> describeCallStats(List<StatsReport> reports) {
         'fir ${_int(v['firCount'])}'
         '${v['active'] == false ? ', INACTIVE' : ''}'
         '${_text(v, 'qualityLimitationReason', 'limit')}'
-        '${_text(v, 'encoderImplementation', 'encoder')}',
+        '${_text(v, 'encoderImplementation', 'encoder')}'
+        '${_videoOutQuality(v)}',
       );
     } else if (report.type == 'inbound-rtp' && kind == 'video') {
       lines.add(
-        'video in ${codecOf(v)} ${_size(v)}, '
+        'video in ${codecOf(v)} ${_size(v)}'
+        '${_has(v, 'framesPerSecond') ? ' ${_int(v['framesPerSecond'])} fps' : ''}, '
         '${_int(v['packetsReceived'])} packets, ${_kb(v['bytesReceived'])}, '
         'lost ${_int(v['packetsLost'])}, '
         'received ${_int(v['framesReceived'])} frames, '
@@ -172,7 +174,9 @@ List<String> describeCallStats(List<StatsReport> reports) {
         'dropped ${_int(v['framesDropped'])}, '
         'nack ${_int(v['nackCount'])} pli ${_int(v['pliCount'])} '
         'fir ${_int(v['firCount'])}'
-        '${_text(v, 'decoderImplementation', 'decoder')}',
+        '${_text(v, 'decoderImplementation', 'decoder')}'
+        '${_int(v['freezeCount']) > 0 ? ', ${_int(v['freezeCount'])} freezes '
+                  '(${_seconds(v['totalFreezesDuration'])})' : ''}',
       );
     } else if (report.type == 'outbound-rtp' && kind == 'audio') {
       lines.add(
@@ -391,6 +395,44 @@ Map<String, String> _codecNames(List<StatsReport> reports) {
 }
 
 bool _has(Map<dynamic, dynamic> values, String key) => values[key] is num;
+
+/// What judges a camera's picture going out, beyond its size and rate:
+/// the bitrate the encoder aims at (`target`), its average quantizer
+/// (`qp`, higher is blockier: VP8 from 4 to 127, around 30-50 a sharp
+/// picture, above 80 blocks), how often it changed the resolution, and
+/// for how long it was held back by the processor or the path in all.
+/// Each part only when the statistics have it.
+String _videoOutQuality(Map<dynamic, dynamic> v) {
+  final StringBuffer out = StringBuffer();
+  final Object? target = v['targetBitrate'];
+  if (target is num && target > 0) {
+    out.write(', target ${(target / 1000).round()} kbit/s');
+  }
+  final Object? qpSum = v['qpSum'];
+  final int encoded = _int(v['framesEncoded']);
+  if (qpSum is num && encoded > 0) {
+    out.write(', qp ${(qpSum / encoded).round()}');
+  }
+  final int changes = _int(v['qualityLimitationResolutionChanges']);
+  if (changes > 0) {
+    out.write(', resolution changed $changes times');
+  }
+  final Object? durations = v['qualityLimitationDurations'];
+  if (durations is Map) {
+    final List<String> held = <String>[
+      for (final String reason in const <String>['cpu', 'bandwidth', 'other'])
+        if (durations[reason] is num && (durations[reason] as num) >= 0.5)
+          '$reason ${_seconds(durations[reason])}',
+    ];
+    if (held.isNotEmpty) {
+      out.write(', held back ${held.join(' ')}');
+    }
+  }
+  return out.toString();
+}
+
+String _seconds(Object? value) =>
+    '${value is num && value.isFinite ? value.round() : 0} s';
 
 int _int(Object? value) => value is num && value.isFinite ? value.round() : 0;
 

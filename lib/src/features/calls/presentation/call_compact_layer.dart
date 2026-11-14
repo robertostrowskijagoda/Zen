@@ -12,6 +12,7 @@ import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_compact_mode.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
+import 'package:zen/src/features/calls/call_screen_awake.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -23,9 +24,9 @@ bool callWantsFloatingWindow(CallSession? session) =>
         session.status == CallSessionStatus.connecting ||
         (!session.isIncoming && session.status == CallSessionStatus.ringing));
 
-/// Keeps [CallCompactMode] in step with the current call and, while the
-/// call floats over other apps, shows only the small call view (the rest of
-/// the app stays alive underneath, off screen).
+/// Keeps [CallCompactMode] and [CallScreenAwake] in step with the current
+/// call and, while the call floats over other apps, shows only the small
+/// call view (the rest of the app stays alive underneath, off screen).
 class CallCompactLayer extends ConsumerStatefulWidget {
   const CallCompactLayer({required this.child, super.key});
 
@@ -66,6 +67,9 @@ class _CallCompactLayerState extends ConsumerState<CallCompactLayer> {
   }
 
   void _sync(CallSession? session) {
+    // Above the call screen, the call bar and picture-in-picture alike:
+    // the screen stays on whichever of them shows the call.
+    CallScreenAwake.instance.update(session);
     _mode.updateCall(
       running: callWantsFloatingWindow(session),
       video:
