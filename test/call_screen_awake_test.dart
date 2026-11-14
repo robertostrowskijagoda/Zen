@@ -79,6 +79,7 @@ void main() {
     });
 
     test('not a voice call at the ear, nor a call ringing in, nor none', () {
+      // At the ear the proximity sensor decides instead.
       expect(callScreenAwakeReason(call(kind: CallInviteKind.audio)), isNull);
       // Its own ringing window keeps the screen on while it rings.
       expect(
@@ -91,15 +92,70 @@ void main() {
     });
   });
 
-  group('the keep-on asked of the platform', () {
-    late List<bool> asked;
+  group('the screen of a voice call at the ear', () {
+    CallScreenMode mode(CallSession? session) =>
+        callScreenModeFor(session).mode;
+
+    test('goes dark at the ear on the earpiece, dialled or answered, '
+        'from the first ring on', () {
+      for (final CallSessionStatus status in CallSessionStatus.values) {
+        expect(
+          mode(call(kind: CallInviteKind.audio, status: status)),
+          CallScreenMode.proximity,
+          reason: '$status',
+        );
+      }
+      for (final CallSessionStatus status in <CallSessionStatus>[
+        CallSessionStatus.connecting,
+        CallSessionStatus.active,
+      ]) {
+        expect(
+          mode(
+            call(kind: CallInviteKind.audio, status: status, incoming: true),
+          ),
+          CallScreenMode.proximity,
+        );
+      }
+      expect(
+        mode(call(kind: CallInviteKind.audio, group: true)),
+        CallScreenMode.proximity,
+      );
+    });
+
+    test('not on the loudspeaker or a headset, not in a video call, not '
+        'while a call rings in, not without a call', () {
+      expect(
+        mode(call(kind: CallInviteKind.audio, speaker: true)),
+        CallScreenMode.keepOn,
+      );
+      expect(mode(call()), CallScreenMode.keepOn);
+      expect(
+        mode(call(kind: CallInviteKind.audio, camera: true)),
+        CallScreenMode.keepOn,
+      );
+      expect(
+        mode(
+          call(
+            kind: CallInviteKind.audio,
+            status: CallSessionStatus.ringing,
+            incoming: true,
+          ),
+        ),
+        CallScreenMode.normal,
+      );
+      expect(mode(null), CallScreenMode.normal);
+    });
+  });
+
+  group('what is asked of the platform', () {
+    late List<CallScreenMode> asked;
     late CallScreenAwake awake;
 
     setUp(() {
-      asked = <bool>[];
+      asked = <CallScreenMode>[];
       awake = CallScreenAwake(
-        setter: (bool on) async {
-          asked.add(on);
+        setter: (CallScreenMode mode) async {
+          asked.add(mode);
           return true;
         },
       );
@@ -112,24 +168,41 @@ void main() {
       awake.update(call());
       awake.update(null);
       await Future<void>.delayed(Duration.zero);
-      // The first state always goes (a new engine of the app may find the
-      // flag of an earlier one), then only changes.
-      expect(asked, <bool>[false, true, false]);
+      // The first state always goes (a new engine of the app may find what
+      // an earlier one left), then only changes.
+      expect(asked, <CallScreenMode>[
+        CallScreenMode.normal,
+        CallScreenMode.keepOn,
+        CallScreenMode.normal,
+      ]);
       expect(awake.keptOn, isFalse);
     });
 
-    test('an answered call keeps it after its ringing, and a voice call '
-        'takes it when the loudspeaker goes on and lets it go at the ear', () {
+    test('a voice call moves between the ear and out loud, and becomes a '
+        'video call', () {
       awake.update(call(status: CallSessionStatus.ringing, incoming: true));
       awake.update(call(status: CallSessionStatus.active, incoming: true));
       expect(awake.keptOn, isTrue);
       awake.update(call(kind: CallInviteKind.audio, speaker: true));
-      expect(awake.keptOn, isTrue);
+      expect(awake.mode, CallScreenMode.keepOn);
       awake.update(call(kind: CallInviteKind.audio));
-      expect(awake.keptOn, isFalse);
+      expect(awake.mode, CallScreenMode.proximity);
+      awake.update(call(kind: CallInviteKind.audio, speaker: true));
+      awake.update(call(kind: CallInviteKind.audio));
       awake.update(call(kind: CallInviteKind.audio, camera: true));
-      expect(awake.keptOn, isTrue);
-      expect(asked, <bool>[false, true, false, true]);
+      expect(awake.mode, CallScreenMode.keepOn);
+      awake.update(call(kind: CallInviteKind.audio));
+      awake.update(null);
+      expect(asked, <CallScreenMode>[
+        CallScreenMode.normal,
+        CallScreenMode.keepOn,
+        CallScreenMode.proximity,
+        CallScreenMode.keepOn,
+        CallScreenMode.proximity,
+        CallScreenMode.keepOn,
+        CallScreenMode.proximity,
+        CallScreenMode.normal,
+      ]);
     });
   });
 }

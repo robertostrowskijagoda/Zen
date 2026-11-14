@@ -1177,7 +1177,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       session: session,
     );
     if (!session.isIncoming) {
-      // Nobody answered: maybe nobody was there to hear it.
+      // Nobody answered: the busy tone here, and maybe nobody was there
+      // to hear it.
+      ref.read(callTonesProvider).busy();
       await _sendMissedCallNotice(session);
     }
     await _closeCallMediaSession();

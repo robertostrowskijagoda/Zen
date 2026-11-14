@@ -790,10 +790,30 @@ which shows as the loudspeaker), from the first ring of an outgoing call
 the call screen, the call bar and picture-in-picture, so none of them takes
 it away; the flag is kept apart from the incoming ringing's own (whose end
 used to clear it) and put back on every new window of the app. A voice call
-at the ear does not keep it on: Zen has no proximity handling, so there the
-phone's own timeout applies. The technical log says `Call screen kept on
-(reason)` and `Call screen keep-on released`, with whether the app's window
-took it then. Up to 1.17.1 only a ringing incoming call kept the screen on.
+on the earpiece holds the proximity sensor instead
+(`PROXIMITY_SCREEN_OFF_WAKE_LOCK`, where the phone has it,
+`ZenCallProximity.kt`): the screen goes dark and ignores touches at the
+ear and lights up away from it; released (once nothing is close) when the
+call ends, goes to the loudspeaker or a headset, or becomes a video call.
+One decision (`callScreenModeFor`) chooses between the two. The technical
+log says `Call screen kept on (reason)`, `Call screen keep-on released`,
+`Call screen dark at the ear` and `Call screen proximity released`, with
+whether the window or the sensor took it. Up to 1.17.1 only a ringing
+incoming call kept the screen on, and nothing used the proximity sensor.
+
+**Call tones** (since 1.17.5, `call_tones.dart`, `ZenCallTones.kt`): the
+sounds of a call only this side hears go to the call's audio (Android's
+voice-call stream, usage `VOICE_COMMUNICATION`, at the call's volume and on
+its route) and play whatever the ringer says: the ringback while the other
+phone rings (a call made here, not a group's), the busy tone when the call
+is declined, finds the other side busy or is not answered, a short signal
+when the media drop and the call reconnects, and Zen's chimes when the call
+connects and ends (these two still follow "Dźwięki w aplikacji"). The
+ringback, busy and reconnecting tones are the phone's own (`ToneGenerator`,
+in its country's cadence). The ringing of an incoming call and the message
+sounds follow silent mode and the notification settings as before. On a
+computer only the chimes play (no ringer to follow); on iOS none (as
+before). Each tone leaves a `Call tone` line in the technical log.
 
 **Group calls** (`groupId` and `callId` mandatory): `group_call_invite`,
 `group_call_join`, `group_call_state`, `group_call_leave`, `group_call_decline`,

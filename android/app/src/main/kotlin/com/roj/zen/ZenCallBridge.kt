@@ -76,12 +76,28 @@ object ZenCallBridge {
                 "canUseFullScreenIntent" -> {
                     result.success(canUseFullScreenIntent(context))
                 }
-                "setCallKeepScreenOn" -> {
+                "playCallTone" -> {
+                    result.success(
+                        ZenCallTones.play(
+                            context,
+                            call.argument<String>("tone") ?: "",
+                            call.argument<String>("asset"),
+                        ),
+                    )
+                }
+                "stopCallTone" -> {
+                    ZenCallTones.stop()
+                    result.success(null)
+                }
+                "setCallScreenMode" -> {
+                    val mode = call.arguments as? String ?: "normal"
                     // Calls run only in the app's engine, on its window.
                     if (context is Activity) {
-                        keepOn.call = call.arguments as? Boolean ?: false
+                        keepOn.call = mode == "keepOn"
                     }
-                    result.success(applyKeepScreenOn(context))
+                    val window = applyKeepScreenOn(context)
+                    val proximity = ZenCallProximity.hold(context, mode == "proximity")
+                    result.success(if (mode == "proximity") proximity else window)
                 }
                 "setRingingCallActive" -> {
                     val active = call.arguments as? Boolean ?: false

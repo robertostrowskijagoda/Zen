@@ -410,8 +410,14 @@ and that feature code uses direction-aware paddings and alignments;
 `test/call_compact_test.dart` checks the small call window and
 picture-in-picture sizes; `test/call_screen_awake_test.dart` which calls keep
 the screen on (video, loudspeaker or headset, from the first ring of an
-outgoing call, not at the ear) and that it is asked of the platform once
-per change and released when the call ends.
+outgoing call) and which hold the proximity sensor (a voice call on the
+earpiece), and that it is asked of the platform once per change and
+released when the call ends; `test/call_tones_test.dart` which tone each
+change of a call asks for (ringback, busy, reconnecting, the chimes), that
+every one goes to the call audio in every ringer mode, and that silent mode
+still silences the message sounds; `test/zen_motion_unfocused_test.dart`
+that the "Łączenie…" dots keep moving on a phone whose window has no
+focus.
 
 ### 4.1 Pictures for the user guide (`tool/ui_tour/docs_screens_test.dart`)
 

@@ -329,8 +329,18 @@ the loudspeaker or a headset, from the first ring of a call you make to its
 end, however the call was answered (in the app, on the lock screen, from the
 notification) and whatever shows it (the call screen, the call bar over the
 app, the small window over other apps). It goes back to the phone's usual
-timeout when the call ends. A voice call held at the ear is left to the
-phone's own screen timeout, as before. Before, only a call that was still
+timeout when the call ends. A voice call held at the ear on the earpiece
+turns the screen off and ignores touches while the phone is at the ear,
+and lights it again when you take it away (Android, where the phone has a
+proximity sensor).
+
+When you call someone you hear the ringing tone while their phone rings,
+and a busy tone if they decline, are busy or do not answer; a short signal
+when a call drops and Zen tries to bring it back; and the chimes when it
+connects and ends. These sounds belong to the call: they play on the call's
+volume and route (earpiece, loudspeaker or headset) also on a phone set to
+silent or vibrate. An incoming call's ringing and message sounds still
+follow silent mode and Zen's notification settings. Before, only a call that was still
 ringing kept the screen on, and on most phones a call went dark after the
 screen timeout when nobody touched it.
 
