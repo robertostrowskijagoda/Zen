@@ -134,9 +134,9 @@ abstract final class PyrT {
   static const Set<String> ruled = <String>{verdict, appealAnswer};
 
   /// The seal of a treasurers' era ([PyrSeal]): signed by most of the
-  /// treasurers who came after it, it fixes who the era's treasurers were,
-  /// from when to when, and which private operations dated in it count.
-  /// Nothing dated in a sealed era changes it any more: an operation it
+  /// era's own treasurers, it fixes from when to when it ran, which of its
+  /// private operations count, and who the next era's treasurers are.
+  /// Nothing changes a sealed era any more: an operation of it the seal
   /// does not list counts nowhere, a change of the tree dated into it
   /// folds after the seals.
   static const String seal = 'seal';
@@ -176,25 +176,13 @@ abstract final class PyrT {
   };
 
   /// Kinds a phone folds at the time it first saw them when they came late
-  /// ([kPyrLateMs]), not at their own: [timed], the changes of the tree
-  /// that touch the treasurers' levels (the service notes only those late:
-  /// one dated back would otherwise move a past set of treasurers and undo
-  /// a payment that counted), and the cell vote's cards and votes (one
-  /// dated back into a vote that ended would turn it around). The seals of
-  /// the treasurers' eras and the closes of cell votes then fix the same
-  /// on every phone, also on one that was not there.
-  static const Set<String> foldedLate = <String>{
-    ...timed,
-    admit,
-    swap,
-    leave,
-    fill,
-    absent,
-    remove,
-    migrate,
-    ballot,
-    vote,
-  };
+  /// ([kPyrLateMs]), not at their own: [timed], and the cell vote's cards
+  /// and votes (one dated back into a vote that ended would turn it
+  /// around); the closes of cell votes then fix the same on every phone.
+  /// Changes of the tree fold at their own time: the treasurers who sign
+  /// payments come from the seals ([seal]), so however one is dated it
+  /// reaches the money only from the era after the seal that names it.
+  static const Set<String> foldedLate = <String>{...timed, ballot, vote};
 
   /// Kinds that change who sits where: what may move the treasurers.
   static const Set<String> tree = <String>{

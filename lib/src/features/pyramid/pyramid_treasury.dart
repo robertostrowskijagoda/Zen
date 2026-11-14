@@ -567,7 +567,7 @@ final class _Treasury {
 
   // ---- ordering ----
 
-  /// Sends [order] (or a settlement) to every treasurer of its time, with
+  /// Sends [order] (or a settlement) to every treasurer of its era, with
   /// the releases of its number it follows; kept until most of them
   /// signed — also across a restart — and sent again as it is.
   Future<void> toTreasurers(PyramidRecord order) async {
@@ -579,7 +579,7 @@ final class _Treasury {
     pyr._resentAt[order.id] = pyr._now();
     await pyr._save();
     final List<Map<String, dynamic>> rel = _chainsOf(<PyramidRecord>[order], s);
-    for (final String t in s.treasurersAt(order.at)) {
+    for (final String t in PyrLedger.treasurersOf(order, s)) {
       await sendTo(t, <String, dynamic>{
         'k': _Priv.order,
         'r': order.toJson(),
@@ -719,26 +719,35 @@ final class _Treasury {
   }
 
   /// This person's orders and settlements still waiting that a release
-  /// left behind go out again, signed afresh in the span the release
-  /// starts: the same number (or payment), the same payee and amount, a
-  /// new time. An acceptance past its time is dropped instead (no honest
-  /// treasurer signs it any more); so is anything when the app may not
-  /// sign now.
+  /// left behind, or whose era was sealed without them, go out again,
+  /// signed afresh in the span the release starts and the era open now:
+  /// the same number (or payment), the same payee and amount, a new time.
+  /// One its era's seal lists counted: it waits no more. An acceptance
+  /// past its time is dropped instead (no honest treasurer signs it any
+  /// more); so is anything when the app may not sign now.
   Future<void> _reissue(PyramidState s) async {
     final LedgerKeyPair? me = pyr._signer;
     if (me == null) {
       return;
     }
     final PyrLedgerView v = view(s);
-    final List<PyramidRecord> stale = <PyramidRecord>[
-      for (final PyramidRecord r in pyr._payments.values)
-        if (r.pyramid == s.id &&
-            r.signers.contains(me.id) &&
-            v.leftBehind(r, s) &&
-            (PyrLedger.relOf(r).isEmpty ||
-                ledger.releases.containsKey(PyrLedger.relOf(r))))
-          r,
-    ];
+    final List<PyramidRecord> stale = <PyramidRecord>[];
+    for (final PyramidRecord r in pyr._payments.values.toList()) {
+      if (r.pyramid != s.id || !r.signers.contains(me.id)) {
+        continue;
+      }
+      final PyrSeal? sealed = s.sealOfEra(PyrLedger.eraOf(r));
+      if (sealed != null && sealed.ops.contains(r.id)) {
+        pyr._payments.remove(r.id);
+        pyr._resentAt.remove(r.id);
+      } else if (sealed != null ||
+          PyrLedger.eraOf(r) < 1 ||
+          (v.leftBehind(r, s) &&
+              (PyrLedger.relOf(r).isEmpty ||
+                  ledger.releases.containsKey(PyrLedger.relOf(r))))) {
+        stale.add(r);
+      }
+    }
     if (stale.isEmpty || !await TamperGuard.allowsSensitive()) {
       return;
     }
@@ -756,6 +765,7 @@ final class _Treasury {
       final Map<String, dynamic> body = <String, dynamic>{
         ...r.body,
         'at': orderAt(me.id),
+        'after': s.seals.length,
         'nc': pyr._newId(24),
       };
       if (rel.isEmpty) {
@@ -781,8 +791,9 @@ final class _Treasury {
     if (me == null || s == null || raw == null || !PyrLedger.fits(raw)) {
       return;
     }
-    if (!s.treasurersAt(raw.at).contains(me.id) ||
-        !s.treasurers.contains(me.id)) {
+    // A treasurer of the era open here; one of another era is refused
+    // with that reason ([PyrLedger.problem]), so its payer orders again.
+    if (!s.treasurers.contains(me.id)) {
       return;
     }
     final PyramidRecord? op = await checked(raw, s);
@@ -852,13 +863,18 @@ final class _Treasury {
     // The same order again (its signature lost on the way) is signed
     // again, not counted twice.
     if (already != op.id) {
-      final String? why = ledger.problem(
-        op,
-        s,
-        now,
-        signedToday: times.length,
-        current: v,
-      );
+      // Once this treasurer signed a seal of the open era, nothing more of
+      // it: what is signed now would be left out, its payer orders again
+      // in the next era.
+      final String? why = pyr._signedOrders['seal|${s.openEra}'] != null
+          ? kPyrOtherEra
+          : ledger.problem(
+              op,
+              s,
+              now,
+              signedToday: times.length,
+              current: v,
+            );
       if (why != null) {
         if (answer && op.signers.isNotEmpty) {
           await sendTo(op.signers.first, <String, dynamic>{
@@ -910,7 +926,7 @@ final class _Treasury {
         k is! String ||
         sig is! String ||
         order.tsigs.containsKey(k) ||
-        !s.treasurersAt(order.at).contains(k)) {
+        !PyrLedger.treasurersOf(order, s).contains(k)) {
       return;
     }
     final PyramidRecord one = PyramidRecord(
@@ -961,15 +977,21 @@ final class _Treasury {
         why is! String ||
         why.length > 16 ||
         after is! int ||
-        !s.treasurersAt(order.at).contains(k) ||
+        !PyrLedger.treasurersOf(order, s).contains(k) ||
         !(from == null ? k == pyr.myKey : _sentBy(s, k, from))) {
+      return;
+    }
+    if (why == PyrLedger.refusalCode(kPyrOtherEra)) {
+      // Another era on that treasurer's phone: once a seal closes the
+      // order's era here, it goes out again in the next ([_reissue]);
+      // until then it is sent again as it is.
       return;
     }
     // A time ahead of any clock a treasurer accepts names nothing real.
     final int when = min(after, pyr._now() + kPyrMaxSkewMs);
     (_refusals[order.id] ??= <String, (String, int)>{})[k] = (why, when);
     pyr._changed();
-    final List<String> t = s.treasurersAt(order.at);
+    final List<String> t = PyrLedger.treasurersOf(order, s);
     final Map<String, (String, int)> no = _refusals[order.id]!;
     final int later = no.values.fold(
       0,
@@ -991,7 +1013,7 @@ final class _Treasury {
     if (order == null || s == null || no == null) {
       return null;
     }
-    final List<String> t = s.treasurersAt(order.at);
+    final List<String> t = PyrLedger.treasurersOf(order, s);
     final Map<String, int> by = <String, int>{};
     for (final MapEntry<String, (String, int)> e in no.entries) {
       if (t.contains(e.key)) {
@@ -1026,6 +1048,7 @@ final class _Treasury {
       body: <String, dynamic>{
         ...old.body,
         'at': orderAt(me.id, after: after),
+        'after': s.seals.length,
         'nc': pyr._newId(24),
       },
     ).signedBy(me);
@@ -1048,14 +1071,14 @@ final class _Treasury {
     return out;
   }
 
-  /// An operation that counts goes to every treasurer (of its time and of
+  /// An operation that counts goes to every treasurer (of its era and of
   /// now) and to those it concerns: the payer, the one paid, the one whose
   /// word a payment waits for, the next one of an announcement — with the
   /// releases of its number it follows.
   Future<void> _spreadDone(PyramidRecord op, PyramidState s) async {
     final List<PyramidRecord> chain = _withChain(op);
     final Set<String> to = <String>{
-      ...s.treasurersAt(op.at),
+      ...PyrLedger.treasurersOf(op, s),
       ...s.treasurers,
       for (final PyramidRecord x in chain) ...PyrLedger.partiesOf(x),
     }..remove(pyr.myKey);
@@ -1170,7 +1193,7 @@ final class _Treasury {
     ];
     final List<Map<String, dynamic>> rel = _chainsOf(paid, s);
     for (final String k in <String>{
-      for (final PyramidRecord op in paid) ...s.treasurersAt(op.at),
+      for (final PyramidRecord op in paid) ...PyrLedger.treasurersOf(op, s),
       ...s.treasurers,
     }.toList()..sort()) {
       if (k != me) {
@@ -1761,14 +1784,14 @@ final class _Treasury {
   /// ledger as evidence, whether it counts or not: within
   /// [kPyrMaxOpBytes], dated within the treasurers' time (not before the
   /// first era, not ahead of this clock), and signed by a treasurer of its
-  /// time — what only treasurers make. How many of one payer's that do
+  /// era — what only treasurers make. How many of one payer's that do
   /// not count are kept is bounded by [_tidy].
   bool _evidence(PyramidRecord op, PyramidState s) =>
       PyrLedger.fits(op) &&
       s.treasurerEras.isNotEmpty &&
       op.at >= s.treasurerEras.first.$1 &&
       op.at <= pyr._now() + kPyrMaxSkewMs &&
-      op.tsigs.keys.any(s.treasurersAt(op.at).contains);
+      op.tsigs.keys.any(PyrLedger.treasurersOf(op, s).contains);
 
   /// The ledger's last tidy: the ledger's revision and the pyramid's.
   Object? _tidied;
@@ -1803,11 +1826,11 @@ final class _Treasury {
       final String span = PyrLedger.spanOf(op);
       final PyramidRecord? had = latest[span];
       if (PyrLedger.relOf(op).isNotEmpty &&
+          PyrLedger.eraOf(op) == s.openEra &&
           !v.leftBehind(op, s) &&
           !v.counted.contains(op.id) &&
           !v.slots.containsKey(PyrLedger.slotOf(op)) &&
           pyr._signedOrders[span] == null &&
-          s.treasurersAt(op.at).contains(me.id) &&
           (had == null || PyrLedger.isLater(op, had))) {
         latest[span] = op;
       }
@@ -1829,7 +1852,8 @@ final class _Treasury {
     final Map<String, List<PyramidRecord>> spans =
         <String, List<PyramidRecord>>{};
     for (final PyramidRecord op in ledger.ops.values) {
-      if (!v.leftBehind(op, s) && s.sealAt(op.at) == null) {
+      if (!v.leftBehind(op, s) &&
+          s.sealOfEra(PyrLedger.eraOf(op)) == null) {
         (spans[PyrLedger.slotOf(op)] ??= <PyramidRecord>[]).add(op);
       }
     }
@@ -1839,7 +1863,9 @@ final class _Treasury {
     for (final MapEntry<String, List<PyramidRecord>> e in spans.entries) {
       final String slot = e.key;
       if (v.slots.containsKey(slot) ||
-          e.value.any((PyramidRecord op) => op.at < s.treasurerEraStart) ||
+          e.value.any(
+            (PyramidRecord op) => PyrLedger.eraOf(op) != s.openEra,
+          ) ||
           !PyrLedger.isSplit(e.value, s.treasurers)) {
         continue;
       }
@@ -1859,7 +1885,7 @@ final class _Treasury {
         pyramid: s.id,
         slot: slot,
         prev: prev,
-        at: s.treasurerEraStart,
+        at: s.sealedTo,
       );
       final String once = 'rel|$seenKey';
       final String? done = pyr._signedOrders[once];
@@ -2090,11 +2116,11 @@ final class _Treasury {
       );
     }
     // Orders and settlements still waiting go out again as they are (every
-    // half hour), until they count, are a week old, the treasurers changed
-    // since (the new ones sign none from before), or their number or
+    // half hour), until they count, are a week old, or their number or
     // payment went to another one (sent from another device of the
     // account); signed afresh in the next span when a release left theirs
-    // behind.
+    // behind, and in the era open now when a seal closed theirs without
+    // them.
     await _reissue(s);
     final PyrLedgerView v = view(s);
     for (final PyramidRecord r in pyr._payments.values.toList()) {
@@ -2103,8 +2129,7 @@ final class _Treasury {
       if ((kept != null && PyrLedger.isFinal(kept, s)) ||
           (took != null && took != r.id) ||
           (r.type == PyrT.transfer && r.integer('seq') < nextSeq(me)) ||
-          now - r.at > kPyrMaxOrderAgeMs ||
-          r.at < s.treasurerEraStart) {
+          now - r.at > kPyrMaxOrderAgeMs) {
         pyr._payments.remove(r.id);
         pyr._resentAt.remove(r.id);
         await pyr._save();

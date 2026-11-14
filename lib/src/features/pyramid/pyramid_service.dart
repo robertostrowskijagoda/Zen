@@ -1765,17 +1765,8 @@ final class PyramidService extends ChangeNotifier {
   }
 
   /// Whether [r] folds at the time this phone saw it when it comes late
-  /// ([PyrT.foldedLate]): a change of the tree only where it may change the
-  /// treasurers.
-  bool _foldsLate(PyramidRecord r) {
-    if (!PyrT.foldedLate.contains(r.type)) {
-      return false;
-    }
-    if (!PyrT.tree.contains(r.type)) {
-      return true;
-    }
-    return _state?.touchesTreasurers(r) ?? true;
-  }
+  /// ([PyrT.foldedLate]).
+  bool _foldsLate(PyramidRecord r) => PyrT.foldedLate.contains(r.type);
 
   /// Records whose signatures name ML-DSA keys this phone does not hold
   /// yet (the admission or handover that publishes them has not come), by
@@ -4011,6 +4002,9 @@ final class PyramidService extends ChangeNotifier {
         'to': to,
         'amount': amount,
         'seq': seq,
+        // The last seal known here: the order is of the era after it, and
+        // only that era's treasurers sign it ([PyrLedger.eraOf]).
+        'after': s.seals.length,
         // The release of the number this order follows, when it was split
         // before ([PyrLedger.isSplit]).
         'rel': ?_treasury.relFor('$payer|$seq'),
@@ -4102,6 +4096,7 @@ final class PyramidService extends ChangeNotifier {
         'x': transferId,
         'ok': ok,
         if (ok && next != null) 'next': next,
+        'after': s.seals.length,
         'rel': ?_treasury.relFor('x|$transferId'),
         'nc': _newId(24),
       },

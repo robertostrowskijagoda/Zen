@@ -353,11 +353,32 @@ final class PyrElection {
       tokens != null && tokens!.isNotEmpty && votes.length >= tokens!.length;
 }
 
+/// The longest an era of the treasurers runs before its treasurers seal
+/// it ([PyrSeal]): a change of the tree waits for a seal to reach the
+/// money, so for at most this long (or [kPyrEraChangeMs]).
+const int kPyrEraMs = 6 * 3600 * 1000;
+
+/// An era whose treasurers the tree has changed may be sealed once it ran
+/// this long: a new treasurer does not wait the whole [kPyrEraMs].
+const int kPyrEraChangeMs = 3600 * 1000;
+
+/// An era may be sealed once this many of its operations count, however
+/// short it was: a seal lists them all and must fit a record.
+const int kPyrEraOps = 2000;
+
+/// The most operations a seal may list: [kPyrEraOps] and those signed
+/// meanwhile by treasurers that had not yet seen the era close. About
+/// 270 KB of ids, far below a record's limit with every signature.
+const int kPyrMaxSealOps = 2 * kPyrEraOps;
+
 /// A sealed era of the treasurers ([PyrT.seal]): from [from] (inclusive)
-/// to [to] (exclusive) the treasurers were [set]; from [to] on they were
-/// [next], most of whom signed it. Of the private operations dated in it
-/// only [ops] count; [changes] are what changed the treasurers at [to]
-/// (records, or a change by time).
+/// to [to] (exclusive) the treasurers were [set], most of whom signed it;
+/// from [to] on they are [next], the treasurers of the tree at [to]. Of
+/// the private operations of the era (those naming the seal before it,
+/// `after`) only [ops] count; [changes] are the changes of the tree it
+/// takes in: what changed the treasurers inside it (or at its end), and
+/// the members who left that no seal before named. A change of the tree
+/// reaches the money only from the era after the seal that names it.
 @immutable
 final class PyrSeal {
   const PyrSeal({
@@ -375,7 +396,7 @@ final class PyrSeal {
 
   final String id;
 
-  /// Who signed it (of [next]).
+  /// Who signed it (of [set]).
   final List<String> signers;
 
   /// Which era (1: the founder's), and the seal of the era before ('' for
@@ -391,8 +412,22 @@ final class PyrSeal {
 
   bool covers(int at) => at >= from && at < to;
 
+  /// Whether this seal dominates [other] of the same era: it lists every
+  /// operation [other] lists and more, or the same ones with the lower id
+  /// (the hash of its content). A treasurer signs a later proposal only
+  /// when it dominates the one it signed before, so of two seals of one
+  /// era that neither dominates, whoever signed both cheated.
+  bool dominates(PyrSeal other) =>
+      ops.containsAll(other.ops) &&
+      (ops.length > other.ops.length || id.compareTo(other.id) < 0);
+
+  /// Whether one honest treasurer may have signed both this and [other].
+  bool comparable(PyrSeal other) =>
+      id == other.id || dominates(other) || other.dominates(this);
+
   /// The seal [r] would be, read without the rules (which the fold
-  /// applies): null when it is not even shaped like one.
+  /// applies): null when it is not even shaped like one, or lists more
+  /// than [kPyrMaxSealOps] operations.
   static PyrSeal? read(PyramidRecord r) {
     final Map<String, dynamic> b = r.body;
     List<String>? keys(Object? x) {
@@ -403,6 +438,7 @@ final class PyrSeal {
     }
 
     final List<String>? set = keys(b['set']);
+    final List<String>? next = keys(b['next']);
     final List<String>? ops = keys(b['ops']);
     final List<String>? ch = keys(b['ch']);
     if (r.type != PyrT.seal ||
@@ -411,8 +447,11 @@ final class PyrSeal {
         b['to'] is! int ||
         (b['prev'] != null && b['prev'] is! String) ||
         set == null ||
+        next == null ||
         ops == null ||
-        ch == null) {
+        ch == null ||
+        ops.length > kPyrMaxSealOps ||
+        !listEquals(set, List<String>.of(r.candidates)..sort())) {
       return null;
     }
     return PyrSeal(
@@ -422,15 +461,15 @@ final class PyrSeal {
       from: b['from'] as int,
       to: b['to'] as int,
       set: set,
-      next: List<String>.of(r.candidates)..sort(),
+      next: next,
       ops: ops.toSet(),
       changes: ch.toSet(),
       signers: r.signers,
     );
   }
 
-  /// The body of the seal of era [n] — the same on every phone that
-  /// counted the same: what a treasurer of the next era signs.
+  /// The body of the seal of era [n], what its treasurers co-sign: the
+  /// same on every phone that counted the same at the same end.
   static Map<String, dynamic> body({
     required String pyramid,
     required int n,
@@ -444,31 +483,35 @@ final class PyrSeal {
   }) => <String, dynamic>{
     't': PyrT.seal,
     'py': pyramid,
-    // Dated at the end of its era: the first seal of an era is the one
-    // with the earliest end, and nobody can date one earlier than that.
+    // Dated at the end of its era, which its proposer chose.
     'at': to,
-    'by': List<String>.of(next)..sort(),
+    // Signed by the era's own treasurers: the next ones come from it.
+    'by': List<String>.of(set)..sort(),
     'n': n,
     if (prev.isNotEmpty) 'prev': prev,
     'from': from,
     'to': to,
     'set': List<String>.of(set)..sort(),
+    'next': List<String>.of(next)..sort(),
     'ops': ops.toSet().toList()..sort(),
     'ch': changes.toSet().toList()..sort(),
   };
 }
 
 /// What one run of the fold takes besides the records: the times records
-/// fold at when not their own, the closes of cell votes, and the records
-/// refused as made after a seal.
+/// fold at when not their own, the closes of cell votes, the records
+/// refused as made after a seal, and the seals the fold expects
+/// ([PyramidState._planSeals]).
 typedef _FoldInput = ({
   Map<String, int> times,
   Map<String, List<PyramidRecord>> closes,
   Set<String> after,
+  Set<String> plan,
 });
 
-/// The era a seal of [PyramidState.unsealedEra] would close: who were the
-/// treasurers when, who came after, and what changed them.
+/// What a seal of the open era ending at [to] says besides the
+/// operations ([PyramidState.eraToSeal]): who were its treasurers, who
+/// they are at its end, and the changes of the tree it takes in.
 typedef PyrEraToSeal = ({
   int n,
   String prev,
@@ -923,9 +966,9 @@ final class PyramidState {
   final Map<int, int> emittedInTerm = <int, int>{};
   final Map<String, PyrEmission> emissions = <String, PyrEmission>{};
 
-  /// The treasurers through time: from when each set holds (the oldest
-  /// first). Payments are private (`pyramid_ledger.dart`): a payment
-  /// counts with the signatures of most of the treasurers of its time.
+  /// The treasurers of the tree through time: from when each set holds
+  /// (the oldest first). Who signs payments is not this but the seals'
+  /// ([treasurersOfEra]): the tree reaches the money through them.
   final List<(int, List<String>)> treasurerEras = <(int, List<String>)>[];
   bool _treasurersDirty = true;
 
@@ -933,12 +976,26 @@ final class PyramidState {
   /// [treasurerEras]: the records (or the changes by time) applied then.
   final Map<int, List<String>> _eraChanges = <int, List<String>>{};
 
-  /// The sealed eras, the founder's first ([PyrT.seal]): before
-  /// [sealedTo] the treasurers and what counted are theirs.
+  /// The sealed eras, the founder's first ([PyrT.seal]): the treasurers
+  /// of era n + 1 are the `next` of the seal of era n.
   final List<PyrSeal> seals = <PyrSeal>[];
 
-  /// Treasurers who signed two different seals of one era → the seals:
-  /// proof, public like the seals.
+  /// The changes a seal named ([PyrSeal.changes]) → the era of the first
+  /// seal that named it.
+  final Map<String, int> _namedIn = <String, int>{};
+
+  /// Who left the pyramid when, and what made them ([_noteLevel]): a
+  /// departure reaches the money only once a seal names it.
+  final Map<String, List<(int, String)>> _departures =
+      <String, List<(int, String)>>{};
+
+  /// The seals the fold expects ([_planSeals]); any other seal record is
+  /// not taken.
+  Set<String> _plan = const <String>{};
+
+  /// Treasurers who signed two seals of one era neither of which
+  /// dominates the other ([PyrSeal.comparable]) → the seals: proof, public
+  /// like the seals.
   final Map<String, Set<String>> sealCheaters = <String, Set<String>>{};
 
   /// The closes of cell votes by vote, seen before the fold
@@ -1148,8 +1205,13 @@ final class PyramidState {
     return out;
   }
 
-  /// The treasurers now.
-  List<String> get treasurers => _treasurersNow();
+  /// The treasurers now: those of the open era ([openEra]), who sign
+  /// payments. The tree may already have others ([treeTreasurers]); they
+  /// take over from the era after the next seal.
+  List<String> get treasurers => treasurersOfEra(openEra);
+
+  /// Who sits at the treasurers' levels of the tree now.
+  List<String> get treeTreasurers => _treasurersNow();
 
   int get treasurerMajority => treasurers.length ~/ 2 + 1;
 
@@ -1176,9 +1238,59 @@ final class PyramidState {
   }
 
   /// The treasurers at [at]: those of the sealed era it falls in
-  /// ([seals]), else those of the era of the tree it falls in (the first
-  /// one for anything before it).
-  List<String> treasurersAt(int at) => sealAt(at)?.set ?? _treeTreasurersAt(at);
+  /// ([seals]), those of the open era after the last seal, the founder's
+  /// era's before the first. Never the tree's of that time: a change of
+  /// the tree, however it is dated, reaches them only through a seal.
+  List<String> treasurersAt(int at) {
+    final PyrSeal? x = sealAt(at);
+    if (x != null) {
+      return x.set;
+    }
+    if (seals.isNotEmpty && at >= seals.last.to) {
+      return seals.last.next;
+    }
+    return _firstEra?.$2 ?? const <String>[];
+  }
+
+  /// The era open now: the one after the last seal.
+  int get openEra => seals.length + 1;
+
+  /// The treasurers of era [n]: the founder's era's for the first, then
+  /// the `next` of the seal before; none for an era after the open one.
+  List<String> treasurersOfEra(int n) {
+    if (n < 1 || n > openEra) {
+      return const <String>[];
+    }
+    if (n == 1) {
+      return _firstEra?.$2 ?? const <String>[];
+    }
+    return seals[n - 2].next;
+  }
+
+  /// The seal of era [n], when it is sealed.
+  PyrSeal? sealOfEra(int n) => n >= 1 && n <= seals.length ? seals[n - 1] : null;
+
+  /// Whether [key] is a member for a private operation of era [era] dated
+  /// [at]: a member then, or one who left by a change no seal before that
+  /// era named ([PyrSeal.changes]). A departure dated back, even into an
+  /// era long sealed, so undoes no payment: like any change of the tree it
+  /// reaches the money from the era after the seal that names it.
+  bool moneyMemberAt(String key, int era, int at) {
+    if (memberAt(key, at)) {
+      return true;
+    }
+    (int, String)? out;
+    for (final (int, String) d in _departures[key] ?? const <(int, String)>[]) {
+      if (d.$1 <= at) {
+        out = d;
+      }
+    }
+    if (out == null) {
+      return false;
+    }
+    final int? named = _namedIn[out.$2];
+    return named == null ? !out.$2.startsWith('auto|') : named >= era;
+  }
 
   List<String> _treeTreasurersAt(int at) {
     List<String> out = const <String>[];
@@ -1189,30 +1301,6 @@ final class PyramidState {
       out = set;
     }
     return out;
-  }
-
-  /// Whether [r] may change who the treasurers are: a change of the tree
-  /// ([PyrT.tree]) that names a place at the treasurers' levels, or a
-  /// member there or right below (who may move up into them).
-  bool touchesTreasurers(PyramidRecord r) {
-    if (!PyrT.tree.contains(r.type)) {
-      return false;
-    }
-    final int depth = params.treasurerDepth;
-    bool near(String k) => (levelOf(k) ?? depth + 2) <= depth + 1;
-    for (final MapEntry<String, dynamic> e in r.body.entries) {
-      final Object? v = e.value;
-      if (v is! String) {
-        continue;
-      }
-      if ((e.key == 'slot' || e.key == 'cell') && v.length <= depth) {
-        return true;
-      }
-      if (near(v)) {
-        return true;
-      }
-    }
-    return r.signers.any(near);
   }
 
   /// The sealed era [at] falls in, or null.
@@ -1233,52 +1321,64 @@ final class PyramidState {
     return seals[lo];
   }
 
-  /// Until when the eras are sealed (the founding, while none is).
+  /// Until when the eras are sealed (the founding, while none is): where
+  /// the open era starts.
   int get sealedTo => seals.isEmpty ? (_firstEra?.$1 ?? 0) : seals.last.to;
 
-  /// Since when the treasurers now are the treasurers.
-  int get treasurerEraStart =>
-      treasurerEras.isEmpty ? 0 : treasurerEras.last.$1;
-
-  /// The founder's era: the first with somebody in it, with the
-  /// treasurers after every change made at its start.
+  /// The founder's era: from the founding, with the founder alone as its
+  /// treasurer (whoever else a record dates at the same millisecond), who
+  /// alone seals it.
   (int, List<String>)? get _firstEra {
     for (final (int at, List<String> set) in treasurerEras) {
       if (set.isNotEmpty) {
-        return (at, _treeTreasurersAt(at));
+        return (at, set);
       }
     }
     return null;
   }
 
-  /// The oldest era that ended and is not sealed yet, with what its seal
-  /// says besides the operations; null while the era after the last seal
-  /// still goes on.
-  PyrEraToSeal? get unsealedEra {
+  /// Whether a change of the tree at [at] falls in era [n] from [from] to
+  /// [to] for its seal: after its start (the founder's era from it, the
+  /// founding aside), up to and with its end.
+  static bool _inEra(int at, int n, int from, int to) =>
+      at <= to && (at > from || (n == 1 && at == from));
+
+  /// What a seal of the open era ending at [to] says besides the
+  /// operations, as this phone sees it; null before the founding or for an
+  /// end not after the era's start. Its next treasurers are the tree's at
+  /// [to]; its changes, what changed the tree's treasurers after its start
+  /// up to [to] (a change no seal named that was dated back into a sealed
+  /// era folds right after the last seal, so it is among them), and every
+  /// departure up to [to] no seal named yet.
+  PyrEraToSeal? eraToSeal(int to) {
     final (int, List<String>)? first = _firstEra;
-    if (first == null) {
+    final int from = sealedTo;
+    if (first == null || to <= from) {
       return null;
     }
     final PyrSeal? last = seals.lastOrNull;
-    final int from = last?.to ?? first.$1;
-    final List<String> set = last?.next ?? first.$2;
-    for (final (int at, List<String> _) in treasurerEras) {
-      // The treasurers after every change made at that time.
-      final List<String> next = _treeTreasurersAt(at);
-      if (at <= from || listEquals(next, set)) {
-        continue;
-      }
-      return (
-        n: seals.length + 1,
-        prev: last?.id ?? '',
-        from: from,
-        to: at,
-        set: set,
-        next: next,
-        changes: List<String>.of(_eraChanges[at] ?? const <String>[])..sort(),
-      );
-    }
-    return null;
+    final Set<String> changes = <String>{
+      for (final MapEntry<int, List<String>> e in _eraChanges.entries)
+        if (_inEra(e.key, openEra, from, to))
+          for (final String c in e.value)
+            if (c != _foundingCause && c != id) c,
+      for (final List<(int, String)> l in _departures.values)
+        for (final (int at, String cause) in l)
+          if (at <= to &&
+              cause.isNotEmpty &&
+              !_namedIn.containsKey(cause) &&
+              !cause.startsWith('auto|'))
+            cause,
+    };
+    return (
+      n: openEra,
+      prev: last?.id ?? '',
+      from: from,
+      to: to,
+      set: last?.next ?? first.$2,
+      next: _treeTreasurersAt(to),
+      changes: changes.toList()..sort(),
+    );
   }
 
   /// Notes a new era when the tree (or the depth) changed who they are,
@@ -1294,7 +1394,14 @@ final class PyramidState {
     }
     treasurerEras.add((at, now));
     (_eraChanges[at] ??= <String>[]).add(_cause);
+    if (_foundingCause.isEmpty && now.isNotEmpty) {
+      _foundingCause = _cause;
+    }
   }
+
+  /// What seated the founder: the founder's era starts with it, and no
+  /// seal names it.
+  String _foundingCause = '';
 
   /// The daily limit of orders at [at].
   int xferLimitAt(int at) {
@@ -1699,15 +1806,17 @@ final class PyramidState {
   ///   from then (a back-dated one skips nothing). A veto of it folds after
   ///   it. A phone that first sees such a record in a full sync (it kept
   ///   nothing newer) takes the record's own time. So do the other kinds of
-  ///   [PyrT.foldedLate] the service noted late: a change of the tree at
-  ///   the treasurers' levels, a cell vote's cards and votes;
+  ///   [PyrT.foldedLate] the service noted late: a cell vote's cards and
+  ///   votes;
   /// - the seals of the treasurers' eras ([PyrT.seal]) fix the past for
-  ///   every phone, also one that was not there: a change of the tree
-  ///   that would change the treasurers inside a sealed era (or at its end,
-  ///   not among the changes its seal names) was made after the seal and
-  ///   folds after the last seal; any other record that would is refused;
-  ///   a record a seal names as a change at its end folds then. A seal that
-  ///   does not hold even so is no seal: the fold runs without it;
+  ///   every phone, also one that was not there, and they alone say who
+  ///   signs payments: a change of the tree that would change the
+  ///   treasurers inside a sealed era (or at its end) and that its seal
+  ///   does not name was made after the seal and folds right after the
+  ///   last seal; any other record that would is refused; one a later
+  ///   seal names folds right after the seal before that one, as it did on
+  ///   its signers' phones. A seal that does not hold even so is no seal:
+  ///   the fold runs without it;
   /// - a cell vote's close ([PyrT.voteClose]) lists the votes that count.
   /// A record whose rule throws is skipped, never the whole pyramid; with
   /// rules 2 it leaves no trace either: the fold runs again with it
@@ -1737,7 +1846,15 @@ final class PyramidState {
     List<PyrSeal> plan = _planSeals(sealRecords, noSeal);
     Map<String, int> times = _sealTimes(plan, byId, seen);
     Set<String> after = const <String>{};
-    PyramidState s = _foldOnce(pyramidId, list, now, times, closes, after);
+    PyramidState s = _foldOnce(
+      pyramidId,
+      list,
+      now,
+      times,
+      closes,
+      after,
+      plan,
+    );
     // A few rounds at most: each one either moves what came after the
     // seals, or drops a seal that does not hold.
     for (int round = 0; round < 3 && plan.isNotEmpty; round++) {
@@ -1748,7 +1865,7 @@ final class PyramidState {
       if (moved.isNotEmpty || refused.isNotEmpty) {
         times = <String, int>{...times, ...moved};
         after = <String>{...after, ...refused};
-        s = _foldOnce(pyramidId, list, now, times, closes, after);
+        s = _foldOnce(pyramidId, list, now, times, closes, after, plan);
       }
       int held = 0;
       while (held < plan.length &&
@@ -1763,8 +1880,9 @@ final class PyramidState {
       plan = _planSeals(sealRecords, noSeal);
       times = _sealTimes(plan, byId, seen);
       after = const <String>{};
-      s = _foldOnce(pyramidId, list, now, times, closes, after);
+      s = _foldOnce(pyramidId, list, now, times, closes, after, plan);
     }
+    s._noteSealCheaters(sealRecords);
     return s;
   }
 
@@ -1778,6 +1896,7 @@ final class PyramidState {
     Map<String, int> times,
     Map<String, List<PyramidRecord>> closes,
     Set<String> after,
+    List<PyrSeal> plan,
   ) {
     final List<PyramidRecord> list = List<PyramidRecord>.of(records)
       ..sort(
@@ -1786,7 +1905,12 @@ final class PyramidState {
             : (PyramidRecord a, PyramidRecord b) =>
                   _orderAt(a, times[a.id] ?? a.at, b, times[b.id] ?? b.at),
       );
-    final _FoldInput input = (times: times, closes: closes, after: after);
+    final _FoldInput input = (
+      times: times,
+      closes: closes,
+      after: after,
+      plan: <String>{for (final PyrSeal x in plan) x.id},
+    );
     PyramidState s = _runClean(
       pyramidId,
       list,
@@ -1803,40 +1927,72 @@ final class PyramidState {
   }
 
   /// The seals a fold expects, one after the other from the founder's
-  /// era: for each era the well-formed one with the earliest end (then
-  /// the id) that follows the one before and is signed by most of those it
-  /// names as the next treasurers. Whether it holds against the tree, the
-  /// fold decides ([_seal]); those in [no] did not.
+  /// era. A candidate is well formed, dated at its end and signed by most
+  /// of the treasurers it names as its era's; it follows the one before
+  /// (its id, its end, its next treasurers). For each era the one with the
+  /// longest chain of seals after it counts, then the one that dominates
+  /// ([PyrSeal.dominates]: more operations, then the lower id), the same
+  /// choice on every phone: a seal later eras rest on is not replaced by
+  /// one that came late. Whether it holds against the tree, the fold
+  /// decides ([_seal]); those in [no] did not.
   static List<PyrSeal> _planSeals(List<PyramidRecord> records, Set<String> no) {
     if (records.isEmpty) {
       return const <PyrSeal>[];
     }
-    final List<(PyrSeal, PyramidRecord)> all =
-        <(PyrSeal, PyramidRecord)>[
-          for (final PyramidRecord r in records)
-            if (!no.contains(r.id))
-              if (PyrSeal.read(r) case final PyrSeal x
-                  when r.at == x.to &&
-                      x.from < x.to &&
-                      x.next.isNotEmpty &&
-                      r.signers.where(x.next.contains).length >=
-                          x.next.length ~/ 2 + 1)
-                (x, r),
-        ]..sort(((PyrSeal, PyramidRecord) a, (PyrSeal, PyramidRecord) b) {
-          final int c = a.$1.to.compareTo(b.$1.to);
-          return c != 0 ? c : a.$1.id.compareTo(b.$1.id);
-        });
+    final List<PyrSeal> all = <PyrSeal>[
+      for (final PyramidRecord r in records)
+        if (!no.contains(r.id))
+          if (PyrSeal.read(r) case final PyrSeal x
+              when x.n >= 1 &&
+                  r.at == x.to &&
+                  x.from < x.to &&
+                  x.set.isNotEmpty &&
+                  x.next.isNotEmpty &&
+                  r.signers.where(x.set.contains).length >=
+                      x.set.length ~/ 2 + 1)
+            x,
+    ];
+    bool follows(PyrSeal y, PyrSeal x) =>
+        y.n == x.n + 1 &&
+        y.prev == x.id &&
+        y.from == x.to &&
+        listEquals(y.set, x.next);
+    // The longest chain each one starts, the latest eras first.
+    final Map<String, List<PyrSeal>> after = <String, List<PyrSeal>>{};
+    for (final PyrSeal y in all) {
+      (after[y.prev] ??= <PyrSeal>[]).add(y);
+    }
+    final Map<String, int> height = <String, int>{};
+    for (final PyrSeal x
+        in List<PyrSeal>.of(all)
+          ..sort((PyrSeal a, PyrSeal b) => b.n.compareTo(a.n))) {
+      int best = 0;
+      for (final PyrSeal y in after[x.id] ?? const <PyrSeal>[]) {
+        if (follows(y, x)) {
+          best = max(best, height[y.id] ?? 1);
+        }
+      }
+      height[x.id] = best + 1;
+    }
+    bool better(PyrSeal a, PyrSeal b) {
+      final int c = height[a.id]!.compareTo(height[b.id]!);
+      if (c != 0) {
+        return c > 0;
+      }
+      if (a.ops.length != b.ops.length) {
+        return a.ops.length > b.ops.length;
+      }
+      return a.id.compareTo(b.id) < 0;
+    }
+
     final List<PyrSeal> chain = <PyrSeal>[];
     while (true) {
       final PyrSeal? last = chain.lastOrNull;
       PyrSeal? pick;
-      for (final (PyrSeal x, PyramidRecord _) in all) {
-        if (x.n == chain.length + 1 &&
-            x.prev == (last?.id ?? '') &&
-            (last == null ||
-                (x.from == last.to && listEquals(x.set, last.next)))) {
+      for (final PyrSeal x in after[last?.id ?? ''] ?? const <PyrSeal>[]) {
+        if ((last == null ? x.n == 1 : follows(x, last)) &&
+            (pick == null || better(x, pick))) {
           pick = x;
-          break;
         }
       }
       if (pick == null) {
@@ -1847,8 +2003,10 @@ final class PyramidState {
   }
 
   /// [seen] (the records folded late here) with the changes of the tree
-  /// a seal of [plan] names as made at its end and that are dated before
-  /// it: those fold at that end, as they did for its signers.
+  /// a seal of [plan] names that are dated before its era: dated back
+  /// into a sealed era that did not name them, they folded right after
+  /// the seal before it on its signers' phones (the first moved first),
+  /// and do so on every phone.
   static Map<String, int> _sealTimes(
     List<PyrSeal> plan,
     Map<String, PyramidRecord> byId,
@@ -1860,52 +2018,89 @@ final class PyramidState {
     final Map<String, int> out = <String, int>{...seen};
     final Set<String> done = <String>{};
     for (final PyrSeal x in plan) {
-      for (final String c in x.changes) {
-        final PyramidRecord? r = byId[c];
-        if (r != null &&
-            PyrT.tree.contains(r.type) &&
-            r.at < x.to &&
-            done.add(c)) {
-          out[c] = x.to;
-        }
+      final List<PyramidRecord> back = <PyramidRecord>[
+        for (final String c in x.changes)
+          if (byId[c] case final PyramidRecord r
+              when PyrT.tree.contains(r.type) && r.at <= x.from && done.add(c))
+            r,
+      ]..sort(_order);
+      for (final (int i, PyramidRecord r) in back.indexed) {
+        out[r.id] = x.from + 1 + i;
       }
     }
     return out;
   }
 
-  /// The changes of the treasurers this fold made inside an era of [plan]
-  /// (or at its end, not among those its seal names): made after the
-  /// seal. A change of the tree folds after the last seal of [plan]
-  /// (moved), any other record is refused.
+  /// The changes of the tree's treasurers this fold made inside an era of
+  /// [plan] (after its start, up to its end) that its seal does not name:
+  /// made after the seal. A change of the tree folds right after the last
+  /// seal of [plan] (moved, in the order of their own times), any other
+  /// record is refused.
   (Map<String, int>, Set<String>) _madeAfterSeals(
     List<PyrSeal> plan,
     Map<String, PyramidRecord> byId,
   ) {
-    final Map<String, int> moved = <String, int>{};
+    final List<PyramidRecord> late = <PyramidRecord>[];
     final Set<String> refused = <String>{};
-    final int end = plan.last.to + 1;
     for (final MapEntry<int, List<String>> e in _eraChanges.entries) {
       final int at = e.key;
       for (final PyrSeal x in plan) {
-        if (at <= x.from ||
-            at > x.to ||
-            (at < x.to && listEquals(_treeTreasurersAt(at), x.set))) {
+        if (!_inEra(at, x.n, x.from, x.to)) {
           continue;
         }
         for (final String c in e.value) {
           final PyramidRecord? r = byId[c];
-          if (r == null || (at == x.to && x.changes.contains(c))) {
+          if (r == null ||
+              r.type == PyrT.found ||
+              r.type == PyrT.genesis ||
+              x.changes.contains(c)) {
             continue;
           }
           if (PyrT.tree.contains(r.type)) {
-            moved[c] = end;
+            late.add(r);
           } else {
             refused.add(c);
           }
         }
       }
     }
-    return (moved, refused);
+    late.sort(_order);
+    final int end = plan.last.to + 1;
+    return (
+      <String, int>{
+        for (final (int i, PyramidRecord r) in late.indexed) r.id: end + i,
+      },
+      refused,
+    );
+  }
+
+  /// Notes who signed two seal records of one era that no honest
+  /// treasurer signs both of: neither dominates the other. Only the
+  /// signatures of the treasurers the seal names as its era's count.
+  void _noteSealCheaters(List<PyramidRecord> records) {
+    final Map<int, List<PyrSeal>> byEra = <int, List<PyrSeal>>{};
+    for (final PyramidRecord r in records) {
+      final PyrSeal? x = PyrSeal.read(r);
+      if (x != null && x.n >= 1 && x.signers.any(x.set.contains)) {
+        (byEra[x.n] ??= <PyrSeal>[]).add(x);
+      }
+    }
+    for (final List<PyrSeal> same in byEra.values) {
+      for (int i = 0; i < same.length; i++) {
+        for (int j = i + 1; j < same.length; j++) {
+          final PyrSeal a = same[i];
+          final PyrSeal b = same[j];
+          if (a.comparable(b) || !listEquals(a.set, b.set)) {
+            continue;
+          }
+          for (final String k in a.signers) {
+            if (a.set.contains(k) && b.signers.contains(k)) {
+              (sealCheaters[k] ??= <String>{}).addAll(<String>[a.id, b.id]);
+            }
+          }
+        }
+      }
+    }
   }
 
   /// The closes of cell votes by vote, the first by time (then id) first.
@@ -2026,7 +2221,8 @@ final class PyramidState {
       .._poison = poison
       .._times = input.times
       .._closes = input.closes
-      .._afterSeal = input.after;
+      .._afterSeal = input.after
+      .._plan = input.plan;
     for (final PyramidRecord r in list) {
       s._applyOne(r, input.times[r.id] ?? r.at);
     }
@@ -2422,6 +2618,9 @@ final class PyramidState {
   void _noteLevel(String key) {
     final String? p = position[key];
     (_levels[key] ??= <List<int>>[]).add(<int>[_clock, p?.length ?? -1]);
+    if (p == null) {
+      (_departures[key] ??= <(int, String)>[]).add((_clock, _cause));
+    }
     moves.add(PyrMove(_causeAt, _cause, key, p));
     _moved.add(key);
     _treasurersDirty = true;
@@ -3374,13 +3573,13 @@ final class PyramidState {
 
   // ---- seals ----
 
-  /// The seal of the next era not sealed yet: dated at the era's end; it
-  /// follows the seal before (the founder's era first) — the same start,
-  /// the same treasurers; signed by most of the treasurers after it; and
-  /// it agrees with the tree: its treasurers from its start until its end,
-  /// a change then, to those who signed. The first that holds stands
-  /// (the earliest end, then the id): a second one for the era needs most
-  /// of the same signers again, and shows who signed two.
+  /// The seal of the open era: dated at the era's end; it follows the
+  /// seal before (the founder's era first) — the same start, the same
+  /// treasurers; signed by most of those treasurers; the one the fold
+  /// chose for the era ([_planSeals]); and it agrees with the tree: the
+  /// next treasurers are the tree's at its end. A change of the tree's
+  /// treasurers inside the era that it does not name was moved after it
+  /// ([_madeAfterSeals]) before this runs.
   String? _seal(PyramidRecord r) {
     final PyrSeal? x = PyrSeal.read(r);
     if (x == null) {
@@ -3388,14 +3587,6 @@ final class PyramidState {
     }
     final PyrSeal? last = seals.lastOrNull;
     if (x.n >= 1 && x.n <= seals.length) {
-      // Signed by somebody who signed the seal that stands: two seals of
-      // one era, which no honest app signs.
-      final PyrSeal kept = seals[x.n - 1];
-      if (kept.id != x.id) {
-        for (final String k in x.signers.where(kept.signers.contains)) {
-          (sealCheaters[k] ??= <String>{}).addAll(<String>[kept.id, x.id]);
-        }
-      }
       return 'era już zapieczętowana';
     }
     if (x.n != seals.length + 1 || x.prev != (last?.id ?? '')) {
@@ -3409,24 +3600,21 @@ final class PyramidState {
         !listEquals(x.set, last?.next ?? first.$2)) {
       return 'pieczęć innej ery';
     }
-    if (_countOf(r.signers, x.next) < x.next.length ~/ 2 + 1) {
-      return 'pieczęć podpisuje większość następnych skarbników';
+    if (_countOf(r.signers, x.set) < x.set.length ~/ 2 + 1) {
+      return 'pieczęć podpisuje większość skarbników ery';
     }
-    // The tree: no change of the treasurers inside the era, the change at
-    // its end to those who signed.
-    final bool inside = treasurerEras.any(
-      ((int, List<String>) e) =>
-          e.$1 > x.from &&
-          e.$1 < x.to &&
-          !listEquals(_treeTreasurersAt(e.$1), x.set),
-    );
-    if (inside ||
-        !listEquals(_treeTreasurersAt(x.from), x.set) ||
-        !listEquals(_treeTreasurersAt(x.to), x.next) ||
-        listEquals(x.next, x.set)) {
+    if (!_plan.contains(x.id)) {
+      // Another seal of the era counts (it dominates this one, or more
+      // seals rest on it).
+      return 'era ma inną pieczęć';
+    }
+    if (x.next.isEmpty || !listEquals(_treeTreasurersAt(x.to), x.next)) {
       return 'pieczęć nie zgadza się z drzewem';
     }
     seals.add(x);
+    for (final String c in x.changes) {
+      _namedIn.putIfAbsent(c, () => x.n);
+    }
     return null;
   }
 
