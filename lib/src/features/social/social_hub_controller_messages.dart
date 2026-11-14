@@ -158,6 +158,12 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     } else {
       attachmentSizeBytes = await _mediaVault.length(normalizedPath!);
     }
+    final ChatMediaSize? mediaSize = await _pictureSizeOf(
+      _mediaVault,
+      resolvedType,
+      initialBytes,
+      normalizedPath,
+    );
     EncodedChatAttachment? encoded;
     Uint8List? inlineBytes = initialBytes;
     bool sendInline = !requiresDeliveryAck;
@@ -200,6 +206,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       mimeType: resolvedMimeType,
       attachmentSizeBytes: attachmentSizeBytes,
       durationMs: durationMs,
+      mediaSize: mediaSize,
       reply: replyTo,
       forwarded: forwarded,
       deliveryState: requiresDeliveryAck
@@ -2540,6 +2547,41 @@ int _effectiveSentAt(ZenSignal signal, int receivedAtMillis) {
     return receivedAtMillis;
   }
   return claimed;
+}
+
+/// How much of a picture's start is read for its size: a JPEG's EXIF and
+/// colour profile come before its size, and both can take tens of KB.
+const int _pictureHeaderBytes = 256 * 1024;
+
+/// The size a picture of [type] is shown at, read from the header of
+/// [bytes] or of the file at [path] (`pictureDisplaySize`): what its
+/// message carries, so the friend's bubble has its final size before the
+/// picture is there or decoded. Null for anything else and for a picture
+/// whose header does not read.
+Future<ChatMediaSize?> _pictureSizeOf(
+  MediaVault vault,
+  ChatMessageType type,
+  Uint8List? bytes,
+  String? path,
+) async {
+  if (type != ChatMessageType.image) {
+    return null;
+  }
+  try {
+    Uint8List? head = bytes;
+    if (head == null && path != null) {
+      final int length = await vault.length(path);
+      head = await vault.readRange(path, 0, min(length, _pictureHeaderBytes));
+    }
+    final ({int width, int height})? size = head == null
+        ? null
+        : pictureDisplaySize(head);
+    return size == null ? null : ChatMediaSize.of(size.width, size.height);
+  } on Object catch (error, stackTrace) {
+    // The message goes without it: the bubble then waits for the picture.
+    logZenError('Reading the size of a picture failed', error, stackTrace);
+    return null;
+  }
 }
 
 /// [bytes], or the file at [path] (a plain path or one of [vault]'s), as

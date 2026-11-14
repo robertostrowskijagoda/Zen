@@ -6,6 +6,7 @@ import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
+import 'package:zen/src/domain/messages/chat_media_size.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 
@@ -61,6 +62,7 @@ final class OutgoingAttachmentTransfer {
     this.mimeType,
     this.attachmentSizeBytes,
     this.durationMs,
+    this.mediaSize,
     this.chunkSizeBytes = kAttachmentChunkSizeBytes,
     this.placeholderSent = false,
     this.ackedChunkIndexes = const <int>[],
@@ -82,6 +84,10 @@ final class OutgoingAttachmentTransfer {
   final String? mimeType;
   final int? attachmentSizeBytes;
   final int? durationMs;
+
+  /// The picture's size, sent with the placeholder and every chunk (see
+  /// [ChatMessage.mediaSize]).
+  final ChatMediaSize? mediaSize;
   final int chunkSizeBytes;
   final bool placeholderSent;
   final List<int> ackedChunkIndexes;
@@ -174,6 +180,7 @@ final class OutgoingAttachmentTransfer {
       durationMs: identical(durationMs, _outgoingAttachmentTransferUnset)
           ? this.durationMs
           : castCopyWithValue<int>(durationMs, fieldName: 'durationMs'),
+      mediaSize: mediaSize,
       chunkSizeBytes: chunkSizeBytes ?? this.chunkSizeBytes,
       placeholderSent: placeholderSent ?? this.placeholderSent,
       ackedChunkIndexes: ackedChunkIndexes ?? this.ackedChunkIndexes,
@@ -337,7 +344,10 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
   });
 
   static const int _versionMarker = 255;
-  static const int _currentVersion = 3;
+  static const int _incomingVersion = 3;
+
+  /// 4 since 1.17.5: the picture's size.
+  static const int _outgoingVersion = 4;
   static const String _incomingFolder = 'in';
   static const String _outgoingFolder = 'out';
 
@@ -467,7 +477,7 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
   Future<void> saveIncoming(IncomingAttachmentTransfer transfer) async {
     final BinaryWriter writer = BinaryWriter()
       ..writeUint8(_versionMarker)
-      ..writeUint8(_currentVersion)
+      ..writeUint8(_incomingVersion)
       ..writeString(transfer.peerAddress)
       ..writeString(transfer.messageId)
       ..writeString(transfer.text)
@@ -497,7 +507,7 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
   Future<void> saveOutgoing(OutgoingAttachmentTransfer transfer) async {
     final BinaryWriter writer = BinaryWriter()
       ..writeUint8(_versionMarker)
-      ..writeUint8(_currentVersion)
+      ..writeUint8(_outgoingVersion)
       ..writeString(transfer.peerAddress)
       ..writeString(transfer.messageId)
       ..writeString(transfer.text)
@@ -509,6 +519,8 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
       ..writeNullableString(transfer.mimeType)
       ..writeNullableUint32(transfer.attachmentSizeBytes)
       ..writeNullableInt64(transfer.durationMs)
+      ..writeNullableUint32(transfer.mediaSize?.width)
+      ..writeNullableUint32(transfer.mediaSize?.height)
       ..writeUint32(transfer.chunkSizeBytes)
       ..writeBool(transfer.placeholderSent)
       ..writeUint32(transfer.ackedChunkIndexes.length);
@@ -522,14 +534,14 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
     );
   }
 
-  /// Only the current layout is read; anything else counts as missing.
-  static bool _isCurrent(BinaryReader reader) =>
-      reader.readUint8() == _versionMarker &&
-      reader.readUint8() == _currentVersion;
+  /// Only the current layout ([version]) is read; anything else counts as
+  /// missing.
+  static bool _isCurrent(BinaryReader reader, int version) =>
+      reader.readUint8() == _versionMarker && reader.readUint8() == version;
 
   IncomingAttachmentTransfer? _readIncoming(Uint8List bytes) {
     final BinaryReader reader = BinaryReader(bytes);
-    if (!_isCurrent(reader)) {
+    if (!_isCurrent(reader, _incomingVersion)) {
       return null;
     }
     final String peerAddress = reader.readString();
@@ -570,7 +582,7 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
 
   OutgoingAttachmentTransfer? _readOutgoing(Uint8List bytes) {
     final BinaryReader reader = BinaryReader(bytes);
-    if (!_isCurrent(reader)) {
+    if (!_isCurrent(reader, _outgoingVersion)) {
       return null;
     }
     final String peerAddress = reader.readString();
@@ -588,6 +600,10 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
     final String? mimeType = reader.readNullableString();
     final int? attachmentSizeBytes = reader.readNullableUint32();
     final int? durationMs = reader.readNullableInt64();
+    final ChatMediaSize? mediaSize = ChatMediaSize.of(
+      reader.readNullableUint32(),
+      reader.readNullableUint32(),
+    );
     final int chunkSizeBytes = reader.readUint32();
     final bool placeholderSent = reader.readBool();
     final int ackCount = reader.readUint32();
@@ -607,6 +623,7 @@ final class FileAttachmentTransferStore implements AttachmentTransferStore {
       mimeType: mimeType,
       attachmentSizeBytes: attachmentSizeBytes,
       durationMs: durationMs,
+      mediaSize: mediaSize,
       chunkSizeBytes: chunkSizeBytes,
       placeholderSent: placeholderSent,
       ackedChunkIndexes: ackedChunkIndexes,

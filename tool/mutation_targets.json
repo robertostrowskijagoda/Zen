@@ -48,6 +48,12 @@
     ]
   },
   {
+    "file": "lib/src/domain/messages/chat_media_size.dart",
+    "tests": [
+      "test/chat_media_size_test.dart"
+    ]
+  },
+  {
     "file": "lib/src/features/chat/location_sharing.dart",
     "tests": [
       "test/location_sharing_test.dart"

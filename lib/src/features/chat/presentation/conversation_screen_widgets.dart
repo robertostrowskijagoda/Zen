@@ -348,7 +348,8 @@ class ChatAttachmentBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (message.type) {
-    _ when !message.hasAttachment => _AttachmentStubContent(message: message),
+    _ when !message.hasAttachment && !_reservesPictureBox(message) =>
+      _AttachmentStubContent(message: message),
     ChatMessageType.image => _ImageAttachmentContent(message: message),
     ChatMessageType.voice => _VoiceAttachmentContent(message: message),
     ChatMessageType.video => _VideoAttachmentContent(message: message),
@@ -472,7 +473,8 @@ class _MessageBubble extends StatelessWidget {
         message: message,
         onGradient: onGradient,
       ),
-      ChatMessageType.image when message.hasAttachment =>
+      ChatMessageType.image
+          when message.hasAttachment || _reservesPictureBox(message) =>
         _ImageAttachmentContent(message: message),
       ChatMessageType.image => _AttachmentStubContent(message: message),
       ChatMessageType.voice => _VoiceAttachmentContent(message: message),
@@ -690,6 +692,26 @@ ImageProvider<Object> _chatImageProvider(ImageProvider<Object> image) {
 /// within this and the bubble's width, and is never cropped.
 const double _kChatGifMaxHeight = 320;
 
+/// The height of a photo in a bubble when its message does not say the
+/// photo's size (from a Zen before 1.17.5): it fills the bubble's width and
+/// is cropped to this.
+const double _kChatPhotoHeight = 220;
+
+/// The tallest a photo whose size its message says is shown: in its
+/// proportions, as wide as the bubble unless that makes it taller.
+const double _kChatPhotoMaxHeight = 320;
+
+/// The widest a bubble is (the conversation's own limit) when the room
+/// around a picture is not known.
+const double _kChatBubbleMaxWidth = 440;
+
+/// Whether [message] shows its picture's box before the file is there: a
+/// photo or a GIF whose message says its size ([ChatMessage.mediaSize]).
+bool _reservesPictureBox(ChatMessage message) =>
+    message.type == ChatMessageType.image &&
+    message.mediaSize != null &&
+    !message.isDeleted;
+
 /// Whether [message] is a GIF: shown on its own, with no frame or caption.
 bool isGifMessage(ChatMessage message) {
   final Uint8List? held = message.attachmentBytes;
@@ -714,6 +736,36 @@ class _ImageAttachmentContent extends StatelessWidget {
         (message.mimeType?.toLowerCase() == 'image/gif') ||
         (message.fileName?.toLowerCase().endsWith('.gif') ?? false) ||
         (held != null && looksLikeGif(held));
+    final ChatMediaSize? size = message.isDeleted ? null : message.mediaSize;
+    if (size != null) {
+      return _withCaption(
+        zen,
+        isGifFile,
+        LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final ({double width, double height}) box = size.boxWithin(
+              maxWidth: constraints.maxWidth.isFinite
+                  ? constraints.maxWidth
+                  : _kChatBubbleMaxWidth,
+              maxHeight: isGifFile ? _kChatGifMaxHeight : _kChatPhotoMaxHeight,
+              enlarge: !isGifFile,
+            );
+            // The same box before the file is there, while it is decoded
+            // and once it shows (or fails to): the conversation around it
+            // does not move.
+            return SizedBox(
+              key: Key('picture-box-${message.id}'),
+              width: box.width,
+              height: box.height,
+              child: ClipRRect(
+                borderRadius: context.zenRadius(16),
+                child: _sizedPicture(context, isGifFile, box),
+              ),
+            );
+          },
+        ),
+      );
+    }
     // GIFs play as far as the media settings allow (tap to play
     // otherwise) and stay still for reduced motion.
     final Widget image = isGifFile && message.attachmentBytes != null
@@ -738,7 +790,7 @@ class _ImageAttachmentContent extends StatelessWidget {
             image: _chatImageProvider(MemoryImage(message.attachmentBytes!)),
             fit: BoxFit.cover,
             width: double.infinity,
-            height: 220,
+            height: _kChatPhotoHeight,
             errorBuilder: _buildImageError,
           )
         : message.attachmentPath != null
@@ -747,17 +799,106 @@ class _ImageAttachmentContent extends StatelessWidget {
             image: _chatImageProvider(mediaFileImage(message.attachmentPath!)),
             fit: BoxFit.cover,
             width: double.infinity,
-            height: 220,
+            height: _kChatPhotoHeight,
             errorBuilder: _buildImageError,
           )
         : _buildImageError(context, StateError('missing attachment'), null);
+    return _withCaption(
+      zen,
+      isGifFile,
+      ClipRRect(borderRadius: context.zenRadius(16), child: image),
+    );
+  }
+
+  /// The picture of a message that says its size, filling [box]: the GIF
+  /// or the photo once it is here, a placeholder while it is on its way or
+  /// when it will not come.
+  Widget _sizedPicture(
+    BuildContext context,
+    bool isGifFile,
+    ({double width, double height}) box,
+  ) {
+    final Uint8List? bytes = message.attachmentBytes;
+    final String? path = message.attachmentPath?.trim().isNotEmpty == true
+        ? message.attachmentPath
+        : null;
+    if (bytes != null && bytes.isNotEmpty) {
+      return isGifFile
+          ? ZenGif(
+              bytes: bytes,
+              fit: BoxFit.contain,
+              width: box.width,
+              height: box.height,
+              errorBuilder: _buildImageError,
+            )
+          : Image(
+              image: _chatImageProvider(MemoryImage(bytes)),
+              fit: BoxFit.cover,
+              width: box.width,
+              height: box.height,
+              errorBuilder: _buildImageError,
+            );
+    }
+    if (path != null) {
+      return isGifFile
+          ? ZenGif(
+              file: File(path),
+              fit: BoxFit.contain,
+              width: box.width,
+              height: box.height,
+              errorBuilder: _buildImageError,
+            )
+          : Image(
+              // An encrypted file is decrypted in memory only.
+              image: _chatImageProvider(mediaFileImage(path)),
+              fit: BoxFit.cover,
+              width: box.width,
+              height: box.height,
+              errorBuilder: _buildImageError,
+            );
+    }
+    final ZenColors zen = ZenColors.of(context);
+    return ColoredBox(
+      key: Key('picture-on-its-way-${message.id}'),
+      color: zen.accent.withValues(alpha: 0.10),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          // Shrunk, never cut, in a small box.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  isGifFile ? Icons.gif_box_outlined : Icons.image_outlined,
+                  color: message.attachmentUnavailable
+                      ? zen.textMuted
+                      : zen.accent,
+                  size: 32,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _missingFileLabel(message),
+                  style: TextStyle(color: zen.textMuted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// [picture] with the photo's name and size under it; a GIF stands alone.
+  Widget _withCaption(ZenColors zen, bool isGifFile, Widget picture) {
     if (isGifFile) {
-      return ClipRRect(borderRadius: context.zenRadius(16), child: image);
+      return picture;
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        ClipRRect(borderRadius: context.zenRadius(16), child: image),
+        picture,
         if (message.fileName != null) ...<Widget>[
           const SizedBox(height: 8),
           Text(

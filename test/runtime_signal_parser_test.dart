@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_buffer.dart';
+import 'package:zen/src/domain/messages/chat_media_size.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/signals/queued_signal.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
@@ -146,6 +147,89 @@ void main() {
     expect(ack, isNotNull);
     expect(ack!.type, ZenSignalType.messageChunkAck);
     expect(ack.chunkIndex, 2);
+  });
+
+  group('the size of a picture', () {
+    const String sender = '200:1111:2222:3333:4444:5555:6666:7777';
+
+    Map<String, dynamic>? extrasOf(Map<String, dynamic> payload) =>
+        zenSignalFromTransportPayload(
+          sender: sender,
+          payload: payload,
+        )?.chatExtras;
+
+    test('a message, a group message, a placeholder and a chunk carry it', () {
+      const Map<String, dynamic> size = <String, dynamic>{
+        kMediaWidthKey: 480,
+        kMediaHeightKey: 270,
+      };
+      for (final Map<String, dynamic> payload in <Map<String, dynamic>>[
+        <String, dynamic>{
+          'type': 'message',
+          'msgId': 'm-1',
+          'attachmentData': 'R0lG',
+          ...size,
+        },
+        <String, dynamic>{
+          'type': 'group_message',
+          'groupId': 'g',
+          'msgId': 'm-2',
+          'messageType': 'image',
+          ...size,
+        },
+        <String, dynamic>{
+          'type': 'message_placeholder',
+          'msgId': 'm-3',
+          'chunkCount': 2,
+          ...size,
+        },
+        <String, dynamic>{
+          'type': 'message_chunk',
+          'msgId': 'm-3',
+          'chunkIndex': 0,
+          'chunkCount': 2,
+          'chunkData': 'AA==',
+          ...size,
+        },
+      ]) {
+        expect(extrasOf(payload)?[kMediaSizeKey], <String, dynamic>{
+          'w': 480,
+          'h': 270,
+        }, reason: payload['type'] as String);
+      }
+    });
+
+    test('a size that is no size is dropped whole, never clamped', () {
+      for (final (Object?, Object?) bad in <(Object?, Object?)>[
+        (0, 270),
+        (480, -1),
+        (kMaxChatMediaSide + 1, 270),
+        (480, 1e300),
+        ('480', 270),
+        (480, null),
+        (<int>[480], 270),
+        (double.infinity, 270),
+      ]) {
+        final Map<String, dynamic>? extras = extrasOf(<String, dynamic>{
+          'type': 'message_placeholder',
+          'msgId': 'm-4',
+          kMediaWidthKey: bad.$1,
+          kMediaHeightKey: bad.$2,
+        });
+        expect(extras?[kMediaSizeKey], isNull, reason: '$bad');
+      }
+      // A number with a fraction counts as its whole pixels.
+      expect(
+        extrasOf(<String, dynamic>{
+          'type': 'message',
+          'msgId': 'm-5',
+          'text': 'x',
+          kMediaWidthKey: 480.7,
+          kMediaHeightKey: 270,
+        })?[kMediaSizeKey],
+        <String, dynamic>{'w': 480, 'h': 270},
+      );
+    });
   });
 
   test('parses realtime transfer offer and answer payloads', () {
