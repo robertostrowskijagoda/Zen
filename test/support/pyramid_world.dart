@@ -24,10 +24,13 @@ final class PyramidWorld {
   /// The pyramid the phones keep (the test one when null).
   final PyramidRoot? root;
 
-  /// Builds S on top, A and B under S and A2 under A, B1 under B.
+  /// Builds S on top, A and B under S and A2 under A, B1 under B. With
+  /// [sealed] the founder then seals its era, so the six are the
+  /// treasurers who sign payments ([sealEra]).
   static Future<PyramidWorld> six({
     int seed = 1,
     int recordSegmentEntries = kPyrLogSegmentEntries,
+    bool sealed = true,
   }) async {
     final PyramidWorld w = PyramidWorld(
       seed: seed,
@@ -51,7 +54,22 @@ final class PyramidWorld {
       ..befriend(a2, b1)
       ..befriend(a1, b);
     await w.sync();
+    if (sealed) {
+      await w.sealEra();
+    }
     return w;
+  }
+
+  /// The open era of the treasurers is sealed by its treasurers' apps
+  /// once the tree changed them: an hour after its start (and the ten
+  /// minutes a seal ends before its proposal), after the ledgers were
+  /// offered to each other.
+  Future<void> sealEra() async {
+    await net.advance(const Duration(hours: 1, minutes: 11));
+    await duties(rounds: 1);
+    await net.advance(const Duration(minutes: 11));
+    await duties(rounds: 3);
+    await sync();
   }
 
   final SimNetwork net;
@@ -413,6 +431,48 @@ final class FoldWorld {
   ) => signedRecord(type, py, at, <LedgerKeyPair>[
     for (final String n in who) keys[n]!,
   ], fields);
+
+  /// The seal of the era open in [records] (and [more]) ending at [to],
+  /// listing [ops], signed by [who] (names; by default every treasurer of
+  /// the era whose key is here): what the treasurers' apps make.
+  Future<PyramidRecord> seal(
+    int to, {
+    Iterable<PyramidRecord> more = const <PyramidRecord>[],
+    Iterable<String> ops = const <String>[],
+    List<String>? who,
+  }) async {
+    final PyramidState s = fold(more, now: to + day);
+    final PyrEraToSeal e = s.eraToSeal(to)!;
+    PyramidRecord r = PyramidRecord(
+      body: PyrSeal.body(
+        pyramid: py,
+        n: e.n,
+        prev: e.prev,
+        from: e.from,
+        to: e.to,
+        set: e.set,
+        next: e.next,
+        ops: ops,
+        changes: e.changes,
+      ),
+    );
+    final Map<String, LedgerKeyPair> byId = <String, LedgerKeyPair>{
+      for (final LedgerKeyPair k in keys.values) k.id: k,
+    };
+    for (final String k in who == null
+        ? e.set
+        : <String>[for (final String n in who) id(n)]) {
+      if (byId[k] case final LedgerKeyPair pair) {
+        r = await r.signedBy(pair);
+      }
+    }
+    return r;
+  }
+
+  /// The founder's seal of its era, an hour after the founding: from then
+  /// on the eight of [kFoldTree] down to the treasurers' levels sign
+  /// payments (era 2: orders naming one seal, `after` 1).
+  Future<PyramidRecord> sealFirst() => seal(t0 + hour);
 
   /// The pyramid with [more] records, at [now] (by default long after).
   PyramidState fold(

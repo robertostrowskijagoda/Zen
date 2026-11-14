@@ -30,15 +30,18 @@ const int kPyrStatementOps = 50;
 const int kPyrConfirmForMs = 24 * 3600 * 1000;
 const int kPyrConfirmEveryMs = 10 * 60 * 1000;
 
-/// How long after an era of the treasurers ended its seal is signed: the
-/// treasurers' ledgers meet in between ([kPyrLedgerSyncEveryMs]), so they
-/// list the same operations.
-const int kPyrSealWaitMs = 3600 * 1000;
-
 /// How long after offering its ledger to the other treasurers a treasurer
-/// waits before it signs a seal: what it missed (back from being away)
+/// waits before it proposes a seal: what it missed (back from being away)
 /// comes first.
 const int kPyrSealSyncedMs = 10 * 60 * 1000;
+
+/// For how long after an operation's time a treasurer who signed it
+/// signs no seal that leaves it out: once most of them signed it, it
+/// reaches every treasurer meanwhile (at once, or with the next ledger
+/// sync), and a seal without it needs a majority, so the signature of at
+/// least one who signed it. Past this, one that never counted is left
+/// out; one that counts never is by an honest treasurer.
+const int kPyrSealGraceMs = kPyrLedgerSyncEveryMs + kPyrSealSyncedMs;
 
 /// How long a treasurer sees a span of a number split ([PyrLedger.isSplit])
 /// before it votes to release it: an operation of it that is final through
@@ -746,6 +749,25 @@ final class _Treasury {
               (PyrLedger.relOf(r).isEmpty ||
                   ledger.releases.containsKey(PyrLedger.relOf(r))))) {
         stale.add(r);
+      }
+    }
+    // One that counted until its era's seal left it out (signed by most of
+    // the era's treasurers, its number still free): once, again.
+    final Set<String> waiting = <String>{
+      for (final PyramidRecord r in pyr._payments.values) PyrLedger.slotOf(r),
+      for (final PyramidRecord r in stale) PyrLedger.slotOf(r),
+    };
+    for (final PyramidRecord op in ledger.ops.values.toList()) {
+      final String slot = PyrLedger.slotOf(op);
+      if (op.pyramid == s.id &&
+          PyrLedger.payerOf(op) == me.id &&
+          op.signers.contains(me.id) &&
+          v.broken[op.id] == kPyrLeftOutOfSeal &&
+          !v.slots.containsKey(slot) &&
+          !waiting.contains(slot) &&
+          pyr._announced.add('again-${op.id}')) {
+        waiting.add(slot);
+        stale.add(op);
       }
     }
     if (stale.isEmpty || !await TamperGuard.allowsSensitive()) {
@@ -2169,58 +2191,176 @@ final class _Treasury {
 
   // ---- seals of the eras ----
 
-  /// Seals the oldest era of the treasurers that ended ([PyrT.seal]), when
-  /// this person is one of the treasurers after it and keeps the whole
-  /// ledger, [kPyrSealWaitMs] after the era's end and [kPyrSealSyncedMs]
-  /// after this phone last offered its ledger to the others: the
-  /// operations dated in it that count here. The app signs by itself;
-  /// treasurers whose ledgers agree sign the same record, and their
-  /// signatures meet in it as it goes round. Never two different seals for
-  /// one era, on any of the account's devices: that would be proof of
-  /// cheating.
+  /// Seals the open era of the treasurers ([PyrT.seal]) with the others
+  /// of its treasurers, when this person is one of them and keeps the
+  /// whole ledger. The app signs by itself:
+  /// - every seal of the era it can check ([_sealHolds]) that dominates
+  ///   the one it signed before ([PyrSeal.dominates]: more operations, or
+  ///   the same with the lower id), the best of them — never one that does
+  ///   not, so two seals of an era an honest app signed always dominate
+  ///   one another, and the treasurers meet in the best one;
+  /// - its own, ending [kPyrMaxSkewMs] before now (what was dated before
+  ///   had time to come), once the era is due by it and [kPyrSealSyncedMs]
+  ///   after this phone offered its ledger to the others, unless a seal
+  ///   it can check already lists everything it counts.
+  /// From its first seal of the era on, it signs no more operations of it
+  /// ([kPyrOtherEra]); their payers order again in the next era.
   Future<void> _sealDuty() async {
     final PyramidState? s = pyr.state;
     final LedgerKeyPair? me = pyr._signer;
-    if (s == null || me == null || !_keeps(s)) {
+    if (s == null ||
+        me == null ||
+        !_keeps(s) ||
+        !s.treasurers.contains(me.id)) {
       return;
     }
-    final PyrEraToSeal? era = s.unsealedEra;
+    final int n = s.openEra;
     final int now = pyr._now();
-    if (era == null ||
-        !era.next.contains(me.id) ||
-        now < era.to + kPyrSealWaitMs ||
-        syncedAt <= era.to ||
-        now - syncedAt < kPyrSealSyncedMs) {
-      return;
-    }
     final PyrLedgerView v = view(s);
-    final PyramidRecord bare = PyramidRecord(
-      body: PyrSeal.body(
-        pyramid: s.id,
-        n: era.n,
-        prev: era.prev,
-        from: era.from,
-        to: era.to,
-        set: era.set,
-        next: era.next,
-        ops: ledger.countedBetween(v, era.from, era.to),
-        changes: era.changes,
-      ),
-    );
-    // A seal that would not fit a record (or a signal) is never taken by
-    // anybody: said so, and its era is not marked as sealed by this
-    // account.
-    if (bare.signedBytes.length > kPyrMaxRecordBytes ||
-        utf8.encode(jsonEncode(bare.toJson())).length > kPyrMaxFrameBytes) {
-      logZenError(
-        'Pyramid: seal of era ${era.n}',
-        StateError(
-          '${(bare.body['ops'] as List<Object?>).length} operations do not fit',
+    final String key = 'seal|$n';
+    final PyramidRecord? signed = pyr._records[pyr._signedOrders[key] ?? ''];
+    final PyrSeal? mine = signed == null ? null : PyrSeal.read(signed);
+    bool may(PyrSeal x) => mine == null || x.id == mine.id || x.dominates(mine);
+    final Set<String> counted = ledger.countedIn(v, n).toSet();
+    final List<(PyrSeal, PyramidRecord)> held = <(PyrSeal, PyramidRecord)>[
+      for (final PyramidRecord r in pyr._records.values)
+        if (r.type == PyrT.seal && r.body['n'] == n)
+          if (PyrSeal.read(r) case final PyrSeal x
+              when may(x) && _sealHolds(x, r, s, v, now))
+            (x, r),
+    ];
+    final int to = now - kPyrMaxSkewMs;
+    final PyrEraToSeal? era = s.eraToSeal(to);
+    if (era != null &&
+        syncedAt > era.from &&
+        now - syncedAt >= kPyrSealSyncedMs &&
+        _sealDue(era.from, to, counted.length, era.next, era.set) &&
+        _leavesOutNothingOwn(counted, n, v, now) &&
+        !held.any(
+          ((PyrSeal, PyramidRecord) h) => h.$1.ops.containsAll(counted),
+        )) {
+      final PyramidRecord own = PyramidRecord(
+        body: PyrSeal.body(
+          pyramid: s.id,
+          n: era.n,
+          prev: era.prev,
+          from: era.from,
+          to: era.to,
+          set: era.set,
+          next: era.next,
+          ops: counted,
+          changes: era.changes,
         ),
-        StackTrace.current,
       );
+      final PyrSeal? x = PyrSeal.read(own);
+      // A seal that would not fit a record (or a signal) is never taken by
+      // anybody: said so, and nothing is signed.
+      if (x == null ||
+          own.signedBytes.length > kPyrMaxRecordBytes ||
+          utf8.encode(jsonEncode(own.toJson())).length > kPyrMaxFrameBytes) {
+        logZenError(
+          'Pyramid: seal of era $n',
+          StateError('${counted.length} operations do not fit'),
+          StackTrace.current,
+        );
+      } else if (may(x)) {
+        held.add((x, pyr._records[own.id] ?? own));
+      }
+    }
+    (PyrSeal, PyramidRecord)? best;
+    for (final (PyrSeal, PyramidRecord) h in held) {
+      // More operations first, then the lower id: what dominates comes
+      // first, and every app picks the same among the rest.
+      if (best == null ||
+          h.$1.ops.length > best.$1.ops.length ||
+          (h.$1.ops.length == best.$1.ops.length &&
+              h.$1.id.compareTo(best.$1.id) < 0)) {
+        best = h;
+      }
+    }
+    if (best == null || best.$2.sigs.containsKey(me.id)) {
       return;
     }
-    await pyr._signOnce('seal|${era.n}|${era.prev}', bare, me);
+    pyr._markSigned(key, best.$1.id, best.$1.to);
+    await pyr._save();
+    await pyr.ingest(await best.$2.signedBy(me));
+  }
+
+  /// Whether an era from [from] to [to] with [ops] operations that count
+  /// may be sealed: it ran [kPyrEraMs], it has [kPyrEraOps] operations, or
+  /// the tree's treasurers are no longer its own ([next] against [set])
+  /// and it ran [kPyrEraChangeMs]. Judged by the time a seal names, which
+  /// its co-signers accept up to [kPyrMaxSkewMs] ahead of their clocks.
+  static bool _sealDue(
+    int from,
+    int to,
+    int ops,
+    List<String> next,
+    List<String> set,
+  ) =>
+      to - from >= kPyrEraMs ||
+      ops >= kPyrEraOps ||
+      (!listEquals(next, set) && to - from >= kPyrEraChangeMs);
+
+  /// Whether this treasurer can co-sign [x] (record [r]) for the open era
+  /// of [s]: it follows the last seal, names the era's treasurers, ends no
+  /// later than [kPyrMaxSkewMs] after [now] and when the era was due; the
+  /// tree here gives its next treasurers at its end, with no change of
+  /// them (or departure) it does not name; and every operation it lists
+  /// is of the era and counts on this whole ledger ([v]). It need not list
+  /// everything this ledger counts: what it leaves out is ordered again in
+  /// the next era.
+  bool _sealHolds(
+    PyrSeal x,
+    PyramidRecord r,
+    PyramidState s,
+    PyrLedgerView v,
+    int now,
+  ) {
+    if (x.prev != (s.seals.lastOrNull?.id ?? '') ||
+        x.from != s.sealedTo ||
+        r.at != x.to ||
+        x.to <= x.from ||
+        x.to > now + kPyrMaxSkewMs ||
+        !listEquals(x.set, s.treasurers) ||
+        !_sealDue(x.from, x.to, x.ops.length, x.next, x.set)) {
+      return false;
+    }
+    final PyrEraToSeal? era = s.eraToSeal(x.to);
+    if (era == null ||
+        !listEquals(era.next, x.next) ||
+        !x.changes.containsAll(era.changes)) {
+      return false;
+    }
+    for (final String id in x.ops) {
+      final PyramidRecord? op = ledger.ops[id];
+      if (op == null ||
+          PyrLedger.eraOf(op) != x.n ||
+          !v.counted.contains(id)) {
+        return false;
+      }
+    }
+    return _leavesOutNothingOwn(x.ops, x.n, v, now);
+  }
+
+  /// Whether a seal of era [n] listing [ops] leaves out no operation of
+  /// the era this treasurer signed: none that counts here, and none dated
+  /// less than [kPyrSealGraceMs] before [now] (it may count yet).
+  bool _leavesOutNothingOwn(
+    Set<String> ops,
+    int n,
+    PyrLedgerView v,
+    int now,
+  ) {
+    final String? me = pyr.myKey;
+    for (final PyramidRecord op in ledger.ops.values) {
+      if (op.tsigs.containsKey(me) &&
+          PyrLedger.eraOf(op) == n &&
+          !ops.contains(op.id) &&
+          (v.counted.contains(op.id) || now - op.at < kPyrSealGraceMs)) {
+        return false;
+      }
+    }
+    return true;
   }
 }

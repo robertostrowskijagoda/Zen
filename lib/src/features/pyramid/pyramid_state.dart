@@ -3603,13 +3603,13 @@ final class PyramidState {
     if (_countOf(r.signers, x.set) < x.set.length ~/ 2 + 1) {
       return 'pieczęć podpisuje większość skarbników ery';
     }
+    if (x.next.isEmpty || !listEquals(_treeTreasurersAt(x.to), x.next)) {
+      return 'pieczęć nie zgadza się z drzewem';
+    }
     if (!_plan.contains(x.id)) {
       // Another seal of the era counts (it dominates this one, or more
       // seals rest on it).
       return 'era ma inną pieczęć';
-    }
-    if (x.next.isEmpty || !listEquals(_treeTreasurersAt(x.to), x.next)) {
-      return 'pieczęć nie zgadza się z drzewem';
     }
     seals.add(x);
     for (final String c in x.changes) {
