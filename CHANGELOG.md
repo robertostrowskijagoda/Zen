@@ -10,6 +10,26 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Switching the camera off no longer ends a video call, and video stays smooth in poor light.
+- [en] The screen stays on during a call, turns off at your ear, and you hear ringing when you call, also on a silent phone.
+- [en] Photos and GIFs no longer move a chat when they load.
+- [pl] Wyłączenie kamery nie kończy już rozmowy wideo, a obraz jest płynny także przy słabym świetle.
+- [pl] Ekran nie gaśnie w trakcie rozmowy, wyłącza się przy uchu, a dzwoniąc słyszysz sygnał także przy wyciszonym telefonie.
+- [pl] Zdjęcia i GIF-y nie przesuwają już rozmowy, gdy się wczytują.
+
+### Fixes and changes
+**Read this first.** None of this was tried on a phone: the causes of the call problems come from the owner's diagnostic log and the code, and the tests cover the decisions and the values set, not what a camera, a screen or a speaker then does. The phone checks are in docs/RELEASES.md, section 3.
+- **Switching the camera off during a video call no longer ends the call**: the phone that kept its camera on answered as if it would still receive video, the other phone refused that answer and the call ended (since 1.12.0). An answer now claims no more of the camera section than the offer allows, and an answer from an older version is cut to fit before it is used, so one side on this version is enough.
+- **Video calls keep their frame rate in poor light and when the picture moves, and start sharp**: the size and rate asked of the camera never reached it on Android, so its exposure slowed it to 5 or 6 frames a second in poor light, and every call started near 300 kbit/s. The camera is asked in plain numbers (1280×720 at 24) and pinned to its steadiest frame-rate range, the encoder gets a floor of 150 kbit/s and a ceiling of 2.5 Mbit/s, starts at 1 Mbit/s and keeps frames before resolution on a bad link. The diagnostic log says what limits the picture.
+- **The screen stays on during a video call or a call on the loudspeaker or a headset**: only a call still ringing kept the screen on, and answering cleared even that, so a call went dark after the phone's screen timeout. The call keeps it on from the first ring until it ends, however it was answered and wherever it is shown.
+- **During a voice call at the ear the screen turns off**: nothing used the proximity sensor. On the earpiece the screen goes dark at the ear and comes back when the phone is moved away (Android; a headset plugged in during the call is noticed at the next change).
+- **When you call, you hear it ring, also on a silent phone**: there was no ringback or busy tone, and the call's chimes were skipped in silent mode. The ringback, the busy tone, the reconnect signal and the connect and end chimes play on the call's own volume and route, whatever the ringer (Android; computers play the two chimes). Incoming ringing and message sounds follow silent mode as before.
+- **The "Łączenie…" dots of a call keep moving**: their clock stopped whenever Zen's window lost the focus while still on screen (a system dialog, the notification shade, split screen, another app's overlay window). On phones it now stops only when the window cannot be seen.
+- **A photo or GIF no longer moves the conversation when it comes in**: its bubble got its height only once the picture was there and decoded. The sender now sends the picture's size with the message and the bubble keeps that size from the start; a size a sender makes up stays within the bubble. Photos with a size show whole, in their own proportions, up to 320 high. Both sides need this version.
+- **Something deleted in Dating, the profile or meetings stays deleted on a device that was off for over a month**: a deletion was rewritten into a device's log for 30 days only, so a returning device kept a switched-off dating profile, a photo or a plan. These deletions now travel with every restart of the log, newest first, within 24 KiB per state.
+- **The release job waits for the draft it just made**: for 1.17.1 the list of releases did not show the draft a moment after its creation and the job stopped before attaching the files.
+
 ## 1.17.1 — 13.11.2026
 
 ### What's new
