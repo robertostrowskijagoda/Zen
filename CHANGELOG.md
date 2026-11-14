@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.17.5 — 14.11.2026
+
 ### What's new
 - [en] Switching the camera off no longer ends a video call, and video stays smooth in poor light.
 - [en] The screen stays on during a call, turns off at your ear, and you hear ringing when you call, also on a silent phone.
