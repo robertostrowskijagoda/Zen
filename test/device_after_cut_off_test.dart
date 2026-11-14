@@ -237,11 +237,23 @@ void main() {
     await early.start();
     await early.rememberDeviceAddresses(<String>[a1, a2]);
     await _settle(160);
+    // Nobody co-signed it: it waits a day before it counts anywhere.
+    final String earlyId = early.identity.deviceKey.id;
+    for (final LedgerNode n in <LedgerNode>[first, laptop]) {
+      expect(n.pendingOwnDevices.map((AccountDevice d) => d.device), <String>[
+        earlyId,
+      ]);
+      expect(n.siblingAddresses, isNot(contains(a3)));
+    }
+    now += 25 * 3600000;
+    await first.rememberDeviceAddresses(<String>[a3]);
+    await laptop.rememberDeviceAddresses(<String>[a3]);
+    await _settle(160);
     expect(first.siblingAddresses, containsAll(<String>[a2, a3]));
     expect(laptop.siblingAddresses, containsAll(<String>[a1, a3]));
 
     // Now the tablet is cut off.
-    now += 2 * 86400000;
+    now += 86400000;
     final LedgerKeyPair tablet = await LedgerKeyPair.generate();
     await first.store.directory.addCertificate(
       await DeviceCertificate.issue(

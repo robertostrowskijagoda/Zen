@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
+import 'package:zen/src/core/ledger/device_trust.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_author.dart';
@@ -149,6 +150,7 @@ final class AccountDevice {
     this.isThis = false,
     this.issued = 0,
     this.confirmed = true,
+    this.waitsUntil,
   });
 
   final String account;
@@ -170,6 +172,10 @@ final class AccountDevice {
   /// cut off and nobody confirmed yet ([LedgerNode.confirmDevice]): nothing
   /// is synced to it and nothing it writes is taken until then.
   final bool confirmed;
+
+  /// For a device of this account without a co-signature: when it starts
+  /// to count (ms) unless cut off before ([LedgerNode.pendingOwnDevices]).
+  final int? waitsUntil;
 }
 
 /// How a device of this account came to be trusted here.
@@ -1005,6 +1011,8 @@ final class LedgerNode {
       DamagedIdentityNotice.instance.note();
       rethrow;
     }
+    // This device never waits for itself ([AccountDirectory.selfDevice]).
+    store.directory.selfDevice = loaded.certificate.device;
     await store.directory.addCertificate(loaded.certificate);
     store.directory.isCoreAccount = (String acc) =>
         acc == loaded.certificate.account ||
@@ -1040,6 +1048,7 @@ final class LedgerNode {
     // Cut-offs that came while this device was closed (or with a copy).
     _noteCutOffs();
     await identity.rememberSelfKey(disk);
+    await _markCoSigning();
     for (final String kind in kAccountSpaceKinds) {
       replicator.subscribe(accountSpace(kind, account));
     }
@@ -2216,10 +2225,22 @@ final class LedgerNode {
   /// The person said [device] of this account is theirs: it gets what the
   /// account's devices share and what it wrote is taken; the account's
   /// other devices hear it from this one.
+  ///
+  /// A device that waits to count (no co-signature, [pendingOwnDevices])
+  /// is co-signed by this one: it counts with friends at once.
   Future<void> confirmDevice(String device) async {
     await start();
-    if (store.directory.isRevoked(account, device) ||
-        _trusted[device]?.sure == true) {
+    if (store.directory.isCutOff(account, device)) {
+      return;
+    }
+    final DeviceCertificate? cert = store.directory.certificateOf(
+      account,
+      device,
+    );
+    if (cert != null && store.directory.pendingUntil(account, device) != null) {
+      await _coSign(cert);
+    }
+    if (_trusted[device]?.sure == true) {
       return;
     }
     _trusted[device] = _Trust(_clock.wallMillis(), sure: true);
@@ -2229,6 +2250,134 @@ final class LedgerNode {
       _sendSiblingSync(a);
     }
   }
+
+  /// The devices of this account that wait to count: certified without a
+  /// co-signature (restored from paper, a file or friends, or made by
+  /// whoever else holds the account key) and seen here less than
+  /// [kNewDeviceWait] ago. "To moje" ([confirmDevice]) co-signs one, "Odłącz"
+  /// ([unlinkDevice]) vetoes it.
+  List<AccountDevice> get pendingOwnDevices {
+    final Map<String, int> waiting = store.directory.pendingDevicesOf(account);
+    final List<AccountDevice> out = <AccountDevice>[
+      for (final MapEntry<String, int> e in waiting.entries)
+        if (store.directory.certificateOf(account, e.key)
+            case final DeviceCertificate cert)
+          AccountDevice(
+            account: account,
+            device: e.key,
+            name: cert.name,
+            address: <String?>[
+              for (final MapEntry<String, _DeviceRef> d in _devices.entries)
+                if (d.value.device == e.key) d.key,
+              _deviceHints[e.key]?.address,
+            ].nonNulls.firstOrNull,
+            issued: cert.issued,
+            confirmed: false,
+            waitsUntil: e.value,
+          ),
+    ]..sort((AccountDevice a, AccountDevice b) => a.issued.compareTo(b.issued));
+    return out;
+  }
+
+  /// Marks this account as co-signing (once, on this device's own
+  /// certificate): from then on friends of this version refuse a cut-off
+  /// by the account key alone and let a device without a co-signature
+  /// wait ([kNewDeviceWait]).
+  Future<void> _markCoSigning() async {
+    final DeviceCertificate own = identity.certificate;
+    if (own.co != null) {
+      return;
+    }
+    final DeviceCertificate marked = await own.coSignedBy(identity.deviceKey);
+    if (await store.directory.adoptOwnCertificate(marked)) {
+      await identity.takeCertificate(disk, marked);
+      _certificateKnownBy.clear();
+    }
+  }
+
+  /// Co-signs [cert], a device of this account that waits to count here
+  /// (linked from here, or confirmed by the person): it counts with friends
+  /// at once. It goes to the account's devices (the device itself takes it
+  /// as its own) and to friends.
+  Future<void> _coSign(DeviceCertificate cert) async {
+    if (cert.account != account ||
+        cert.device == identity.deviceKey.id ||
+        cert.coSignedByOther ||
+        isRevoked) {
+      return;
+    }
+    final DeviceCertificate signed = await cert.coSignedBy(identity.deviceKey);
+    await store.directory.addCertificate(signed);
+    _emitDevices();
+    final Map<String, dynamic> message = <String, dynamic>{
+      'type': LedgerMessages.certs,
+      'items': <Map<String, dynamic>>[signed.toJson()],
+    };
+    for (final String a in <String>{
+      ..._knownFriends(),
+      ...siblingAddresses,
+      for (final MapEntry<String, _DeviceRef> e in _devices.entries)
+        if (e.value.device == cert.device) e.key,
+    }) {
+      _send(a, message);
+    }
+  }
+
+  /// [cert], this device's own certificate co-signed by another device of
+  /// the account, came from that device: taken while this device is new
+  /// (younger than [kNewDeviceWait], when the co-signature lets it count
+  /// before then) and only from a device of the account that counts and
+  /// that this one trusts (the one it was linked from). A co-signature of an older device would only
+  /// tie it to the co-signer, which a thief's could take down with it.
+  Future<void> _takeOwnCoSignature(DeviceCertificate cert) async {
+    final DeviceCertificate own = identity.certificate;
+    final CoSignature? co = cert.co;
+    if (co == null ||
+        own.coSignedByOther ||
+        cert.signature != own.signature ||
+        co.by == own.device ||
+        _clock.wallMillis() - own.issued >= kNewDeviceWait.inMilliseconds ||
+        !_trustsOwn(co.by) ||
+        store.directory.isRevoked(account, co.by)) {
+      return;
+    }
+    if (!await store.directory.adoptOwnCertificate(cert)) {
+      return;
+    }
+    await identity.takeCertificate(
+      disk,
+      store.directory.certificateOf(account, own.device)!,
+    );
+    // Friends hold the one without it: the next hellos carry it whole.
+    _certificateKnownBy.clear();
+    for (final String friend in _knownFriends()) {
+      _hello(friend, force: true);
+    }
+  }
+
+  /// A device of friend account [cert]'s waits to count here (no
+  /// co-signature): the account's devices are told (once per device), so
+  /// the person can veto it within [kNewDeviceWait] when it is not theirs.
+  void _tellOwnerOfWaiting(DeviceCertificate cert) {
+    if (cert.account == account ||
+        store.directory.pendingUntil(cert.account, cert.device) == null ||
+        !_toldWaiting.add('${cert.account}|${cert.device}')) {
+      return;
+    }
+    if (_toldWaiting.length > 1000) {
+      _toldWaiting.remove(_toldWaiting.first);
+    }
+    final Map<String, dynamic> message = <String, dynamic>{
+      'type': LedgerMessages.certs,
+      'items': <Map<String, dynamic>>[cert.toJson()],
+    };
+    for (final String a in addressesOfAccount(cert.account)) {
+      _send(a, message);
+    }
+  }
+
+  /// Friends' devices whose owner was told they wait ([_tellOwnerOfWaiting]).
+  final Set<String> _toldWaiting = <String>{};
 
   /// A device of this account is expected at [address] (the new device this
   /// one is linking or copying the account to, or the one this device is
@@ -2281,9 +2430,10 @@ final class LedgerNode {
   /// to a cut-off of this account: whoever kept the key on the cut-off
   /// device may have certified it ([kOwnDeviceTrustWindow]).
   bool _nearCutOff(int at) {
-    for (final DeviceRevocation r in store.directory.revocations) {
-      if (r.account == account &&
-          at >= r.issued - kOwnDeviceTrustWindow.inMilliseconds) {
+    for (final DeviceRevocation r in store.directory.countingRevocationsOf(
+      account,
+    )) {
+      if (at >= r.issued - kOwnDeviceTrustWindow.inMilliseconds) {
         return true;
       }
     }
@@ -2330,10 +2480,12 @@ final class LedgerNode {
   /// confirmed again — the cut-off device may have certified it.
   void _noteCutOffs() {
     bool changed = false;
-    for (final DeviceRevocation r in store.directory.revocations) {
-      if (r.account != account) {
-        continue;
-      }
+    // Only cut-offs that count: one a cut-off device signed after it was
+    // cut off, or one by the account key alone in an account that
+    // co-signs, changes nothing.
+    for (final DeviceRevocation r in store.directory.countingRevocationsOf(
+      account,
+    )) {
       _gated = true;
       if (!_cutSeen.add(r.device)) {
         continue;
@@ -2519,6 +2671,12 @@ final class LedgerNode {
   /// sending there and are warned once the revocation reaches them
   /// ([onDeviceUnlinked]). Needs the account key ([LedgerIdentity.unlock]
   /// with the account password first, if one is set).
+  ///
+  /// Signed by this device too, naming the devices it keeps (those that
+  /// count here): friends of this version take a cut-off only from a
+  /// device of the account, and leave out with the cut-off one what it
+  /// co-signed and what this device does not keep. Of a device that waits
+  /// to count ([pendingOwnDevices]) it is a veto: it never counts.
   Future<void> unlinkDevice(String device) async {
     await start();
     final LedgerKeyPair? key = identity.accountKey;
@@ -2528,11 +2686,26 @@ final class LedgerNode {
     if (device == identity.deviceKey.id) {
       throw StateError(t('Tego urządzenia nie można odłączyć z niego samego.'));
     }
+    if (isRevoked) {
+      throw StateError(
+        t(
+          'To urządzenie zostało odłączone od konta i nie może odłączać innych.',
+        ),
+      );
+    }
     final DeviceRevocation revocation = await DeviceRevocation.issue(
       account: key,
       device: device,
       cutoffs: store.headsOfDevice(account: account, device: device),
       issued: _clock.wallMillis(),
+      by: identity.deviceKey,
+      byCertificate: identity.certificate,
+      keep: <String>[
+        for (final DeviceCertificate c in store.directory.devicesOf(account))
+          if (c.device != device &&
+              !store.directory.isRevoked(account, c.device))
+            c.device,
+      ],
     );
     final _DeviceHint? claimed = _deviceHints.remove(device);
     final Set<String> itsAddresses = <String>{
@@ -2571,7 +2744,7 @@ final class LedgerNode {
       if (acc != null &&
           acc != account &&
           !_unlinked.containsKey(e.key) &&
-          store.directory.isRevoked(acc, e.value)) {
+          store.directory.isCutOff(acc, e.value)) {
         unawaitedLogged(
           _cutOff(e.key, acc),
           context: 'Unlinking a device of a friend',
@@ -3197,6 +3370,12 @@ final class LedgerNode {
       if (wrapped != null && wrapped.signature != null)
         'wrap': wrapped.toJson(),
       'ok': _vouches(),
+      // The account's devices as co-signed: one this device co-signed
+      // takes its co-signature from here.
+      'cos': <Map<String, dynamic>>[
+        for (final DeviceCertificate c in store.directory.devicesOf(account))
+          if (c.coSignedByOther) c.toJson(),
+      ].take(_maxVouches).toList(),
     });
   }
 
@@ -3238,6 +3417,20 @@ final class LedgerNode {
     final int added = keyring.mergeOwn(m['own']);
     await _applyLevels(levels, keysAdded: added);
     await _takeVouches(m['ok']);
+    final Object? cos = m['cos'];
+    if (cos is List) {
+      for (final Object? json in cos.take(_maxVouches)) {
+        final DeviceCertificate? cert = DeviceCertificate.fromJson(json);
+        if (cert == null || cert.account != account) {
+          continue;
+        }
+        if (cert.device == identity.deviceKey.id) {
+          await _takeOwnCoSignature(cert);
+        } else {
+          await store.directory.addCertificate(cert);
+        }
+      }
+    }
     final PasswordWrappedSeed? wrapped = PasswordWrappedSeed.fromJson(
       m['wrap'],
     );
@@ -3678,7 +3871,24 @@ final class LedgerNode {
       final bool proven = await _proven(frame, cert);
       if (proven &&
           cert.account == account &&
-          store.directory.isRevoked(account, cert.device) &&
+          store.directory.pendingUntil(account, cert.device) != null &&
+          (_introduced[from] ?? 0) >= _clock.wallMillis()) {
+        // The device this one is linking or copying the account to: it
+        // counts with friends at once, by this device's co-signature.
+        await _coSign(cert);
+      }
+      if (proven) {
+        _tellOwnerOfWaiting(cert);
+        if (cert.account == account &&
+            store.directory.pendingUntil(account, cert.device) != null) {
+          // A device of this account nobody co-signed: shown, so the
+          // person says whether it is theirs.
+          _emitDevices();
+        }
+      }
+      if (proven &&
+          cert.account == account &&
+          store.directory.isCutOff(account, cert.device) &&
           _onceAMinute(_revocationToldAt, from)) {
         // A device of this account that was cut off while away: it is
         // told, so it stops.
@@ -3952,6 +4162,10 @@ final class LedgerNode {
       return;
     }
     await replicator.handle(frame.from, frame.payload);
+    if (type == LedgerMessages.certs) {
+      // A device of this account friends saw waiting, or a co-signature.
+      _emitDevices();
+    }
   }
 
   Future<void> _onHello(String from, SignalTransportFrame frame) async {
@@ -3975,6 +4189,12 @@ final class LedgerNode {
     }
     final String normalized = PeerShareCodec.normalizeAddress(from);
     if (store.directory.isRevoked(cert.account, cert.device)) {
+      // Waiting to count (no co-signature): its owner hears of it, and it
+      // is greeted again once it counts.
+      _tellOwnerOfWaiting(cert);
+      if (!store.directory.isCutOff(cert.account, cert.device)) {
+        return;
+      }
       // Its owner cut this device off (a lost or stolen phone): whoever
       // holds it is not that account any more, here or to the app.
       if (cert.account != account &&
