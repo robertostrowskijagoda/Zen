@@ -33,8 +33,8 @@ const Duration _editClockSkew = Duration(hours: 1);
 /// author of the message they mean (the parser's `kChangeAuthorKey`).
 const String _changeAuthorKey = 'author';
 
-/// [message] with the reply, forwarding, mentions and poll [signal]
-/// carries.
+/// [message] with the reply, forwarding, mentions, poll, position and
+/// picture size [signal] carries.
 ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
   final Map<String, dynamic>? extras = signal.chatExtras;
   if (extras == null) {
@@ -46,11 +46,17 @@ ChatMessage _withSignalExtras(ChatMessage message, ZenSignal signal) {
     mentions: usedMentions(message.text, signalMentions(signal)),
     poll: ChatPoll.fromJson(extras[kPollKey]),
     location: ChatLocation.fromJson(extras[kLocationKey]),
+    mediaSize: _signalMediaSize(signal),
   );
 }
 
-/// The reply, forwarding and mention fields of an outgoing message's
-/// payload.
+/// The size of the picture [signal] names (its chat extras, read by the
+/// parser), or null.
+ChatMediaSize? _signalMediaSize(ZenSignal signal) =>
+    ChatMediaSize.fromJson(signal.chatExtras?[kMediaSizeKey]);
+
+/// The reply, forwarding, mention, position and picture size fields of an
+/// outgoing message's payload.
 Map<String, dynamic> _outgoingChatExtras(ChatMessage message) =>
     <String, dynamic>{
       if (message.reply != null) 're': message.reply!.toJson(),
@@ -58,6 +64,7 @@ Map<String, dynamic> _outgoingChatExtras(ChatMessage message) =>
       if (message.mentions.isNotEmpty)
         kMentionsKey: mentionsToJson(message.mentions),
       if (message.location != null) kLocationKey: message.location!.toJson(),
+      ...?message.mediaSize?.toPayload(),
     };
 
 /// Reactions, replies, editing, deleting for everyone and forwarding, in
@@ -522,6 +529,12 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
     final ChatMessageType resolvedType =
         type ??
         _attachmentTransport.inferType(mimeType: mimeType, fileName: name);
+    final ChatMediaSize? mediaSize = await _pictureSizeOf(
+      _mediaVault,
+      resolvedType,
+      given,
+      path,
+    );
     final String key = 'group:$groupId';
     final int timestamp = _outgoingStamp(key);
     final String messageId = _groupMessageId(timestamp, groupId);
@@ -545,6 +558,7 @@ mixin _SocialHubChatExtrasMixin on _SocialHubControllerBase {
         mimeType: mimeType,
         attachmentSizeBytes: size,
         durationMs: durationMs,
+        mediaSize: mediaSize,
         deliveryState: ChatMessageDeliveryState.sending,
         reply: replyTo,
         forwarded: forwarded,

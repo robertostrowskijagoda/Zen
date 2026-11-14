@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/domain/messages/chat_location.dart';
+import 'package:zen/src/domain/messages/chat_media_size.dart';
 import 'package:zen/src/domain/messages/chat_poll.dart';
 import 'package:zen/src/features/social/mentions.dart';
 
@@ -105,6 +106,7 @@ final class ChatMessage {
     this.mimeType,
     this.attachmentSizeBytes,
     this.durationMs,
+    this.mediaSize,
     this.deliveryState = ChatMessageDeliveryState.none,
     this.readAtMillis,
     this.expiresAtMillis,
@@ -132,6 +134,11 @@ final class ChatMessage {
   final String? mimeType;
   final int? attachmentSizeBytes;
   final int? durationMs;
+
+  /// The size of its picture (a photo, a GIF) as the sender read it: the
+  /// bubble has its final size before the file is there or decoded. Null
+  /// for other files and from a Zen before 1.17.5.
+  final ChatMediaSize? mediaSize;
   final ChatMessageDeliveryState deliveryState;
   final int? readAtMillis;
 
@@ -224,6 +231,7 @@ final class ChatMessage {
     Object? mimeType = _chatMessageUnset,
     Object? attachmentSizeBytes = _chatMessageUnset,
     Object? durationMs = _chatMessageUnset,
+    Object? mediaSize = _chatMessageUnset,
     Object? readAtMillis = _chatMessageUnset,
     Object? expiresAtMillis = _chatMessageUnset,
     ChatMessageDeliveryState? deliveryState,
@@ -272,6 +280,9 @@ final class ChatMessage {
       durationMs: identical(durationMs, _chatMessageUnset)
           ? this.durationMs
           : castCopyWithValue<int>(durationMs, fieldName: 'durationMs'),
+      mediaSize: identical(mediaSize, _chatMessageUnset)
+          ? this.mediaSize
+          : castCopyWithValue<ChatMediaSize>(mediaSize, fieldName: 'mediaSize'),
       readAtMillis: identical(readAtMillis, _chatMessageUnset)
           ? this.readAtMillis
           : castCopyWithValue<int>(readAtMillis, fieldName: 'readAtMillis'),
@@ -330,8 +341,8 @@ final class ChatMessage {
 }
 
 /// What [m] has beyond the basic fields (reply, reactions, edit, deletion,
-/// forwarding, a file still to fetch, a file that will not come), for
-/// storage and copies; `null` when there is nothing.
+/// forwarding, a file still to fetch, a file that will not come, the size
+/// of its picture), for storage and copies; `null` when there is nothing.
 Map<String, dynamic>? chatMessageExtrasToJson(ChatMessage m) {
   final Map<String, dynamic> out = <String, dynamic>{
     if (m.reply != null) 're': m.reply!.toJson(),
@@ -344,6 +355,7 @@ Map<String, dynamic>? chatMessageExtrasToJson(ChatMessage m) {
     if (m.mentions.isNotEmpty) kMentionsKey: mentionsToJson(m.mentions),
     if (m.poll != null) kPollKey: m.poll!.toJson(),
     if (m.location != null) kLocationKey: m.location!.toJson(),
+    if (m.mediaSize != null) kMediaSizeKey: m.mediaSize!.toJson(),
   };
   return out.isEmpty ? null : out;
 }
@@ -378,6 +390,7 @@ ChatMessage chatMessageWithExtras(ChatMessage m, Object? json) {
     mentions: mentionsFromJson(json[kMentionsKey]),
     poll: ChatPoll.fromJson(json[kPollKey]),
     location: ChatLocation.fromJson(json[kLocationKey]),
+    mediaSize: ChatMediaSize.fromJson(json[kMediaSizeKey]),
   );
 }
 

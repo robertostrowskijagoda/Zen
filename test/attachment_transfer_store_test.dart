@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/domain/messages/chat_media_size.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 
@@ -34,6 +35,7 @@ void main() {
           attachmentSizeBytes: 5,
           attachmentBytes: Uint8List.fromList(<int>[1, 2, 3, 4, 5]),
           durationMs: 3210,
+          mediaSize: ChatMediaSize.of(640, 480),
           placeholderSent: true,
           ackedChunkIndexes: const <int>[0],
         ),
@@ -73,6 +75,12 @@ void main() {
       expect(outgoing!.chunkCount, 1);
       expect(outgoing.attachmentBytes, <int>[1, 2, 3, 4, 5]);
       expect(outgoing.durationMs, 3210);
+      // The picture's size goes with every chunk sent after a restart.
+      expect(outgoing.mediaSize, ChatMediaSize.of(640, 480));
+      expect(
+        outgoing.copyWith(placeholderSent: false).mediaSize,
+        ChatMediaSize.of(640, 480),
+      );
       expect(outgoing.placeholderSent, isTrue);
       expect(incoming, isNotNull);
       expect(incoming!.isComplete, isTrue);
@@ -124,6 +132,7 @@ void main() {
       expect(outgoing, isNotNull);
       expect(outgoing!.attachmentBytes, isNull);
       expect(outgoing.attachmentPath, payload.path);
+      expect(outgoing.mediaSize, isNull);
       expect(await outgoing.chunkAt(0), <int>[1, 2, 3, 4, 5, 6]);
     },
   );

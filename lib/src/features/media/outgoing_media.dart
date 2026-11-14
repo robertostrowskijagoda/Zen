@@ -88,6 +88,31 @@ Uint8List stripOutgoingMetadata(Uint8List bytes) {
   }
 }
 
+/// The size, in pixels, the picture [bytes] (its start is enough) is
+/// shown at, read from its header without decoding it: a GIF's canvas, a
+/// PNG, JPEG, WebP or BMP picture's size, with width and height swapped for
+/// a JPEG whose kept EXIF turns it a quarter (orientations 5 to 8: the
+/// friend's phone shows it turned). Null when [bytes] are no such picture
+/// or its header does not read.
+({int width, int height})? pictureDisplaySize(Uint8List bytes) {
+  if (looksLikeGif(bytes)) {
+    if (bytes.length < 10) {
+      return null;
+    }
+    final int width = bytes[6] | (bytes[7] << 8);
+    final int height = bytes[8] | (bytes[9] << 8);
+    return width > 0 && height > 0 ? (width: width, height: height) : null;
+  }
+  final ImageCost? cost = incomingImageCost(bytes);
+  if (cost == null) {
+    return null;
+  }
+  final int? orientation = _isJpeg(bytes) ? _jpegOrientation(bytes) : null;
+  return orientation != null && orientation >= 5 && orientation <= 8
+      ? (width: cost.height, height: cost.width)
+      : (width: cost.width, height: cost.height);
+}
+
 /// [stripOutgoingMetadata] off the UI thread when [bytes] are big.
 // Not async on purpose: a closure made in an async function may drag its
 // suspended frame along, which cannot be sent to another isolate.
@@ -242,6 +267,42 @@ Uint8List? _stripJpeg(Uint8List b) {
     ..add(const <int>[0xFF, 0xD8]);
   kept.forEach(out.add);
   return out.takeBytes();
+}
+
+/// The EXIF orientation of the JPEG [b]: of the first APP1 segment with
+/// one, before the picture data; null when there is none or the segments
+/// do not add up.
+int? _jpegOrientation(Uint8List b) {
+  int at = 2;
+  while (at + 4 <= b.length) {
+    if (b[at] != 0xFF) {
+      return null;
+    }
+    final int marker = b[at + 1];
+    if (marker == 0xFF) {
+      at++; // fill byte
+      continue;
+    }
+    if (marker == 0xDA || marker == 0xD9) {
+      return null;
+    }
+    if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+      at += 2;
+      continue;
+    }
+    final int end = at + 2 + ((b[at + 2] << 8) | b[at + 3]);
+    if (end > b.length) {
+      return null;
+    }
+    if (marker == 0xE1) {
+      final int? orientation = _exifOrientation(b, at + 4, end);
+      if (orientation != null) {
+        return orientation;
+      }
+    }
+    at = end;
+  }
+  return null;
 }
 
 /// Where the entropy-coded data that starts at [from] ends: just past the
