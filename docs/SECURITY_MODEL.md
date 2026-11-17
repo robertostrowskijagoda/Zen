@@ -1010,7 +1010,14 @@ inbox.
   one content, the one that dominates, instead of each its own once), and
   a back-dated change of the tree no longer undoes a payment (the seals,
   not the records' times, say who signs). An era of the treasurers lasts
-  up to six hours: a new treasurer signs from the next one.
+  up to six hours: a new treasurer signs from the next one. Only the
+  device at a treasurer's member address seals, so an honest treasurer
+  with several devices never signs two seals of an era that would mark it
+  as a cheater; a payee handed a final order whose number the treasurers
+  released counts it only once their agreed statement lists it. Open: the
+  close of a cell vote is still signed once per member and can stall when
+  members saw different votes (co-signing a larger close would let one
+  member list a vote dated back).
 - Self-update from GitHub takes only a file whose `SHA256SUMS` carries the
   release signing key's signature (one maintainer key is pinned in
   `release.dart`) and, on Android, an APK signed by the installed copy's

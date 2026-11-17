@@ -2236,7 +2236,11 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   superset of operations, or the same ones with the lower id. It never
   leaves out an operation it signed that counts, nor, for 40 minutes
   after its time, one that may still count; from its first seal of an era
-  it signs no more operations of it. Of several seals of an era every
+  it signs no more operations of it. Of a treasurer's devices only the one
+  at the address its member record names seals (since 1.18.1): the private
+  ledger goes there, and two devices with one key and different ledgers
+  could otherwise sign two seals of an era neither of which dominates the
+  other. Of several seals of an era every
   phone takes the one the longest chain of later seals rests on, then the
   one with more operations, then the lower id; who signed two seals of an
   era neither of which dominates the other is shown with both. A change
