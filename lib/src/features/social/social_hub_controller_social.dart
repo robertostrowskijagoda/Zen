@@ -556,7 +556,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       // What they sent that waits for the app's return is of no use now.
       await _dropQueuedSignalsFrom(canonical);
 
-      await _messageTimelineStore.save(canonical, const <ChatMessage>[]);
+      await _clearThreadWithFiles(canonical);
       _bumpTimelineRevision();
 
       // The book remembers it: nothing brings them back on its own.
@@ -2650,7 +2650,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         );
         // What was said before joining was said in that other group.
         for (final String id in unjoined) {
-          await _messageTimelineStore.save('group:$id', const <ChatMessage>[]);
+          await _clearThreadWithFiles('group:$id');
         }
         await _persistState();
       }

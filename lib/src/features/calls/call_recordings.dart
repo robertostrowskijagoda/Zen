@@ -109,6 +109,28 @@ final class CallRecordingStore {
     }
   }
 
+  /// Names of the vault files the index lists. Unlike [list], throws when
+  /// the index does not read: the media sweep then removes nothing.
+  Future<Set<String>> fileNames() async {
+    final Uint8List? raw = await disk.read(_indexKey);
+    if (raw == null) {
+      return <String>{};
+    }
+    final Object? json = jsonDecode(utf8.decode(raw));
+    if (json is! List) {
+      throw const FormatException('The recordings index is damaged.');
+    }
+    final Set<String> names = <String>{};
+    for (final Object? item in json) {
+      final CallRecording? r = CallRecording.fromJson(item);
+      if (r == null) {
+        throw const FormatException('A recording in the index is damaged.');
+      }
+      names.add(r.file);
+    }
+    return names;
+  }
+
   Future<void> _saveIndex(List<CallRecording> items) => disk.write(
     _indexKey,
     Uint8List.fromList(

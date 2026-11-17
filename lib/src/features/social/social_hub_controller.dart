@@ -33,6 +33,7 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
+import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/call_tones.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
@@ -52,6 +53,7 @@ import 'package:zen/src/features/ledger/contacts_backup.dart'
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/media/media_vault_sweep.dart';
 import 'package:zen/src/features/media/outgoing_media.dart';
 import 'package:zen/src/features/profile/profile_card.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
@@ -1135,6 +1137,21 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     }
     await _mediaVault.delete(path);
   }
+
+  /// Empties the conversation [key] and deletes the app's copies of its
+  /// files: emptied alone, they stayed in the vault with nothing pointing
+  /// at them.
+  Future<void> _clearThreadWithFiles(String key) async {
+    final List<ChatMessage> gone = await _messageTimelineStore.load(key);
+    await _messageTimelineStore.save(key, const <ChatMessage>[]);
+    for (final ChatMessage message in gone) {
+      await _deleteManagedAttachmentIfPresent(message);
+    }
+  }
+
+  /// Sweeps the media vault at most once a day of a run
+  /// (`social_hub_controller_retention.dart`).
+  Future<void> _sweepMediaVaultNow();
 
   Future<void> _setPendingLaunchIntent(RuntimeRouteIntent intent) async {
     state = state.copyWith(pendingLaunchIntent: intent);

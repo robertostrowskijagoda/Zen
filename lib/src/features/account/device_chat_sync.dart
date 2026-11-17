@@ -92,10 +92,15 @@ bool _fileReady(ChatMessage m) =>
 /// device sends (once it is complete: a file message once its file is in),
 /// and [onNewIncomingFile] about every file from someone else once it is
 /// whole here.
-final class SyncingMessageTimelineStore implements MessageTimelineStore {
+final class SyncingMessageTimelineStore
+    implements MessageTimelineStore, StrictTimelineReader {
   SyncingMessageTimelineStore(this.delegate);
 
   final MessageTimelineStore delegate;
+
+  @override
+  Future<List<ChatMessage>> loadStrict(String peerAddress) =>
+      loadTimelineStrict(delegate, peerAddress);
   void Function(String peer, ChatMessage message)? onNewOutgoing;
 
   /// A friend's file came whole to this device. A file goes to every

@@ -328,6 +328,19 @@ friend list or device record names it only as a hint, see above).
   as plain files under the account folder; what earlier versions left in
   its `avatars` and `profile` folders is sealed if still in use and removed
   at the next start.
+- **Leftover files in the media vault.** Removing a friend (here, or by
+  them) deletes the files of the chat with them, as clearing a chat does.
+  What a crash, an unfinished write or an older version still leaves in
+  the vault is swept at a quiet moment (when the person leaves the app, at
+  most once a day of a run, never at start): a file goes only when it is
+  at least two days old, was not written in this run, and nothing of the
+  open account points at it (the messages of every conversation,
+  unfinished sends, friends' photos, the own photo and cover, call
+  recordings). When any of that cannot be read whole (the store locked, a
+  damaged or newer file), or when over 20 files and more than half of them look unused,
+  nothing is removed. One sweep removes at most 200 files; the folder is
+  never made or removed by it, and the diagnostics log gets only counts and
+  bytes (nothing at all while a hidden account is open).
 - **Several accounts.** Each account has its own keys, mesh node, folder,
   keystore entries and password. Folders are named by a keyed hash of the
   account ID. Every device has 2 decoy folders from the first start and

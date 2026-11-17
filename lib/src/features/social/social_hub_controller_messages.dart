@@ -886,7 +886,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         return;
       case ZenSignalType.friendRemove:
         final String canonical = PeerShareCodec.normalizeAddress(signal.sender);
-        await _messageTimelineStore.save(canonical, const <ChatMessage>[]);
+        await _clearThreadWithFiles(canonical);
         _bumpTimelineRevision();
         return;
       case ZenSignalType.transferCancel:

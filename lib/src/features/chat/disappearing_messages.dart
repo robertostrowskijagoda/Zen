@@ -154,7 +154,8 @@ Map<String, int> _newestRemembered(Map<String, int> next) {
 ///   copied from another own device);
 /// * expired messages are never shown again, even before they are swept;
 /// * [sweep] deletes them for good, and [onExpired] removes their files.
-final class DisappearingTimelineStore implements MessageTimelineStore {
+final class DisappearingTimelineStore
+    implements MessageTimelineStore, StrictTimelineReader {
   DisappearingTimelineStore(this.delegate, {int Function()? now})
     : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -199,6 +200,19 @@ final class DisappearingTimelineStore implements MessageTimelineStore {
     }
     return List<ChatMessage>.unmodifiable(
       all.where((ChatMessage m) => !m.isExpiredAt(now)),
+    );
+  }
+
+  /// Expired messages are left out here too: their files are no longer in
+  /// use, whether or not [sweep] has deleted the messages yet.
+  @override
+  Future<List<ChatMessage>> loadStrict(String peerAddress) async {
+    final int now = _now();
+    return List<ChatMessage>.unmodifiable(
+      (await loadTimelineStrict(
+        delegate,
+        peerAddress,
+      )).where((ChatMessage m) => !m.isExpiredAt(now)),
     );
   }
 

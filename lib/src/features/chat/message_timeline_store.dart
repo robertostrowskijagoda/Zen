@@ -86,6 +86,27 @@ abstract interface class MessageTimelineStore {
   );
 }
 
+/// A store that reads a conversation whole or not at all, for the sweep of
+/// the media vault: a part it cannot read may name files still in use.
+abstract interface class StrictTimelineReader {
+  /// Every message of [peerAddress]; throws where [MessageTimelineStore.load]
+  /// shows nothing or less (a locked store, a damaged or newer index, a
+  /// piece that does not read).
+  Future<List<ChatMessage>> loadStrict(String peerAddress);
+}
+
+/// [store]'s [StrictTimelineReader.loadStrict], or a throw for a store that
+/// cannot read strictly.
+Future<List<ChatMessage>> loadTimelineStrict(
+  MessageTimelineStore store,
+  String peerAddress,
+) {
+  if (store is! StrictTimelineReader) {
+    throw StateError('This conversation store cannot be read strictly.');
+  }
+  return (store as StrictTimelineReader).loadStrict(peerAddress);
+}
+
 /// [current] (a conversation as it is now) with what turned [before] into
 /// [after] (the same conversation as someone read it earlier, and what they
 /// made of it): the messages [after] no longer has are taken out, those it
@@ -157,7 +178,8 @@ const int kTimelineCachedBytes = 16 * 1024 * 1024;
 /// `<thread>` is `threads/<address>` and `threads/` is one of
 /// [kZenHiddenNamePrefixes]: in the encrypted store none of these keys
 /// becomes a readable file name. Nothing lists folders to find them.
-final class FileMessageTimelineStore implements MessageTimelineStore {
+final class FileMessageTimelineStore
+    implements MessageTimelineStore, StrictTimelineReader {
   FileMessageTimelineStore({
     required FileBinaryStore store,
     String storagePrefix = 'threads',
@@ -228,6 +250,21 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       // over it (a damaged one starts afresh in [_open]).
       return const <ChatMessage>[];
     }
+  }
+
+  @override
+  Future<List<ChatMessage>> loadStrict(String peerAddress) {
+    final String key = _keyFor(peerAddress);
+    return _serial(key, () async {
+      // Throws for a locked store and for a damaged or newer index, where
+      // [load] shows nothing.
+      _ThreadIndex.decode(await disk.read(_indexKey(key)));
+      final _Thread thread = await _open(key);
+      if (thread.segments.any((_Segment s) => !s.readable)) {
+        throw StateError('A piece of the conversation cannot be read.');
+      }
+      return thread.all;
+    });
   }
 
   @override
@@ -1146,7 +1183,8 @@ final class _ThreadIndex {
   }
 }
 
-final class MemoryMessageTimelineStore implements MessageTimelineStore {
+final class MemoryMessageTimelineStore
+    implements MessageTimelineStore, StrictTimelineReader {
   MemoryMessageTimelineStore([
     Map<String, List<ChatMessage>> initialThreads =
         const <String, List<ChatMessage>>{},
@@ -1171,6 +1209,9 @@ final class MemoryMessageTimelineStore implements MessageTimelineStore {
       _threads[peerAddress] ?? const <ChatMessage>[],
     );
   }
+
+  @override
+  Future<List<ChatMessage>> loadStrict(String peerAddress) => load(peerAddress);
 
   @override
   Future<void> save(String peerAddress, List<ChatMessage> messages) async {

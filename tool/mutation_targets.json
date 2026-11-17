@@ -666,5 +666,11 @@
       "test/blocked_everywhere_test.dart",
       "test/dating_block_everywhere_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/features/media/media_vault_sweep.dart",
+    "tests": [
+      "test/media_vault_sweep_test.dart"
+    ]
   }
 ]
