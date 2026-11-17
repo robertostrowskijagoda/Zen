@@ -144,6 +144,13 @@ List<String> describeCallStats(List<StatsReport> reports) {
     return id is String ? codecs[id] ?? '?' : '?';
   }
 
+  // The frames each camera gave, so a sender can say how many of them its
+  // encoder never took (held back or over its frame rate).
+  final Map<String, int> sourceFrames = <String, int>{
+    for (final StatsReport report in reports)
+      if (report.type == 'media-source' && _has(report.values, 'frames'))
+        report.id: _int(report.values['frames']),
+  };
   final List<String> lines = <String>[];
   for (final StatsReport report in reports) {
     final Map<dynamic, dynamic> v = report.values;
@@ -160,7 +167,8 @@ List<String> describeCallStats(List<StatsReport> reports) {
         '${v['active'] == false ? ', INACTIVE' : ''}'
         '${_text(v, 'qualityLimitationReason', 'limit')}'
         '${_text(v, 'encoderImplementation', 'encoder')}'
-        '${_videoOutQuality(v)}',
+        '${_videoOutQuality(v)}'
+        '${_videoOutLoad(v, sourceFrames)}',
       );
     } else if (report.type == 'inbound-rtp' && kind == 'video') {
       lines.add(
@@ -175,6 +183,7 @@ List<String> describeCallStats(List<StatsReport> reports) {
         'nack ${_int(v['nackCount'])} pli ${_int(v['pliCount'])} '
         'fir ${_int(v['firCount'])}'
         '${_text(v, 'decoderImplementation', 'decoder')}'
+        '${_perFrame(v['totalDecodeTime'], v['framesDecoded'], 'decode')}'
         '${_int(v['freezeCount']) > 0 ? ', ${_int(v['freezeCount'])} freezes '
                   '(${_seconds(v['totalFreezesDuration'])})' : ''}',
       );
@@ -186,7 +195,20 @@ List<String> describeCallStats(List<StatsReport> reports) {
     } else if (report.type == 'inbound-rtp' && kind == 'audio') {
       lines.add(
         'audio in ${codecOf(v)}, ${_int(v['packetsReceived'])} packets, '
-        '${_kb(v['bytesReceived'])}, lost ${_int(v['packetsLost'])}',
+        '${_kb(v['bytesReceived'])}, lost ${_int(v['packetsLost'])}'
+        '${_audioInQuality(v)}',
+      );
+    } else if (report.type == 'remote-inbound-rtp' &&
+        (kind == 'audio' || kind == 'video')) {
+      // What the other side reports of this side's packets: the round trip
+      // of the media themselves (RTCP, so it includes what waits queued
+      // behind the video; the pair's rtt is its rarer connectivity
+      // checks) and what was lost on the way.
+      final Object? rtt = v['roundTripTime'];
+      lines.add(
+        '$kind out reached the other side'
+        '${rtt is num && rtt.isFinite ? ', rtt ${(rtt * 1000).round()} ms' : ''}'
+        ', lost ${_int(v['packetsLost'])}',
       );
     } else if (report.type == 'media-source' && kind == 'video') {
       lines.add(
@@ -427,6 +449,61 @@ String _videoOutQuality(Map<dynamic, dynamic> v) {
     if (held.isNotEmpty) {
       out.write(', held back ${held.join(' ')}');
     }
+  }
+  return out.toString();
+}
+
+/// What a camera's encoder costs and leaves out: the time it takes a
+/// frame on average (a phone whose software VP8 takes 30 ms or more at 24
+/// frames has no time left for the voice) and the camera's frames it never
+/// encoded (dropped for the processor or the path, or over its frame
+/// rate). Each part only when the statistics have it.
+String _videoOutLoad(Map<dynamic, dynamic> v, Map<String, int> sourceFrames) {
+  final StringBuffer out = StringBuffer(
+    _perFrame(v['totalEncodeTime'], v['framesEncoded'], 'encode'),
+  );
+  final Object? source = v['mediaSourceId'];
+  final int? captured = source is String ? sourceFrames[source] : null;
+  final int encoded = _int(v['framesEncoded']);
+  if (captured != null && captured > encoded) {
+    out.write(', ${captured - encoded} camera frames not encoded');
+  }
+  return out.toString();
+}
+
+/// `, [label] N ms/frame` from a total time in seconds over [frames], or
+/// nothing when either is missing.
+String _perFrame(Object? totalSeconds, Object? frames, String label) {
+  final int count = _int(frames);
+  if (totalSeconds is! num || !totalSeconds.isFinite || count <= 0) {
+    return '';
+  }
+  final double ms = totalSeconds * 1000 / count;
+  return ', $label ${ms.toStringAsFixed(1)} ms/frame';
+}
+
+/// How the voice coming in held up: the share of it made up for lost or
+/// late packets (`concealed`, with how many times), how long a packet
+/// waited in the jitter buffer on average, and the jitter of arrival.
+/// Each part only when the statistics have it.
+String _audioInQuality(Map<dynamic, dynamic> v) {
+  final StringBuffer out = StringBuffer();
+  final int total = _int(v['totalSamplesReceived']);
+  if (_has(v, 'concealedSamples') && total > 0) {
+    final double share = _int(v['concealedSamples']) * 100 / total;
+    out.write(
+      ', concealed ${share.toStringAsFixed(1)}% '
+      '(${_int(v['concealmentEvents'])} times)',
+    );
+  }
+  final Object? buffered = v['jitterBufferDelay'];
+  final int emitted = _int(v['jitterBufferEmittedCount']);
+  if (buffered is num && buffered.isFinite && emitted > 0) {
+    out.write(', jitter buffer ${(buffered * 1000 / emitted).round()} ms');
+  }
+  final Object? jitter = v['jitter'];
+  if (jitter is num && jitter.isFinite) {
+    out.write(', jitter ${(jitter * 1000).round()} ms');
   }
   return out.toString();
 }

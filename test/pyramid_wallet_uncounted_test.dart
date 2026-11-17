@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/dev/sim/sim_network.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
@@ -22,28 +21,20 @@ void main() {
     late PyramidWorld w;
     late PyramidRecord pay;
     await tester.runAsync(() async {
+      // The founder's era sealed, as the treasurers' apps do.
       w = await PyramidWorld.six();
-      // The first eras sealed, as the treasurers' apps do.
-      await w.net.advance(const Duration(hours: 2));
-      await w.duties(rounds: 1);
-      await w.net.advance(const Duration(minutes: 15));
-      await w.duties(rounds: 8);
-      await w.sync();
       await w.fund('A1', 10000);
       pay = (await w['A1'].pay(w['B1'].myKey!, 800, memo: 'Rower'))!;
       await w.net.run();
       expect(w['B1'].myEntries.map((PyrLedgerEntry e) => e.id), <String>[
         pay.id,
       ]);
-      // A newcomer at the treasurers' levels ends the payment's era.
-      final SimPhone x = w.add('X');
-      await w.join(w.net['A2'], x);
-      await w.sync();
       final PyramidState s = w['B1'].state!;
-      final PyrEraToSeal era = s.unsealedEra!;
-      expect(pay.at, inInclusiveRange(era.from, era.to - 1));
-      // Most of the next treasurers seal it without the payment — twice,
-      // differently: both leave it out, and those four signed two seals.
+      final PyrEraToSeal era = s.eraToSeal(w.net.now)!;
+      expect(PyrLedger.eraOf(pay), era.n);
+      // Most of the era's treasurers seal it without the payment — twice,
+      // differently, neither dominating the other: both leave it out, and
+      // those four signed two seals.
       Future<PyramidRecord> seal(List<String> ops) async {
         PyramidRecord r = PyramidRecord(
           body: PyrSeal.body(
@@ -64,8 +55,8 @@ void main() {
         return r;
       }
 
-      await w['S'].ingest(await seal(const <String>[]));
       await w['S'].ingest(await seal(<String>['0' * 64]));
+      await w['S'].ingest(await seal(<String>['1' * 64]));
       await w.net.run();
       await w.sync();
     });

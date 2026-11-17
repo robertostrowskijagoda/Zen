@@ -118,6 +118,23 @@ every third time, and a wake with no network at all does not
 wait for a link. A computer on battery stops being a bridge for others and keeps
 only 4 public peers; plugged in, it goes back to normal.
 
+**No network at all** (Android: Wi-Fi and mobile data off, flight mode,
+no signal). Zen learns it from Android's own network callback, not by
+checking, and then rests: no mailbox polls, presence rounds, link checks,
+outbox rounds or update checks, and no wake for any of them. Before, each
+of those wakes (several an hour) held the phone for 3 to 16 seconds while
+it dialled and waited for answers that could not come. Now, by the app's
+own test model, an hour without a network costs **no wakes** for them.
+Only the look around nearby keeps its wakes, as Bluetooth works without
+a network: by default at most 12 an hour (fewer when it finds nobody),
+each about 8 seconds awake plus up to 5. With the look off, none. When a
+network comes back, what came due meanwhile runs at once, link check
+first (the node redials its peers), so waiting mail goes out within
+seconds; everything then keeps its old place on the 10-minute grid. The
+diagnostic log says when Zen goes to rest and when it resumes. What only
+a phone can show: that Android reports no network on your phone (an
+always-on VPN may keep one), and how much battery that saves.
+
 **GIFs.** The GIF button in chats searches KLIPY, an outside company (the
 only chat feature that talks to one). Switch off *GIF search* and the GIF button disappears and Zen
 sends nothing to KLIPY. GIFs from your phone's keyboard and GIF files keep

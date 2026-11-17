@@ -1277,6 +1277,116 @@ void main() {
     });
   });
 
+  group('with no network at all', () {
+    test('work that needs one wakes nothing and does not run, nor does the '
+        'link check; the look around still does', () async {
+      final List<String> ran = <String>[];
+      ZenWake.alongsideBeat('link-check', () async => ran.add('check'));
+      ZenWake.beat(
+        'mailbox-poll',
+        const Duration(minutes: 10),
+        () async => ran.add('poll'),
+        hold: const Duration(seconds: 10),
+        needsNetwork: true,
+      );
+      ZenWake.beat(
+        'presence-round',
+        const Duration(minutes: 10),
+        () async => ran.add('round'),
+        needsNetwork: true,
+      );
+      expect(platform.live, hasLength(1));
+      ZenWake.networkChanged(up: false);
+      expect(ZenWake.offline, isTrue);
+      expect(platform.live, isEmpty, reason: 'no wake at all for them');
+      expect(ZenWake.plannedBeat, isEmpty);
+      // Bluetooth works without a network: the look keeps its wakes.
+      ZenWake.beat(
+        'nearby-look',
+        const Duration(minutes: 5),
+        () async => ran.add('look'),
+        whileIdle: false,
+      );
+      for (int i = 0; i < 12; i++) {
+        final _Alarm next = platform.live.single;
+        now += next.delay.inMilliseconds;
+        await next.ring();
+      }
+      expect(ran, List<String>.filled(12, 'look'));
+    });
+
+    test('a wake that comes anyway holds the phone no longer than a '
+        'moment', () async {
+      final Completer<void> neverAnswered = Completer<void>();
+      int polls = 0;
+      ZenWake.beat('mailbox-poll', const Duration(minutes: 10), () {
+        polls++;
+        // A poll waits for answers that cannot come without a network.
+        return neverAnswered.future;
+      }, needsNetwork: true);
+      ZenWake.alongsideBeat('link-check', () => neverAnswered.future);
+      // The alarm was set before the network went; it goes off anyway.
+      final _Alarm set = platform.live.single;
+      ZenWake.networkChanged(up: false);
+      now += set.delay.inMilliseconds;
+      bool done = false;
+      unawaited((set.ring() as Future<void>).then((_) => done = true));
+      await _settle();
+      expect(done, isTrue, reason: 'nothing ran, so nothing holds it');
+      expect(polls, 0);
+    });
+
+    test('once a network is back what waited runs at once, the link check '
+        'first, under a hold of its own; each keeps its place', () async {
+      final List<String> ran = <String>[];
+      ZenWake.alongsideBeat('link-check', () async => ran.add('check'));
+      ZenWake.beat(
+        'mailbox-poll',
+        const Duration(minutes: 10),
+        () async => ran.add('poll'),
+        needsNetwork: true,
+      );
+      ZenWake.beat(
+        'locked-outbox',
+        const Duration(hours: 1),
+        () async => ran.add('outbox'),
+        needsNetwork: true,
+      );
+      now = 1 * _min;
+      ZenWake.networkChanged(up: false);
+      // 25 minutes without: the poll came due twice, the outbox not yet.
+      now = 26 * _min;
+      ZenWake.networkChanged(up: true);
+      expect(ZenWake.offline, isFalse);
+      await _settle();
+      expect(ran, <String>['check', 'poll']);
+      expect(platform.calls.first, 'hold network-back 30');
+      expect(
+        platform.calls.where(
+          (String c) => c.startsWith('release network-back'),
+        ),
+        hasLength(1),
+      );
+      // The poll's next run is at 30 minutes, on its old 10-minute steps,
+      // not 10 minutes after the network came back.
+      final _Alarm next = platform.live.single;
+      expect(next.delay, const Duration(minutes: 4));
+      expect(ZenWake.plannedBeat, <String>['mailbox-poll']);
+      // A short gap with nothing due: only the link check (the node
+      // redials its peers).
+      ran.clear();
+      ZenWake.networkChanged(up: false);
+      now += 30 * _sec;
+      ZenWake.networkChanged(up: true);
+      await _settle();
+      expect(ran, <String>['check']);
+      // Told twice, it is one change.
+      ZenWake.networkChanged(up: true);
+      await _settle();
+      expect(ran, <String>['check']);
+    });
+  });
+
   group('Android', () {
     late List<MethodCall> calls;
     MockStreamHandlerEventSink? sink;
@@ -1340,6 +1450,33 @@ void main() {
       // Not by the backup timer: the alarm already came.
       expect(calls.where((MethodCall c) => c.method == 'cancel'), isEmpty);
     });
+
+    test(
+      'Android tells whether there is a network on the power events',
+      () async {
+        mockPower();
+        ZenWake.platform = AndroidWakePlatform();
+        ZenWake.beat(
+          'mailbox-poll',
+          const Duration(minutes: 10),
+          () async {},
+          needsNetwork: true,
+        );
+        await _settle();
+        expect(ZenWake.offline, isFalse, reason: 'nothing said yet');
+        sink!.success(<String, Object?>{'type': 'network', 'up': false});
+        await _settle();
+        expect(ZenWake.offline, isTrue);
+        expect(
+          calls.map((MethodCall c) => c.method),
+          contains('cancel'),
+          reason: 'the poll\'s wake is taken back',
+        );
+        sink!.success(<String, Object?>{'type': 'network', 'up': true});
+        await _settle();
+        expect(ZenWake.offline, isFalse);
+      },
+    );
 
     test('the beat lets go of a wake as soon as its works are done', () async {
       mockPower();

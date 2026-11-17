@@ -194,14 +194,15 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
             const SizedBox(height: 12),
             Text(
               t(
-                'Odłączenie nie zabiera z niego klucza konta. Jeśli było '
-                'odblokowane, a klucz nie był chroniony hasłem konta (albo '
-                'ktoś zna to hasło), ten ktoś może dodać do konta nowe '
-                'urządzenie. Twoje urządzenia zapytają Cię o nie, zanim '
-                'cokolwiek mu dadzą, ale znajomi przyjmą je jako Twoje. Wtedy '
-                'przenieś się na nowe konto: Ustawienia → Konta na tym '
-                'urządzeniu → Dodaj konto, zaproś znajomych od nowa, a stare '
-                'konto usuń.',
+                'Odłączenie nie zabiera z niego klucza konta. Kto ma ten '
+                'klucz i hasło konta, jest dla Zen nie do odróżnienia od '
+                'Ciebie. Urządzenie, które sam doda, zacznie działać u '
+                'znajomych dopiero po 24 godzinach; do tego czasu Twoje '
+                'urządzenia pokażą je tutaj i możesz je odłączyć. Jeśli w '
+                'ciągu doby odłączy ono to urządzenie, oba zostaną '
+                'odłączone. Wtedy przenieś się na nowe konto: Ustawienia → '
+                'Konta na tym urządzeniu → Dodaj konto, zaproś znajomych od '
+                'nowa, a stare konto usuń.',
               ),
               key: const Key('device-unlink-key-note'),
               style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
@@ -320,6 +321,64 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                         '→ Dodaj konto).',
                       ),
                     ),
+                  if (node.pendingOwnDevices.isNotEmpty) ...<Widget>[
+                    ZenInfo(
+                      key: const Key('devices-waiting'),
+                      icon: Icons.hourglass_top_rounded,
+                      tone: zen.danger,
+                      title: t('Nowe urządzenie czeka na Twoją decyzję'),
+                      text: t(
+                        'Żadne z Twoich urządzeń go nie podłączyło: to '
+                        'przywrócenie konta z kartki, pliku albo od '
+                        'znajomych, albo ktoś, kto ma klucz Twojego konta. '
+                        'Znajomi zaczną je traktować jak Twoje 24 godziny po '
+                        'tym, jak się pojawiło. Jeśli jest Twoje, potwierdź '
+                        'je; jeśli go nie znasz, odłącz je teraz.',
+                      ),
+                    ),
+                    for (final AccountDevice d in node.pendingOwnDevices)
+                      ZenTile(
+                        key: Key('device-waiting-${d.device}'),
+                        icon: Icons.devices_other_rounded,
+                        tone: zen.danger,
+                        title: deviceNameLabel(d.name),
+                        subtitle: t(
+                          'Zacznie działać za {hours} h, jeśli go nie '
+                          'odłączysz',
+                          {
+                            'hours':
+                                ((d.waitsUntil! -
+                                            DateTime.now()
+                                                .millisecondsSinceEpoch) /
+                                        3600000)
+                                    .ceil()
+                                    .clamp(0, 24),
+                          },
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            TextButton(
+                              key: Key('device-confirm-${d.device}'),
+                              onPressed: _busy
+                                  ? null
+                                  : () => unawaited(_confirm(d)),
+                              child: Text(t('To moje')),
+                            ),
+                            TextButton(
+                              key: Key('device-unlink-${d.device}'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: zen.danger,
+                              ),
+                              onPressed: _busy
+                                  ? null
+                                  : () => unawaited(_unlink(d)),
+                              child: Text(t('Odłącz')),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                   ZenSection(t('Twoje urządzenia'), top: 12),
                   for (final AccountDevice d in node.ownDevices)
                     ZenTile(

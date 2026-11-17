@@ -649,12 +649,12 @@ void main() {
 
       /// Starts the receiver; the node tells [links] in turn whether it has
       /// a link (the last one stays). [network]: whether the phone is on
-      /// any network at all.
+      /// any network at all (`null`: the receiver's own way of telling).
       Future<void> start(
         List<bool> answers, {
         Duration relinkWait = const Duration(seconds: 10),
         Duration relinkStep = const Duration(milliseconds: 5),
-        bool network = true,
+        bool? network = true,
       }) async {
         links = List<bool>.of(answers);
         looks = 0;
@@ -677,7 +677,7 @@ void main() {
             looks++;
             return links.length > 1 ? links.removeAt(0) : links.single;
           },
-          onNetwork: () async => network,
+          onNetwork: network == null ? null : () async => network,
         );
         await receiver.start();
       }
@@ -754,6 +754,46 @@ void main() {
           network: false,
         );
         expect(await wakeAndCount(), 1);
+        expect(looks, 1, reason: 'only the look before the poll');
+      });
+
+      test('with no network at all no poll goes out and nothing wakes the '
+          'phone; once a network is back the poll goes out at once', () async {
+        await start(<bool>[true]);
+        final int before = polls();
+        expect(wake.live, hasLength(1));
+        // Android: Wi-Fi and mobile data off.
+        ZenWake.networkChanged(up: false);
+        expect(wake.live, isEmpty, reason: 'no wake while there is none');
+        // An hour later the network is back: the poll that came due goes
+        // out now, not on the next wake.
+        clock += const Duration(hours: 1).inMilliseconds;
+        ZenWake.networkChanged(up: true);
+        for (int i = 0; i < 40 && polls() == before; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(polls() - before, 1);
+        expect(wake.live, hasLength(1), reason: 'the polls go on');
+      });
+
+      test('a network gone during a wake: the wake does not wait for a link, '
+          'whatever the interfaces say', () async {
+        const Duration wait = Duration(milliseconds: 200);
+        const Duration step = Duration(milliseconds: 10);
+        // The receiver's own test: Android's word, then the interfaces
+        // (with mobile data off a phone may keep an address for calls).
+        await start(
+          <bool>[false],
+          relinkWait: wait,
+          relinkStep: step,
+          network: null,
+        );
+        expect(
+          await wakeAndCount(
+            during: () async => ZenWake.networkChanged(up: false),
+          ),
+          1,
+        );
         expect(looks, 1, reason: 'only the look before the poll');
       });
 

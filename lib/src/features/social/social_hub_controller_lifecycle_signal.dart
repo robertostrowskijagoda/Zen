@@ -213,6 +213,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       return;
     }
     await _persistState();
+    if (_isUiInteractive(previous)) {
+      // The person just left the app: a quiet moment, never the start.
+      unawaitedLogged(
+        _sweepMediaVaultNow(),
+        context: 'Sweeping the media vault failed',
+      );
+    }
   }
 
   /// Takes over what another isolate stored while this one was away.

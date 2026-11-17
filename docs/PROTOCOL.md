@@ -760,26 +760,43 @@ camera runs (`ZenCallCamera.kt`) to the steadiest range the camera offers:
 the highest floor from 15 up to 24 frames (24-24 where there is one), else
 the lowest floor above 24; WebRTC's own pick was the lowest floor (7-30 on
 most phones), and in poor light the camera then sent 5-6 frames, each
-smeared by movement. The camera sender keeps between 150 kbit/s and 2.5
-Mbit/s at up to 24 frames, and keeps its frames before its resolution when
-the path is tight (`MAINTAIN_FRAMERATE`); the estimate of the path starts at
-1 Mbit/s (`x-google-start-bitrate` added to the camera's VP8 and H.264
-formats of the other side's description before it is applied) instead of
-300 kbit/s. What is promised: on a path that carries 1.5 Mbit/s or more
-each way, a sharp 1280 x 720 picture at a steady 24 frames (15 at the least
-in poor light where the camera has no steady range of 24), also when it
-moves; on a worse path the frames keep coming at a lower resolution, and
-below 150 kbit/s the path's own losses decide. A camera sends VP8, in
-software where the phone's WebRTC has no VP8 encoder (the frame encryption
-leaves only VP8 and H.264 readable, and H.264 left pictures black); the
-log line `encoder` says which. The `Call stats` lines (4 s, 15 s and a
-minute after the media connect and after each offer or answer) give the
-camera's size and frames captured, the frames sent with the encoder's aim
+smeared by movement.
+
+The voice comes before the picture (since 1.17.6). The camera sender
+encodes at most 960 x 540 (the camera's 1280 x 720 scaled down by 4/3),
+up to 1.2 Mbit/s with no floor of Zen's own, at up to 24 frames, and keeps
+its frames before its resolution when the path or the processor is tight
+(`MAINTAIN_FRAMERATE`); WebRTC watches the processor
+(`googCpuOveruseDetection`, off from 1.10.0 to 1.17.5) and lowers the
+resolution when the encoder cannot keep up. The estimate of the path
+starts at 500 kbit/s (`x-google-start-bitrate` added to the camera's VP8
+and H.264 formats of the other side's description before it is applied)
+instead of WebRTC's 300 kbit/s. 1.17.5 encoded 1280 x 720 between 150
+kbit/s and 2.5 Mbit/s from a start of 1 Mbit/s with the processor
+unwatched: VP8 is encoded and decoded in software on most phones, every
+frame is sealed and every packet crosses Yggdrasil's encryption in the same
+app, and over Yggdrasil's TCP links whatever the path cannot carry waits in
+a queue ahead of the voice, so calls stuttered, the voice too. What is
+promised: on a path that carries 1.2 Mbit/s or more each way and a phone
+that keeps up, a 960 x 540 picture at a steady 24 frames (15 at the least
+in poor light where the camera has no steady range of 24); otherwise the
+frames keep coming at a lower resolution. A camera sends VP8, in software
+where the phone's WebRTC has no VP8 encoder (the frame encryption leaves
+only VP8 and H.264 readable, and H.264 left pictures black); the log line
+`encoder` says which. The `Call stats` lines (4 s, 15 s and a minute after
+the media connect and after each offer or answer) give the camera's size
+and frames captured; the frames sent with their size and rate, what limits
+them now (`limit cpu`, `bandwidth` or `none`), the encoder's aim
 (`target`), its average quantizer (`qp`, above about 80 blocky), how often
-it changed the resolution and how long the processor or the path held it
-back, and for the picture coming in its frames a second and freezes; a
-`Call camera` line says what the camera was asked for and which frame-rate
-range it offered, ran at and was pinned to.
+it changed the resolution, how long the processor or the path held it
+back, its time per frame (`encode … ms/frame`) and the camera's frames it
+never encoded; for the picture coming in its frames a second, decode time
+per frame and freezes; for the voice coming in the packets lost, the share
+made up for lost or late packets (`concealed`), the average wait in the
+jitter buffer and the jitter; and per stream sent the round trip of the
+media and what the other side lost (`… out reached the other side, rtt`).
+A `Call camera` line says what the camera was asked for and which
+frame-rate range it offered, ran at and was pinned to.
 
 **The screen during a call** (since 1.17.5, `call_screen_awake.dart`,
 `CallScreenKeepOn.kt`): the app's window keeps the screen on
@@ -1022,6 +1039,21 @@ messages and no matches: one rule decides wherever a match can reach it. The
 hide list holds against friends; the sealed match test (`match`, `match_re`)
 holds only against apps that follow the rules.
 
+Answers to a lantern: per lantern, a friend asking from one step away is
+answered once (`kDatingMatchNearPerFriend`) and questions that come through
+one friend from further 40 times (`kDatingMatchFarPerFriend`), so several
+people asking through one friend, and another device of an account asking
+through a mutual friend, are each answered. A question that got no answer
+(the keys `lk` or the match test) goes again, the same question to the same
+mark, after 12 hours (`kDatingAskAgainAfter`), 3 times in all
+(`kDatingAskTries`), only while the lantern is asked about (3 days), with
+dating on or off alike. The holder answers the same question (the same key,
+the same way, its answer not used for a profile yet) with the same answer,
+`a`, `o` and `n` unchanged and sealed anew for that key, at most 2 more
+times (`kDatingMatchRepeats`), outside the limits above: a lost answer no
+longer costs a match, and a repeated or replayed question gives nobody
+anything new.
+
 ### 2.9 Relay mailboxes (`rly_*`)
 
 See 3.2. Types: `rly_ack`, `rly_announce`, `rly_announce_ack`, `rly_deposit`,
@@ -1115,10 +1147,14 @@ who are not treasurers or parties receive nothing.
   (orders waiting, or split) per payer (`kPyrMaxEvidencePerPayer`), and
   answers `ldig` / `lwant` only to the treasurer whose member record names
   the sending address.
-- **Seals of the eras** (`seal`, public, 3.4): once an era of the
-  treasurers ended, most of the next era's treasurers seal it with the
-  operations dated in it that counted for them; an operation dated in a
-  sealed era that its seal does not list counts nowhere.
+- **Eras** (`after`, since 1.17.5): an operation names how many seals its
+  payer knew (`after`) and belongs to the era after the last of them; only
+  that era's treasurers (the `next` of that seal) sign it, and a treasurer
+  signs only operations of the era open on its phone. **Seals** (`seal`,
+  public, 3.4): most of an era's own treasurers seal it with its
+  operations that counted for them; one its seal does not list counts
+  nowhere, and its payer's app orders it again in the era open then (the
+  same number, payee and amount).
 
 ### 2.12 Nearby (Bluetooth LE: Android and computers) [V]
 
@@ -1877,10 +1913,31 @@ A signed, append-only, per-device **log** for each **space**.
   Certificates also come in `lg_hello`. An entry passed on outside the ledger
   (a reshare, a passed-on tombstone, a pyramid report, a post on order, a
   follow notice of another device) carries its certificate as `cert`.
+  It may carry a **co-signature** `co: {by, sig}` outside what the account
+  signs: `sig` is device `by`'s hybrid signature (naming its key) over the
+  certificate's fields with `t:"dev_co"` and `by`. `by` is another device of
+  the account that linked this one or that the person confirmed it on, or
+  the device itself (only a mark that the account co-signs; every device of
+  this version marks its own). A device keeps the first certificate a
+  phone took for it; a co-signature is added to it only while the device
+  does not count there yet. Versions before co-signatures drop `co` and
+  check the certificate as before. How a phone judges devices with them:
+  docs/SECURITY_MODEL.md, "Cutting a device off".
 - A `DeviceRevocation` = `{t:"dev_revoke", account, device,
   cutoffs:{"writer@space": lastValidSeq}, issued, sig}` (keyed hybrid, account
   key: it reaches phones that never met the account) cuts a stolen device off
-  (later entries are refused). An Ed25519-only signature makes an entry,
+  (later entries are refused). The device that cuts adds a device part
+  outside the account's signature: `by` (its device key), `keep` (the
+  devices it keeps, sorted, <= 64), `dsig` (its signature over the account's
+  fields with `t:"dev_revoke_by"`, `by` and `keep`) and `bc` (its
+  certificate, so the cut-off checks out on its own). A device part that
+  does not hold is dropped whole. Once an account co-signs, a cut-off
+  without a device part is refused; one is kept only when its signer could
+  count, at most 8 per signing device and 64 per account (one by a device
+  fewer co-signatures from the account's first devices pushes out one by a
+  device further away). The receiver keeps when it took each cut-off
+  (`got` in `ledger/revocations`) and when it first saw each device
+  (`seen`, `fc` in the certificate file). An Ed25519-only signature makes an entry,
   certificate or revocation malformed; so does a certificate or revocation
   signature that does not carry its key.
 - `hlc` = hybrid logical clock `(millis << 16) | counter`; entries more than 10
@@ -2157,34 +2214,46 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   the parties' phones. The screens and the history name the court of a
   level, never a person. Limit: a court of one person (every level below
   the top) is known by its seat.
-- **Seals of the treasurers' eras** (`seal`, `PyrSeal`): an era is a span
-  in which the treasurers stayed the same. One hour after an era ended
-  (`kPyrSealWaitMs`, and 10 minutes after the treasurer last offered its
-  ledger to the others) each treasurer of the next era that keeps the
-  whole ledger signs {`n` era number (1: the founder's), `prev` the seal
-  before, `from`, `to`, `set` the era's treasurers, `ops` the ids of the
-  private operations dated in it that counted, `ch` what changed the
-  treasurers at `to`}, dated `to`, `by` the next era's treasurers; equal
-  ledgers give equal records, and the signatures meet as it goes round.
-  The seal that counts for an era is the first well-formed one (earliest
-  end, then id) that follows the seal before, is signed by most of the
-  next treasurers and agrees with the tree; a treasurer that signs two
-  different seals of one era is shown with both. A sealed era is fixed for
-  every phone: its treasurers are the sealed ones, an operation dated in
-  it that the seal does not list counts nowhere, a change of the tree that
-  would change the treasurers inside it (or at its end, not among `ch`) is
-  taken as made after the seal and folds after the last seal, and any
-  other record that would change it is refused. Limits: a seal lists at
-  most about 30000 operation ids (the 2 MiB record limit) and cannot be
-  published with more than 100 next treasurers (`kPyrMaxSigners`); until
-  an era is sealed (at least an hour after its end) its past can still
-  move; sealing stalls while the treasurers' ledgers disagree.
+- **Seals of the treasurers' eras** (`seal`, `PyrSeal`, since 1.17.5).
+  The treasurers who sign payments come from the seals alone, never from
+  the time a record claims: era 1 is the founder's, the founder alone its
+  treasurer, and the treasurers of era n + 1 are `next` of the seal of era
+  n. A seal is {`n`, `prev` the seal before, `from` (the end of the one
+  before, or the founding), `to` its end, `set` the era's treasurers,
+  `next` the tree's treasurers at `to`, `ops` the ids of the era's
+  operations that counted (at most 4000, `kPyrMaxSealOps`), `ch` the
+  changes of the tree it takes in: what changed the tree's treasurers
+  after `from` up to `to`, and every departure no seal named yet}, dated
+  `to`, `by` = `set`, and it counts when signed by most of `set`. An era
+  may be sealed after 6 h (`kPyrEraMs`), after 2000 counted operations
+  (`kPyrEraOps`), or after 1 h when the tree's treasurers are no longer the
+  era's (`kPyrEraChangeMs`). A treasurer's app proposes a seal ending 10
+  minutes before its clock (10 minutes after it offered its ledger to the
+  others), and co-signs every seal it can check — the right chain and
+  set, an end at most 10 minutes ahead of its clock by which the era was
+  due, `next` and `ch` as its own tree gives them, every operation listed
+  counting on its ledger — that dominates the one it signed before: a
+  superset of operations, or the same ones with the lower id. It never
+  leaves out an operation it signed that counts, nor, for 40 minutes
+  after its time, one that may still count; from its first seal of an era
+  it signs no more operations of it. Of several seals of an era every
+  phone takes the one the longest chain of later seals rests on, then the
+  one with more operations, then the lower id; who signed two seals of an
+  era neither of which dominates the other is shown with both. A change
+  of the tree reaches the money only from the era after the seal that
+  names it: a change of the treasurers inside a sealed era that its seal
+  does not name folds right after the last seal (a later seal names it),
+  any other record that would change them there is refused, and a member
+  who left by a change no seal before an operation's era named still
+  counts as a member for that operation, so a departure dated back
+  undoes no payment either. Limit: a seal cannot be published with more
+  than 100 treasurers in its era (`kPyrMaxSigners`).
 - **Late records** (`PyrT.foldedLate`, `kPyrLateMs`, 30 min): the timed
-  kinds (below), a change of the tree at the treasurers' levels (or right
-  below them) and a cell vote's ballot and votes, seen by a phone more than
-  30 minutes after their date, fold at the time that phone saw them, so
-  they cannot move a past set of treasurers or turn a vote that ended; the
-  seals and the closes then fix the same on every phone.
+  kinds (below) and a cell vote's ballot and votes, seen by a phone more
+  than 30 minutes after their date, fold at the time that phone saw them,
+  so they cannot turn a vote that ended; the closes then fix the same on
+  every phone. Changes of the tree fold at their own time (the seals keep
+  them from the money).
 - **Closing a cell vote** (`vclose` {`elect` the vote, `votes` the ids of
   the votes that count}, dated at the vote's end, `by` its ring): once a
   vote ended by time, each ring member's app signs the votes that had come

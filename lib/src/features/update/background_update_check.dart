@@ -114,6 +114,7 @@ final class BackgroundUpdateCheck {
       checkIfDue,
       hold: const Duration(seconds: 30),
       whileIdle: false,
+      needsNetwork: true,
     );
   }
 

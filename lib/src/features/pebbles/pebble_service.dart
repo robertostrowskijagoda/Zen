@@ -216,7 +216,12 @@ final class PebbleService {
 
   /// Puts the asking on the wake beat (once).
   void beatOn() {
-    _beat ??= ZenWake.beat('pebbles', kPebblesBeatEvery, hosting.tick);
+    _beat ??= ZenWake.beat(
+      'pebbles',
+      kPebblesBeatEvery,
+      hosting.tick,
+      needsNetwork: true,
+    );
   }
 
   /// Takes the asking off the beat.

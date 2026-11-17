@@ -10,6 +10,25 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.18.0 — 17.11.2026
+
+### What's new
+- [en] Calls no longer stutter: the voice comes first and the picture adapts to the phone and the connection.
+- [en] With Wi-Fi and mobile data off, Zen rests instead of using the battery.
+- [en] Disconnecting a device now also stops someone who has your account key, and a chat's files go when a friend is removed.
+- [pl] Rozmowy już się nie tną: głos ma pierwszeństwo, a obraz dopasowuje się do telefonu i łącza.
+- [pl] Przy wyłączonym Wi-Fi i danych komórkowych Zen odpoczywa, zamiast zużywać baterię.
+- [pl] Odłączenie urządzenia zatrzymuje teraz także kogoś, kto ma klucz Twojego konta, a pliki rozmowy znikają razem z usuniętym znajomym.
+
+### Fixes and changes
+**Read this first.** None of this was tried on a phone. The cause of the stutter and of the battery use without a network comes from the code, not from a log of this version; the diagnostic log now says what limits a call's picture, how the voice held up, and when Zen rests for lack of a network. The new rules for devices need this version on both sides.
+- **Calls no longer stutter, and the voice comes before the picture**: since 1.17.5 a phone encoded 1280×720 at 24 frames a second in software up to 2.5 Mbit/s, with WebRTC's processor watch off since 1.10.0, so on a phone that could not keep up voice and picture both broke up, and the picture did not get sharper either. The picture is now at most 960×540 and 1.2 Mbit/s, starts at 500 kbit/s, has no floor, and gets smaller when the phone or the connection cannot keep up. The camera keeps the steady frame rate that fixed poor light. Each stats line of the log gives the encode time, frames not encoded, concealed audio, jitter and the round-trip time.
+- **With Wi-Fi and mobile data off, Zen on Android rests instead of draining the battery**: several times an hour the locked phone still woke to ask its mailboxes for mail, ping friends and check its links, and held itself awake for each while waiting for answers that could not come. Zen now learns from Android when there is no network at all; until one returns it does none of this and sets no wakes for it, and then everything that waited runs at once. The look for friends nearby over Bluetooth goes on (at most 12 short wakes an hour; none when it is switched off).
+- **"Odłącz" stops a thief who has the account key**: every device held that key, so whoever got it and the account password could add a device of his own or cut the owner's off. A new device counts with friends at once only when a valid device of the account co-signed it (linking and "To moje" do); a device nobody co-signed (restored from paper, a file or friends) starts working after 24 hours and any valid device can stop it in that time; a cut-off carries a device's signature and the list of those that stay, and one made with the account key alone is refused once the account co-signs. What remains, said in the security model: someone with the key and the password cannot be told from the owner beyond that day and the veto, and within a day a thief holding a stolen device can take down the owner's device that answers him.
+- **Files of a chat with a removed friend no longer stay on the phone**: removing a friend, or being removed, emptied the chat but kept its photos and files encrypted on disk for ever. They are now deleted with the chat, and files left by a crash or an unfinished transfer are swept when the app is left, at most once a day: only files older than two days that nothing refers to, and nothing at all when the list of files in use cannot be read whole.
+- **Two people who fit still meet when an answer to a lantern is lost on the way**: the question was asked once, and a lost answer cost the match for the week. An unanswered question goes again after 12 hours (3 times at most), and the same question gets the same answer again (twice at most), so a repeated or replayed one gives nobody anything new.
+- **Pyramid: the seal of an era no longer stalls after a late change among the treasurers, and a change of the tree dated back no longer undoes a payment**: each phone counted a late change from when it saw it, so treasurers signed different seals, and a quiet pyramid did not see a back-dated change as late at all. The seals alone now say who signs, a change reaches the money from the era after the seal that names it, and treasurers co-sign one seal. A treasurer's second device can still be taken for a cheater; the pyramid is not open.
+
 ## 1.17.5 — 14.11.2026
 
 ### What's new

@@ -79,6 +79,23 @@ final class MediaVault {
   /// without a provider container: image providers and players.
   static MediaVault? current;
 
+  /// Names of the files written in this run, from the moment their writing
+  /// starts. What holds such a file (a message, a restored backup) may
+  /// record it only much later, so the orphan sweep never takes one.
+  static final Set<String> _madeThisRun = <String>{};
+
+  /// Whether the vault file [name] ([fileNameOf]) was written, or is being
+  /// written, in this run.
+  static bool madeThisRun(String name) =>
+      _madeThisRun.contains(name.toLowerCase());
+
+  /// A new random id, noted in [_madeThisRun] before anything is written.
+  static String _claimId() {
+    final String id = _newId();
+    _madeThisRun.add('$id$kMediaVaultExtension');
+    return id;
+  }
+
   final Future<Uint8List?> Function() _masterKey;
   final Future<Directory> Function() _supportDirectory;
   final Future<Directory> Function() _temporaryDirectory;
@@ -100,11 +117,20 @@ final class MediaVault {
     return folder;
   }
 
+  /// The folder of the files, never made here: a sweep must not create the
+  /// folder an account without media does not have.
+  Future<Directory> existingFolder() async {
+    final Directory support = await _supportDirectory();
+    return Directory(
+      '${support.path}${Platform.pathSeparator}$kMediaVaultFolder',
+    );
+  }
+
   /// Encrypts [bytes] into a new file; returns its path.
   Future<String> put(Uint8List bytes) async {
     final Uint8List key = await _key();
     final Directory folder = await _folder();
-    final String id = _newId();
+    final String id = _claimId();
     final String path =
         '${folder.path}${Platform.pathSeparator}$id$kMediaVaultExtension';
     await _sealToFileIn(
@@ -124,7 +150,7 @@ final class MediaVault {
   Future<String> putFile(File source, {bool deleteSource = true}) async {
     final Uint8List key = await _key();
     final Directory folder = await _folder();
-    final String id = _newId();
+    final String id = _claimId();
     final String path =
         '${folder.path}${Platform.pathSeparator}$id$kMediaVaultExtension';
     await _sealFileToFileIn(
@@ -162,7 +188,7 @@ final class MediaVault {
     _checkLength(length);
     final Uint8List key = await _key();
     final Directory folder = await _folder();
-    final String id = _newId();
+    final String id = _claimId();
     final String path =
         '${folder.path}${Platform.pathSeparator}$id$kMediaVaultExtension';
     final File temporary = File('$path.tmp');

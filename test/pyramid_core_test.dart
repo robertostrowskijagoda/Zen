@@ -169,7 +169,10 @@ void main() {
       expect(st.pathOf(a1.id), '00');
       expect(st.pathOf(a2.id), '01');
       expect(st.rejected.values, contains('już jest w piramidzie'));
-      expect(st.treasurers.length, 5);
+      // At the treasurers' levels of the tree; who signs payments is the
+      // founder until it seals its era.
+      expect(st.treeTreasurers.length, 5);
+      expect(st.treasurers, <String>[s.id]);
 
       // A1 and A2 make A1 the head of cell A: A goes down.
       all.add(

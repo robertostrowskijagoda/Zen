@@ -137,14 +137,51 @@ computer could break. So Zen does not rely on it for identity:
   **What cutting a device off does not do:** it does not take the account
   key off that device. If the device was unlocked, and the key was not
   protected by an account password (or whoever holds it knows the
-  password), it can make itself a new device of the account after the
-  cut-off. The account's own devices then ask the person before they give
-  that new device anything, and say so ("Odłącz" explains it and what to do
-  next); **friends, who cannot tell, still accept it as the person's own**.
-  The way out is a new account (Settings, Accounts on this device, Add
-  account), inviting friends again, and wiping the old one. With an account
-  password set, the account key travels wrapped under it, on every device
-  (below), so a stolen unlocked phone does not hold it in the clear.
+  password), whoever holds it can sign anything the account can, and **Zen
+  cannot tell that person from you**. What is left is in "Cutting a device
+  off" below: a device they make waits a day before friends take it, and
+  you can cut it off in that day. The way out is a new account (Settings,
+  Accounts on this device, Add account), inviting friends again, and wiping
+  the old one. With an account password set, the account key travels
+  wrapped under it, on every device (below), so a stolen unlocked phone
+  does not hold it in the clear.
+- **Cutting a device off.** Every device of an account holds the account
+  key, so the account key alone cannot decide which devices are yours.
+  Phones of this version (both sides need it; a friend on an older version
+  takes certificates and cut-offs by the account key alone, as before)
+  judge them by device keys and time (`device_trust.dart`):
+  - A device you link (or copy the account to) from one of yours is
+    **co-signed** by that device and counts with friends at once. Every
+    device also marks its own certificate, which says the account
+    co-signs.
+  - A device nobody co-signed (restored from paper, a file or close
+    friends, or made by whoever holds the account key) counts at a friend
+    only **24 hours after that friend first saw it**. Friends tell your
+    devices about it; "Urządzenia" shows it with "To moje" (your device
+    co-signs it, it counts at once) and "Odłącz" (a veto: it never
+    counts). Devices a friend sees within an hour of first meeting the
+    account count at once: nobody could have vetoed them for a new friend.
+  - "Odłącz" is signed by the device that cuts, with the list of devices
+    it keeps. Once an account co-signs, **a cut-off by the account key
+    alone is refused**, and one counts only when its signer could count. A
+    cut-off leaves out with the cut-off device what it co-signed, and any
+    device certified before the cut-off that the list does not keep and no
+    kept device co-signed.
+  - A device cut off by a third device cuts nothing any more. **Two devices
+    that cut each other off within a day of each other are both cut off**
+    (with what only they vouched for); a cut-off that stood a day
+    unanswered is settled, and a later answer cannot undo it.
+  - A device keeps the first certificate a phone took for it; a
+    co-signature is added only while the device does not count there yet,
+    so a thief cannot tie your devices to the stolen one.
+
+  What stays possible for whoever has the account key and password: a
+  device of their own counts after 24 hours if you do not cut it off in
+  that time; with the stolen device, before you cut it off, they can cut
+  yours off, and whichever of your devices answers within the day goes
+  with it; a new friend meeting the account in that hour takes what it is
+  shown. They cannot add a device that counts at once, cut your devices off
+  with the account key alone, or bring a cut-off device back.
 - A hello from a stranger that only names a certificate is dropped without
   an answer, so nobody can probe whom you know.
 
@@ -328,6 +365,19 @@ friend list or device record names it only as a hint, see above).
   as plain files under the account folder; what earlier versions left in
   its `avatars` and `profile` folders is sealed if still in use and removed
   at the next start.
+- **Leftover files in the media vault.** Removing a friend (here, or by
+  them) deletes the files of the chat with them, as clearing a chat does.
+  What a crash, an unfinished write or an older version still leaves in
+  the vault is swept at a quiet moment (when the person leaves the app, at
+  most once a day of a run, never at start): a file goes only when it is
+  at least two days old, was not written in this run, and nothing of the
+  open account points at it (the messages of every conversation,
+  unfinished sends, friends' photos, the own photo and cover, call
+  recordings). When any of that cannot be read whole (the store locked, a
+  damaged or newer file), or when over 20 files and more than half of them look unused,
+  nothing is removed. One sweep removes at most 200 files; the folder is
+  never made or removed by it, and the diagnostics log gets only counts and
+  bytes (nothing at all while a hidden account is open).
 - **Several accounts.** Each account has its own keys, mesh node, folder,
   keystore entries and password. Folders are named by a keyed hash of the
   account ID. Every device has 2 decoy folders from the first start and
@@ -924,13 +974,17 @@ inbox.
   account number, needs that many treasurers signing both: provable
   afterwards, not preventable. A number split between orders none of
   which can count any more is freed only by a release most treasurers of
-  the era sign, about an hour after they see the split. Each era is
-  sealed by most of the next era's treasurers with the operations that
-  counted, and an operation dated into a sealed era that its seal does not
-  list counts nowhere, so former treasurers cannot create money or replace
-  a past payment afterwards. Until an era is sealed (an hour or more after
-  it ends) that window is open, and a majority of the next era can leave
-  an operation out of a seal (visibly). Treasurers check the whole ledger
+  the era sign, about an hour after they see the split. Who signs comes
+  from the seals of the eras alone: an operation names the last seal its
+  payer knew and only the treasurers that seal named sign it; each era is
+  sealed by most of its own treasurers with the operations that counted,
+  and one of a sealed era that its seal does not list counts nowhere, so
+  former treasurers cannot create money or replace a past payment
+  afterwards. A change of the tree, however it is dated, reaches the money
+  only from the era after the seal that names it, so a change dated back
+  (new treasurers, a member leaving) undoes no payment. A dishonest
+  majority of an era can leave an operation out of its seal (visibly; its
+  payer orders it again). Treasurers check the whole ledger
   for numbering and balance and every phone checks what it counts, so no
   majority makes money from nothing; but a phone that is not a treasurer
   keeps only the treasurers' signed statements of its balance, and a
@@ -951,10 +1005,12 @@ inbox.
   and the accused could hide a real one with an overturning of their own;
   an overturning now takes back only its sender's word). A payment a seal
   left out, one signed against the rules and a treasurer who signed two
-  seals of one era are shown in the wallet. **Known limits, not fixed in
-  this version** (the pyramid is not open): the seal of an era can stall
-  after a late change among the treasurers, and a back-dated change in a
-  quiet pyramid can still undo a payment.
+  seals of one era are shown in the wallet. Since 1.17.5 a seal no longer
+  stalls after a late change among the treasurers (the treasurers co-sign
+  one content, the one that dominates, instead of each its own once), and
+  a back-dated change of the tree no longer undoes a payment (the seals,
+  not the records' times, say who signs). An era of the treasurers lasts
+  up to six hours: a new treasurer signs from the next one.
 - Self-update from GitHub takes only a file whose `SHA256SUMS` carries the
   release signing key's signature (one maintainer key is pinned in
   `release.dart`) and, on Android, an APK signed by the installed copy's
@@ -976,9 +1032,9 @@ inbox.
   sending keys and messages to it once the revocation reaches them. A
   device that held the key unwrapped and unlocked (the account password
   not set, or known to whoever holds it) can make itself a new device
-  after the cut-off; the account's own devices ask before they give it
-  anything, but **friends still accept it** as the account's, so the only
-  remedy is a new account (see "Device keys and pinning").
+  after the cut-off; friends take it after 24 hours unless one of your
+  devices cuts it off in that time ("Cutting a device off"), so the only
+  sure remedy is a new account (see "Device keys and pinning").
 - A lost device you have not cut off could still send a newer (validly
   signed) copy with friends, and the newest copy is the one restored; its
   data is yours anyway, but it could make the copy smaller. Holders also

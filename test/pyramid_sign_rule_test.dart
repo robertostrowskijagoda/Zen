@@ -25,6 +25,8 @@ void main() {
 
   setUp(() async {
     w = await FoldWorld.make();
+    // The founder sealed its era: the eight sign (orders of era 2).
+    w.records.add(await w.sealFirst());
   });
 
   Future<PyramidRecord> order(
@@ -43,13 +45,18 @@ void main() {
       'to': to.length > 4 ? to : w.id(to),
       'amount': amount,
       'seq': seq,
+      'after': 1,
       'memo': '',
       'cond': ?cond,
     },
   );
 
-  Future<PyramidRecord> settle(int at, String by, String x, bool ok) =>
-      w.rec(PyrT.settle, at, <String>[by], <String, dynamic>{'x': x, 'ok': ok});
+  Future<PyramidRecord> settle(int at, String by, String x, bool ok) => w.rec(
+    PyrT.settle,
+    at,
+    <String>[by],
+    <String, dynamic>{'x': x, 'ok': ok, 'after': 1},
+  );
 
   Future<PyramidRecord> signed(PyramidRecord op, List<String> who) async {
     PyramidRecord r = op;

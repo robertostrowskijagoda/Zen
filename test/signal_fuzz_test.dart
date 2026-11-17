@@ -113,6 +113,9 @@ const List<String> _keys = <String>[
   'mini',
   'replyTo',
   'seq',
+  // A pyramid operation's era and a seal's next treasurers.
+  'after',
+  'next',
   'total',
   'data',
   'name',

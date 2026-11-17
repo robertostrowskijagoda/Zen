@@ -5,6 +5,120 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
   /// ([_updateMessageDeliveryState]).
   final Map<String, Future<void>> _deliveryEdits = <String, Future<void>>{};
 
+  /// When the media vault was last swept in this run (0: not yet).
+  int _mediaSweptAtMillis = 0;
+
+  @override
+  Future<void> _sweepMediaVaultNow() async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _mediaSweptAtMillis < const Duration(days: 1).inMilliseconds) {
+      return;
+    }
+    _mediaSweptAtMillis = now;
+    await sweepOrphanedMedia();
+  }
+
+  /// Removes the files of the media vault nothing here refers to any more
+  /// ([sweepMediaVault]: old enough, not written in this run, at most a
+  /// bounded number) and logs how many and how many bytes, never which.
+  /// [inFlight] and [now] stand in for the run's own files and the clock
+  /// in tests.
+  Future<MediaVaultSweepResult> sweepOrphanedMedia({
+    bool Function(String name) inFlight = MediaVault.madeThisRun,
+    DateTime Function() now = DateTime.now,
+  }) async {
+    final MediaVaultSweepResult result = await sweepMediaVault(
+      folder: await _mediaVault.existingFolder(),
+      referenced: referencedMediaNames,
+      inFlight: inFlight,
+      now: now,
+    );
+    switch (result.outcome) {
+      case MediaVaultSweepOutcome.nothing:
+        break;
+      case MediaVaultSweepOutcome.swept:
+        logZenMessage(
+          'Media vault: ${result.removed} unused files removed '
+          '(${result.bytes} B), ${result.unused - result.removed} left for '
+          'later.',
+        );
+      case MediaVaultSweepOutcome.unreadable:
+        logZenWarning(
+          'Media vault: what is in use could not be read; nothing removed.',
+        );
+      case MediaVaultSweepOutcome.implausible:
+        logZenWarning(
+          'Media vault: ${result.unused} files looked unused, too many to '
+          'trust; nothing removed.',
+        );
+    }
+    return result;
+  }
+
+  /// Names of the media vault files ([MediaVault.fileNameOf]) something of
+  /// this account still points at: messages of every conversation it may
+  /// have (friends in any state and removed ones still in the book, groups,
+  /// people who are not friends, unfinished sends), friends' photos, its
+  /// own photo and cover, call recordings. Throws when any of it cannot be
+  /// read, so that the sweep removes nothing.
+  Future<Set<String>> referencedMediaNames() async {
+    if (!_hydrationCompleted || !_snapshotLoaded || state.snapshotUnreadable) {
+      throw StateError('The friend list is not read.');
+    }
+    final Set<String> names = <String>{};
+    void add(String? path) {
+      final String? p = path?.trim();
+      if (p == null || p.isEmpty || !isMediaVaultPath(p)) {
+        return;
+      }
+      try {
+        names.add(MediaVault.fileNameOf(p));
+      } on FormatException {
+        // Not named as a vault file: the sweep never touches such a file.
+      }
+    }
+
+    final StrangerChatBook strangers = ref.read(strangerChatsProvider);
+    await strangers.load();
+    final Set<String> keys = <String>{
+      ...state.book.profiles.keys,
+      ...state.book.records.keys,
+      for (final String id in state.groups.keys) 'group:$id',
+      for (final StrangerChat c in <StrangerChat>[
+        ...strangers.requests,
+        ...strangers.conversations,
+      ])
+        c.address,
+    };
+    for (final OutgoingAttachmentTransfer t
+        in await _transferStore.loadAllOutgoing()) {
+      keys.add(t.peerAddress);
+      add(t.attachmentPath);
+    }
+    for (final String key in keys) {
+      for (final ChatMessage m in await loadTimelineStrict(
+        _messageTimelineStore,
+        key,
+      )) {
+        add(m.attachmentPath);
+      }
+    }
+    for (final PeerPublicProfile p in state.peerProfiles.values) {
+      add(p.avatarPath);
+    }
+    final UserProfile me = ref.read(userProfileControllerProvider);
+    final UserProfile? saved = await ref.read(userProfileStoreProvider).load();
+    for (final UserProfile? p in <UserProfile?>[me, saved]) {
+      add(p?.avatarPath);
+      add(p?.coverPath);
+    }
+    names.addAll(await ref.read(callRecordingKeeperProvider).store.fileNames());
+    if (!ref.mounted) {
+      throw StateError('The account was closed meanwhile.');
+    }
+    return names;
+  }
+
   @override
   Future<void> _applyRetentionAcrossConversations({
     required int nowMillis,

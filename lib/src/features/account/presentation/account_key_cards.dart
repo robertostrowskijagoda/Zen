@@ -78,7 +78,8 @@ class _OnNodeState extends ConsumerState<_OnNode> {
 }
 
 /// "Nowe urządzenie na Twoim koncie": a device of the account appeared
-/// after one was cut off, and nobody confirmed it yet. It gets nothing from
+/// after one was cut off, and nobody confirmed it yet; or one no device of
+/// the account co-signed, which friends take a day after it appeared. It gets nothing from
 /// this device until the person says it is theirs, in "Urządzenia".
 class UnconfirmedDevicesCard extends StatelessWidget {
   const UnconfirmedDevicesCard({super.key, this.padding = EdgeInsets.zero});
@@ -88,7 +89,11 @@ class UnconfirmedDevicesCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _OnNode(
     builder: (BuildContext context, LedgerNode node) {
-      final List<AccountDevice> waiting = node.unconfirmedDevices;
+      // Also one nobody co-signed, which friends take after a day.
+      final List<AccountDevice> waiting = <AccountDevice>[
+        ...node.unconfirmedDevices,
+        ...node.pendingOwnDevices,
+      ];
       if (waiting.isEmpty) {
         return const SizedBox.shrink();
       }
