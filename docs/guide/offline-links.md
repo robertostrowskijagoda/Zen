@@ -60,11 +60,15 @@ on. Their phones form a group and the chat just works.
 - Strangers on the same network or nearby cannot tell who you are: adverts
   carry no address, no name and no identifier of yours that is stable over
   time. **But anyone within Bluetooth range can tell that a Zen user is
-  there**: the advert carries Zen's service identifier, and with it the
-  number of the channel the phone listens on. That number stays the same
-  while the listener runs, so someone who stays around can recognise the
-  same phone for as long as the listener runs. On Wi-Fi a beacon likewise
-  shows that a Zen device is on the network.
+  there**: the advert carries Zen's service identifier. Nothing else in it
+  stays the same from one advert to the next, so someone who stays around
+  cannot tell your phone's adverts from another Zen phone's once the
+  phone's Bluetooth address changes. (Until 1.18.0 an Android phone also
+  put the number of the channel it listens on in the advert; that number
+  stayed the same for days and let them. Now a phone reads it only from a
+  friend's phone it is about to connect to; a device that connects to
+  yours can still read it.) On Wi-Fi a beacon likewise shows that a Zen
+  device is on the network.
 - Recorded link traffic stays unreadable, also for a future quantum
   computer (the link key mixes in ML-KEM-768).
 
