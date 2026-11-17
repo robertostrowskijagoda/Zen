@@ -27,14 +27,15 @@ final class LedgerIdentity {
     required this.account,
     required LedgerKeyPair? accountKey,
     required this.deviceKey,
-    required this.certificate,
+    required DeviceCertificate certificate,
     required this.writer,
     required this.pyramidSeed,
     PasswordWrappedSeed? wrapped,
     Uint8List? selfKey,
     LedgerDisk? disk,
     int? keyGuard,
-  }) : _accountKey = accountKey,
+  }) : _certificate = certificate,
+       _accountKey = accountKey,
        _wrapped = wrapped,
        _selfKey = selfKey,
        _disk = disk,
@@ -59,7 +60,24 @@ final class LedgerIdentity {
   final String account;
   LedgerKeyPair? _accountKey;
   final LedgerKeyPair deviceKey;
-  final DeviceCertificate certificate;
+
+  /// This device's certificate, with the co-signature it carries.
+  DeviceCertificate get certificate => _certificate;
+  DeviceCertificate _certificate;
+
+  /// Keeps [cert] (this device's own certificate with a co-signature) as
+  /// this device's certificate, as it hands it to others. Returns false
+  /// for one that is not this device's certificate.
+  Future<bool> takeCertificate(LedgerDisk disk, DeviceCertificate cert) async {
+    if (cert.signature != _certificate.signature ||
+        cert.device != deviceKey.id ||
+        cert.account != account) {
+      return false;
+    }
+    _certificate = cert;
+    await _save(disk);
+    return true;
+  }
 
   /// Log id of this installation (never reused, see [LedgerAuthor]).
   final String writer;

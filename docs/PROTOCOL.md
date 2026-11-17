@@ -1909,10 +1909,31 @@ A signed, append-only, per-device **log** for each **space**.
   Certificates also come in `lg_hello`. An entry passed on outside the ledger
   (a reshare, a passed-on tombstone, a pyramid report, a post on order, a
   follow notice of another device) carries its certificate as `cert`.
+  It may carry a **co-signature** `co: {by, sig}` outside what the account
+  signs: `sig` is device `by`'s hybrid signature (naming its key) over the
+  certificate's fields with `t:"dev_co"` and `by`. `by` is another device of
+  the account that linked this one or that the person confirmed it on, or
+  the device itself (only a mark that the account co-signs; every device of
+  this version marks its own). A device keeps the first certificate a
+  phone took for it; a co-signature is added to it only while the device
+  does not count there yet. Versions before co-signatures drop `co` and
+  check the certificate as before. How a phone judges devices with them:
+  docs/SECURITY_MODEL.md, "Cutting a device off".
 - A `DeviceRevocation` = `{t:"dev_revoke", account, device,
   cutoffs:{"writer@space": lastValidSeq}, issued, sig}` (keyed hybrid, account
   key: it reaches phones that never met the account) cuts a stolen device off
-  (later entries are refused). An Ed25519-only signature makes an entry,
+  (later entries are refused). The device that cuts adds a device part
+  outside the account's signature: `by` (its device key), `keep` (the
+  devices it keeps, sorted, <= 64), `dsig` (its signature over the account's
+  fields with `t:"dev_revoke_by"`, `by` and `keep`) and `bc` (its
+  certificate, so the cut-off checks out on its own). A device part that
+  does not hold is dropped whole. Once an account co-signs, a cut-off
+  without a device part is refused; one is kept only when its signer could
+  count, at most 8 per signing device and 64 per account (one by a device
+  fewer co-signatures from the account's first devices pushes out one by a
+  device further away). The receiver keeps when it took each cut-off
+  (`got` in `ledger/revocations`) and when it first saw each device
+  (`seen`, `fc` in the certificate file). An Ed25519-only signature makes an entry,
   certificate or revocation malformed; so does a certificate or revocation
   signature that does not carry its key.
 - `hlc` = hybrid logical clock `(millis << 16) | counter`; entries more than 10

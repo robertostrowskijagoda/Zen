@@ -672,5 +672,11 @@
     "tests": [
       "test/media_vault_sweep_test.dart"
     ]
+  },
+  {
+    "file": "lib/src/core/ledger/device_trust.dart",
+    "tests": [
+      "test/device_trust_test.dart"
+    ]
   }
 ]

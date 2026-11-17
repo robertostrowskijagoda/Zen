@@ -137,14 +137,51 @@ computer could break. So Zen does not rely on it for identity:
   **What cutting a device off does not do:** it does not take the account
   key off that device. If the device was unlocked, and the key was not
   protected by an account password (or whoever holds it knows the
-  password), it can make itself a new device of the account after the
-  cut-off. The account's own devices then ask the person before they give
-  that new device anything, and say so ("Odłącz" explains it and what to do
-  next); **friends, who cannot tell, still accept it as the person's own**.
-  The way out is a new account (Settings, Accounts on this device, Add
-  account), inviting friends again, and wiping the old one. With an account
-  password set, the account key travels wrapped under it, on every device
-  (below), so a stolen unlocked phone does not hold it in the clear.
+  password), whoever holds it can sign anything the account can, and **Zen
+  cannot tell that person from you**. What is left is in "Cutting a device
+  off" below: a device they make waits a day before friends take it, and
+  you can cut it off in that day. The way out is a new account (Settings,
+  Accounts on this device, Add account), inviting friends again, and wiping
+  the old one. With an account password set, the account key travels
+  wrapped under it, on every device (below), so a stolen unlocked phone
+  does not hold it in the clear.
+- **Cutting a device off.** Every device of an account holds the account
+  key, so the account key alone cannot decide which devices are yours.
+  Phones of this version (both sides need it; a friend on an older version
+  takes certificates and cut-offs by the account key alone, as before)
+  judge them by device keys and time (`device_trust.dart`):
+  - A device you link (or copy the account to) from one of yours is
+    **co-signed** by that device and counts with friends at once. Every
+    device also marks its own certificate, which says the account
+    co-signs.
+  - A device nobody co-signed (restored from paper, a file or close
+    friends, or made by whoever holds the account key) counts at a friend
+    only **24 hours after that friend first saw it**. Friends tell your
+    devices about it; "Urządzenia" shows it with "To moje" (your device
+    co-signs it, it counts at once) and "Odłącz" (a veto: it never
+    counts). Devices a friend sees within an hour of first meeting the
+    account count at once: nobody could have vetoed them for a new friend.
+  - "Odłącz" is signed by the device that cuts, with the list of devices
+    it keeps. Once an account co-signs, **a cut-off by the account key
+    alone is refused**, and one counts only when its signer could count. A
+    cut-off leaves out with the cut-off device what it co-signed, and any
+    device certified before the cut-off that the list does not keep and no
+    kept device co-signed.
+  - A device cut off by a third device cuts nothing any more. **Two devices
+    that cut each other off within a day of each other are both cut off**
+    (with what only they vouched for); a cut-off that stood a day
+    unanswered is settled, and a later answer cannot undo it.
+  - A device keeps the first certificate a phone took for it; a
+    co-signature is added only while the device does not count there yet,
+    so a thief cannot tie your devices to the stolen one.
+
+  What stays possible for whoever has the account key and password: a
+  device of their own counts after 24 hours if you do not cut it off in
+  that time; with the stolen device, before you cut it off, they can cut
+  yours off, and whichever of your devices answers within the day goes
+  with it; a new friend meeting the account in that hour takes what it is
+  shown. They cannot add a device that counts at once, cut your devices off
+  with the account key alone, or bring a cut-off device back.
 - A hello from a stranger that only names a certificate is dropped without
   an answer, so nobody can probe whom you know.
 
@@ -989,9 +1026,9 @@ inbox.
   sending keys and messages to it once the revocation reaches them. A
   device that held the key unwrapped and unlocked (the account password
   not set, or known to whoever holds it) can make itself a new device
-  after the cut-off; the account's own devices ask before they give it
-  anything, but **friends still accept it** as the account's, so the only
-  remedy is a new account (see "Device keys and pinning").
+  after the cut-off; friends take it after 24 hours unless one of your
+  devices cuts it off in that time ("Cutting a device off"), so the only
+  sure remedy is a new account (see "Device keys and pinning").
 - A lost device you have not cut off could still send a newer (validly
   signed) copy with friends, and the newest copy is the one restored; its
   data is yours anyway, but it could make the copy smaller. Holders also
