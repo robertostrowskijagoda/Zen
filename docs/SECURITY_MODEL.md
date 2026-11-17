@@ -490,7 +490,8 @@ friend list or device record names it only as a hint, see above).
   The account key comes back with the account password and the pieces of
   2 of them (with up to 4 holders), 3 (5 to 9) or 4 (10 or more); there is
   no way back without the password. Inside, the key is sealed under the
-  account password (Argon2id, 64 MiB, 2 passes); around that, each set of
+  account password (Argon2id, 64 MiB, 2 passes; 128 MiB with 3 passes is
+  opened too, any other cost is refused); around that, each set of
   pieces seals it under a fresh random secret split among the holders, so
   pieces of different sets never combine. The account password must have
   at least 12 characters, be hard to guess and differ from the app
@@ -564,8 +565,9 @@ friend list or device record names it only as a hint, see above).
 - **The full account copy.** "Create a full account copy" writes the chosen parts of the
   account (always the account key) into one file, in parts of 1 GB when
   larger. It is sealed in frames of 1 MiB with AES-256-GCM under a key from
-  the backup password (Argon2id, 64 MiB, 2 passes; symmetric only, so
-  post-quantum safe); each frame's number and whether it is the last are
+  the backup password (Argon2id, 64 MiB, 2 passes; a file made with 128 MiB
+  and 3 passes is opened too, any other cost is refused before Argon2
+  runs; symmetric only, so post-quantum safe); each frame's number and whether it is the last are
   bound to it, so frames cannot be cut, swapped or added, and every file
   inside is checked by its SHA-256. A wrong password is told apart from a
   damaged file. Another account never replaces one that holds anything: a copy, a

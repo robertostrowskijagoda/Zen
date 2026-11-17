@@ -283,6 +283,7 @@ Future<({AccountArchive? archive, AccountBackupError? error})> _read(
   Uint8List file,
   String password, {
   Map<String, Uint8List>? into,
+  List<PasswordCost> accepted = _accepted,
 }) => AccountBackupFile.read(
   chunks: Stream<List<int>>.fromIterable(<List<int>>[
     // In odd pieces, as a file comes.
@@ -290,7 +291,7 @@ Future<({AccountArchive? archive, AccountBackupError? error})> _read(
       file.sublist(at, (at + 70001).clamp(0, file.length)),
   ]),
   password: password,
-  acceptedCosts: _accepted,
+  acceptedCosts: accepted,
   file: (String id, int size) async => _Collect((Uint8List bytes) {
     into?[id] = bytes;
   }),
@@ -583,6 +584,30 @@ void main() {
       final Uint8List costlier = Uint8List.fromList(file)..[12] = 99;
       expect(
         (await _read(costlier, 'dobre hasło 1')).error,
+        AccountBackupError.newerOrDamaged,
+      );
+      // 128 MiB / 3 passes is a known cost: it is tried (the wrong key of a
+      // file written with a light cost reads as a wrong password) ...
+      final Uint8List heavy = Uint8List.fromList(file);
+      ByteData.sublistView(heavy)
+        ..setUint32(8, 131072)
+        ..setUint8(12, 3);
+      expect(
+        (await _read(
+          heavy,
+          'dobre hasło 1',
+          accepted: kAcceptedRecoveryCosts,
+        )).error,
+        AccountBackupError.password,
+      );
+      // ... and one step above it is not.
+      final Uint8List heavier = Uint8List.fromList(heavy)..[12] = 4;
+      expect(
+        (await _read(
+          heavier,
+          'dobre hasło 1',
+          accepted: kAcceptedRecoveryCosts,
+        )).error,
         AccountBackupError.newerOrDamaged,
       );
       // A damaged salt reads as a wrong password: the text says both.
