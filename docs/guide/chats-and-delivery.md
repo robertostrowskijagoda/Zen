@@ -333,7 +333,9 @@ app, the small window over other apps). It goes back to the phone's usual
 timeout when the call ends. A voice call held at the ear on the earpiece
 turns the screen off and ignores touches while the phone is at the ear,
 and lights it again when you take it away (Android, where the phone has a
-proximity sensor).
+proximity sensor). Earphones or a Bluetooth headset plugged in or taken
+away during a call switch between the two at once, and "Głośnik" shows
+where the sound is.
 
 When you call someone you hear the ringing tone while their phone rings,
 and a busy tone if they decline, are busy or do not answer; a short signal
