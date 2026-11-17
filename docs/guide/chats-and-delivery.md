@@ -314,15 +314,16 @@ technical log (**Diagnostics**) shows for each call which
 codecs were offered and how many video frames went out, came in and were
 shown.
 
-The picture of a video call stays sharp and steady when it moves and in
-poor light, on a connection that carries about 1.5 Mbit/s each way: 1280 x
-720 at 24 frames a second. A phone's camera used to slow down in poor light
-to 5 or 6 frames a second, each blurred by any movement; on Android Zen now
-holds the camera to its steadiest frame rate (24, or at least 15 where the
-camera has nothing steadier). In poor light the picture is then a little
-darker or grainier rather than slow. The picture also starts sharp instead
-of taking several seconds. On a weak connection the frames keep coming at a
-smaller size: a soft picture rather than a frozen one.
+The voice of a call comes before its picture. The picture of a video call
+stays steady when it moves and in poor light, on a connection that carries
+about 1.2 Mbit/s each way: 960 x 540 at 24 frames a second. A phone's
+camera used to slow down in poor light to 5 or 6 frames a second, each
+blurred by any movement; on Android Zen now holds the camera to its
+steadiest frame rate (24, or at least 15 where the camera has nothing
+steadier). In poor light the picture is then a little darker or grainier
+rather than slow. On a weak connection, or on a phone too busy to keep up,
+the frames keep coming at a smaller size: a soft picture rather than a
+frozen one, so that the voice does not break up.
 
 The screen stays on for the whole of a video call, and of a voice call on
 the loudspeaker or a headset, from the first ring of a call you make to its

@@ -217,7 +217,11 @@ still exists:
 >    In a dim room, waving a hand in front of the camera, the picture stays
 >    smooth: the `Call camera` line says `pinned to` (or `already at`) a
 >    range, and the `Call stats` lines show `camera … captured at` 15 fps or
->    more and `video out … 1280x720` with no `held back` of many seconds.
+>    more and `video out … 960x540` (smaller with `limit cpu` on a slow
+>    phone) with no `held back` of many seconds. Through a call of two
+>    minutes the voice never breaks up, both ways: the `audio in` lines show
+>    `concealed` under 2% and a `jitter buffer` under 150 ms, and
+>    `encode … ms/frame` stays under 30.
 >    With the phone's screen timeout at 30 seconds and nothing touched, the
 >    screen stays on through a video call, also one answered from the lock
 >    screen and one shrunk to the small window, and goes dark as usual after

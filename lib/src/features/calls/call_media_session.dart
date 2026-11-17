@@ -2967,9 +2967,10 @@ final class WebRtcCallMediaSessionController
   }
 
   /// The camera over the mesh: a steady picture, sharp while the path
-  /// allows ([tuneCallCameraParameters]: between [kCallVideoMinBitrate]
-  /// and [kCallVideoMaxBitrate] at up to [kCallVideoFrameRate] frames,
-  /// sharpness given up before frames when the path is tight). The shared
+  /// and the processor allow ([tuneCallCameraParameters]: up to
+  /// [kCallVideoMaxBitrate] at up to [kCallVideoFrameRate] frames and
+  /// [kCallVideoSendWidth] x [kCallVideoSendHeight], sharpness given up
+  /// before frames when the path or the processor is tight). The shared
   /// screen keeps its own settings (sharp text matters there).
   Future<void> _tuneCameraSenders(RTCPeerConnection connection) async {
     try {
@@ -3361,14 +3362,9 @@ const Map<String, dynamic> _configuration = <String, dynamic>{
   'iceCandidatePoolSize': 0,
 };
 
-const Map<String, dynamic> _peerConstraints = <String, dynamic>{
-  'mandatory': <String, dynamic>{},
-  'optional': <Map<String, dynamic>>[
-    <String, dynamic>{'googDscp': true},
-    <String, dynamic>{'googCpuOveruseDetection': false},
-    <String, dynamic>{'googSuspendBelowMinBitrate': false},
-  ],
-};
+/// The processor watched, so the voice does not starve
+/// ([kCallPeerConstraints]).
+const Map<String, dynamic> _peerConstraints = kCallPeerConstraints;
 
 final RegExp _hostCandidatePattern = RegExp(
   r'candidate:\S+ \d+ udp \d+ (\S+) \d+ typ host',

@@ -26,14 +26,40 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 // once the camera runs, to the steadiest range it offers
 // ([chooseCameraFrameRateRange], applied by ZenCallCamera.kt); the encoder
 // starts at [kCallVideoStartBitrate] ([withCallVideoStartBitrate]) and
-// keeps between [kCallVideoMinBitrate] and [kCallVideoMaxBitrate] at up
-// to [kCallVideoFrameRate] frames ([tuneCallCameraParameters]).
+// keeps up to [kCallVideoMaxBitrate] at up to [kCallVideoFrameRate]
+// frames ([tuneCallCameraParameters]).
 //
 // It stays adaptive: on a path that carries less than the start, WebRTC's
-// estimate comes down within a second or two, and on a path below the
-// floor the frames keep coming at a lower resolution
+// estimate comes down within a second or two, and on a path that carries
+// little the frames keep coming at a lower resolution
 // ([RTCDegradationPreference.MAINTAIN_FRAMERATE]) rather than the picture
 // stopping. A frozen picture is worse than a soft one.
+//
+// The voice comes first (since 1.17.6). 1.17.5 encoded the camera at
+// 1280 x 720 and 24 frames whatever the light, up to 2.5 Mbit/s from a
+// start of 1 Mbit/s and never below 150 kbit/s, with WebRTC's watch on the
+// processor switched off (`googCpuOveruseDetection: false` since 1.10.0).
+// The camera is VP8 in software on most phones (call_video_codecs.dart),
+// each frame is sealed (call_media_e2ee.dart), the other side's picture is
+// decoded in software too, and every packet goes through Yggdrasil's own
+// encryption in the same app: in poor light 1.17.1 encoded 5 frames a
+// second, 1.17.5 encoded 24 at full size, and calls stuttered, the voice
+// too. Over Yggdrasil's TCP links whatever the path cannot carry waits in
+// a queue, and the voice waits behind it. So:
+//
+// - WebRTC watches the processor again ([kCallPeerConstraints]): an
+//   encoder that cannot keep up lowers the resolution before the voice
+//   starves;
+// - the camera is encoded at most at [kCallVideoSendWidth] x
+//   [kCallVideoSendHeight] ([kCallVideoScaleDownBy]), about half the work
+//   of 1280 x 720 for VP8 in software, here and on the other's decoder;
+// - the ceiling is [kCallVideoMaxBitrate], the start
+//   [kCallVideoStartBitrateKbps], and there is no floor of Zen's own: on a
+//   path that carries little the picture gives way down to WebRTC's own
+//   minimum instead of keeping 150 kbit/s queued ahead of the voice.
+//
+// The camera's frame rate in poor light stays as 1.17.5 fixed it: asked
+// for 24 frames and pinned to its steadiest range.
 
 /// The frames a second a call's camera is asked for and its encoder sends
 /// at most.
@@ -44,26 +70,51 @@ const int kCallVideoFrameRate = 24;
 /// smears.
 const int kCallCameraMinFrameRate = 15;
 
-/// The most a call's camera sends, in bits per second: 1280 x 720 at 24
-/// frames in VP8 that stays sharp while it moves. It is a ceiling, not a
-/// rate: WebRTC sends what the path carries. 1.8 Mbit/s turned to blocks
-/// as soon as the picture moved.
-const int kCallVideoMaxBitrate = 2500000;
+/// The size a call's camera is asked for: one every phone camera has in
+/// 16:9 (a smaller size asked of a camera may come back 4:3).
+const int kCallCameraWidth = 1280;
+const int kCallCameraHeight = 720;
 
-/// The least a call's camera is given while the path's estimate is above
-/// it: a brief dip of the estimate no longer turns the picture to mush.
-/// Kept low, so a really bad link still gets a picture (smaller, at the
-/// same frame rate) rather than a congested one.
-const int kCallVideoMinBitrate = 150000;
+/// The largest picture the camera's encoder sends: sharp on a phone's
+/// screen, about half the processor's work of 1280 x 720 in VP8 in
+/// software, on this phone's encoder and on the other's decoder.
+const int kCallVideoSendWidth = 960;
+const int kCallVideoSendHeight = 540;
+
+/// How much the encoder scales the camera's picture down
+/// ([kCallCameraWidth] to [kCallVideoSendWidth]). A camera that gives less
+/// than it was asked is scaled by as much.
+const double kCallVideoScaleDownBy = kCallCameraWidth / kCallVideoSendWidth;
+
+/// The most a call's camera sends, in bits per second: 960 x 540 at 24
+/// frames in VP8 is sharp at it. It is a ceiling, not a rate: WebRTC sends
+/// what the path carries. 1.17.5's 2.5 Mbit/s filled Yggdrasil's links
+/// ahead of the voice.
+const int kCallVideoMaxBitrate = 1200000;
 
 /// Where WebRTC's estimate of the path starts, in kbit/s (the SDP
-/// `x-google-start-bitrate`): its own 300 kbit/s made the first seconds
-/// of every call soft. A path that carries less brings the estimate down
-/// within a second or two.
-const int kCallVideoStartBitrateKbps = 1000;
+/// `x-google-start-bitrate`): above WebRTC's own 300 kbit/s, so the first
+/// seconds are not soft, and half of 1.17.5's 1 Mbit/s, which a relayed
+/// path may not carry. WebRTC probes upwards from it in the first seconds.
+const int kCallVideoStartBitrateKbps = 500;
 
 /// [kCallVideoStartBitrateKbps] in bits per second.
 const int kCallVideoStartBitrate = kCallVideoStartBitrateKbps * 1000;
+
+/// What every peer connection of a call is made with
+/// (`createPeerConnection`'s constraints). `googCpuOveruseDetection` lets
+/// WebRTC lower the camera's resolution when the encoder cannot keep up:
+/// it was off from 1.10.0 to 1.17.5, and a phone that could not keep up
+/// starved the voice instead. `googSuspendBelowMinBitrate` off keeps a
+/// small picture coming on a tight path rather than none.
+const Map<String, dynamic> kCallPeerConstraints = <String, dynamic>{
+  'mandatory': <String, dynamic>{},
+  'optional': <Map<String, dynamic>>[
+    <String, dynamic>{'googDscp': true},
+    <String, dynamic>{'googCpuOveruseDetection': true},
+    <String, dynamic>{'googSuspendBelowMinBitrate': false},
+  ],
+};
 
 /// The camera of a call, as getUserMedia takes it: on a phone ([mobile])
 /// plain numbers only (flutter_webrtc on Android skips a map such as
@@ -78,8 +129,8 @@ Map<String, dynamic> callCameraConstraints({
   if (mobile) {
     return <String, dynamic>{
       if (chosen) 'deviceId': deviceId else 'facingMode': 'user',
-      'width': 1280,
-      'height': 720,
+      'width': kCallCameraWidth,
+      'height': kCallCameraHeight,
       'frameRate': kCallVideoFrameRate,
     };
   }
@@ -89,17 +140,18 @@ Map<String, dynamic> callCameraConstraints({
       'optional': <Map<String, dynamic>>[
         <String, dynamic>{'sourceId': deviceId},
       ],
-    'width': 1280,
-    'height': 720,
+    'width': kCallCameraWidth,
+    'height': kCallCameraHeight,
     'frameRate': kCallVideoFrameRate,
   };
 }
 
 /// Sets what a camera sender of a call keeps to ([parameters] of its
-/// sender): every encoding between [kCallVideoMinBitrate] and
-/// [kCallVideoMaxBitrate] at up to [kCallVideoFrameRate] frames, at full
-/// size unless the path is tight, and frames kept before resolution when
-/// it is. False when there is no encoding to set.
+/// sender): every encoding up to [kCallVideoMaxBitrate] with no floor of
+/// Zen's own, at up to [kCallVideoFrameRate] frames and at most
+/// [kCallVideoSendWidth] x [kCallVideoSendHeight] ([kCallVideoScaleDownBy]),
+/// and frames kept before resolution when the path or the processor is
+/// tight. False when there is no encoding to set.
 bool tuneCallCameraParameters(RTCRtpParameters parameters) {
   final List<RTCRtpEncoding> encodings =
       parameters.encodings ?? const <RTCRtpEncoding>[];
@@ -108,9 +160,9 @@ bool tuneCallCameraParameters(RTCRtpParameters parameters) {
   }
   for (final RTCRtpEncoding encoding in encodings) {
     encoding.maxBitrate = kCallVideoMaxBitrate;
-    encoding.minBitrate = kCallVideoMinBitrate;
+    encoding.minBitrate = null;
     encoding.maxFramerate = kCallVideoFrameRate;
-    encoding.scaleResolutionDownBy = 1.0;
+    encoding.scaleResolutionDownBy = kCallVideoScaleDownBy;
   }
   parameters.degradationPreference =
       RTCDegradationPreference.MAINTAIN_FRAMERATE;

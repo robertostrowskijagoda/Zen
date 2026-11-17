@@ -60,23 +60,57 @@ void main() {
   });
 
   group('the camera encoder', () {
-    test('keeps between the floor and the ceiling at up to 24 frames', () {
+    test('keeps under the ceiling, with no floor, at up to 24 frames and '
+        '960 x 540', () {
       final RTCRtpParameters parameters = RTCRtpParameters(
         encodings: <RTCRtpEncoding>[
-          RTCRtpEncoding(maxBitrate: 1800000, scaleResolutionDownBy: 2.0),
+          RTCRtpEncoding(
+            maxBitrate: 1800000,
+            minBitrate: 150000,
+            scaleResolutionDownBy: 2.0,
+          ),
         ],
       );
       expect(tuneCallCameraParameters(parameters), isTrue);
       final RTCRtpEncoding encoding = parameters.encodings!.single;
-      expect(encoding.maxBitrate, 2500000);
-      expect(encoding.minBitrate, 150000);
+      // 1.17.5 allowed 2.5 Mbit/s: over Yggdrasil's links it queued ahead
+      // of the voice.
+      expect(encoding.maxBitrate, 1200000);
+      // 1.17.5 kept 150 kbit/s whatever the path carried.
+      expect(encoding.minBitrate, isNull);
+      expect(encoding.toMap().containsKey('minBitrate'), isFalse);
       expect(encoding.maxFramerate, 24);
-      expect(encoding.scaleResolutionDownBy, 1.0);
+      // 1.17.5 encoded the camera's full 1280 x 720 in software.
+      expect(encoding.scaleResolutionDownBy, closeTo(4 / 3, 1e-9));
+      expect((1280 / encoding.scaleResolutionDownBy!).round(), 960);
+      expect((720 / encoding.scaleResolutionDownBy!).round(), 540);
       // Frames before resolution: a soft picture rather than a frozen one.
       expect(
         parameters.degradationPreference,
         RTCDegradationPreference.MAINTAIN_FRAMERATE,
       );
+    });
+
+    test('the camera is asked for more than is sent, never less', () {
+      expect(kCallCameraWidth / kCallVideoScaleDownBy, kCallVideoSendWidth);
+      expect(kCallCameraHeight / kCallVideoScaleDownBy, kCallVideoSendHeight);
+      expect(kCallVideoScaleDownBy, greaterThan(1.0));
+      final Map<String, dynamic> front = callCameraConstraints(mobile: true);
+      expect(front['width'], kCallCameraWidth);
+      expect(front['height'], kCallCameraHeight);
+    });
+
+    test('WebRTC watches the processor, so the voice does not starve', () {
+      final List<Map<String, dynamic>> optional =
+          (kCallPeerConstraints['optional'] as List<Map<String, dynamic>>);
+      bool? named(String key) => optional
+          .where((Map<String, dynamic> o) => o.containsKey(key))
+          .map((Map<String, dynamic> o) => o[key] as bool)
+          .single;
+      // Off from 1.10.0 to 1.17.5.
+      expect(named('googCpuOveruseDetection'), isTrue);
+      expect(named('googSuspendBelowMinBitrate'), isFalse);
+      expect(named('googDscp'), isTrue);
     });
 
     test('every encoding is set; none is nothing to set', () {
@@ -95,11 +129,12 @@ void main() {
       expect(none.degradationPreference, isNull);
     });
 
-    test('the floor stays far below the ceiling and the start between', () {
-      expect(kCallVideoMinBitrate, lessThan(kCallVideoStartBitrate));
+    test('the start is modest, between WebRTC\'s own and the ceiling', () {
+      // 1.17.5 started at 1 Mbit/s, which a relayed path may not carry.
+      expect(kCallVideoStartBitrateKbps, 500);
+      expect(kCallVideoStartBitrate, 500000);
+      expect(kCallVideoStartBitrate, greaterThan(300000));
       expect(kCallVideoStartBitrate, lessThan(kCallVideoMaxBitrate));
-      // Low enough for a really bad link to still carry a small picture.
-      expect(kCallVideoMinBitrate, lessThanOrEqualTo(200000));
     });
   });
 
@@ -330,14 +365,14 @@ void main() {
       expect(
         sections[2],
         contains(
-          'a=rtpmap:96 VP8/90000\r\na=fmtp:96 x-google-start-bitrate=1000\r\n',
+          'a=rtpmap:96 VP8/90000\r\na=fmtp:96 x-google-start-bitrate=500\r\n',
         ),
       );
       expect(
         sections[2],
         contains(
           'a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;'
-          'x-google-start-bitrate=1000\r\n',
+          'x-google-start-bitrate=500\r\n',
         ),
       );
       // Not the retransmissions, the audio or the screen slot.
@@ -361,7 +396,7 @@ void main() {
         offer.replaceAll('\r\n', '\n'),
       );
       expect(lf, isNot(contains('\r')));
-      expect(lf, contains('a=fmtp:96 x-google-start-bitrate=1000\n'));
+      expect(lf, contains('a=fmtp:96 x-google-start-bitrate=500\n'));
     });
   });
 
@@ -415,6 +450,72 @@ void main() {
       );
       expect(lines[1], startsWith('video in VP8 1280x720 23 fps, '));
       expect(lines[1], endsWith(', 3 freezes (2 s)'));
+    });
+
+    test('what the processor and the voice went through: encode and decode '
+        'time, camera frames not encoded, concealed voice, jitter buffer, '
+        'and the round trip of the media', () {
+      final List<String> lines = describeCallStats(<StatsReport>[
+        report('C1', 'codec', <String, dynamic>{'mimeType': 'video/VP8'}),
+        report('C2', 'codec', <String, dynamic>{'mimeType': 'audio/opus'}),
+        report('S1', 'media-source', <String, dynamic>{
+          'kind': 'video',
+          'frames': 1440,
+          'width': 1280,
+          'height': 720,
+          'framesPerSecond': 24.0,
+        }),
+        report('O1', 'outbound-rtp', <String, dynamic>{
+          'kind': 'video',
+          'codecId': 'C1',
+          'mediaSourceId': 'S1',
+          'framesEncoded': 1200,
+          'frameWidth': 960,
+          'frameHeight': 540,
+          'framesPerSecond': 20.0,
+          'qualityLimitationReason': 'cpu',
+          'totalEncodeTime': 42.6,
+        }),
+        report('I1', 'inbound-rtp', <String, dynamic>{
+          'kind': 'video',
+          'codecId': 'C1',
+          'framesDecoded': 1000,
+          'totalDecodeTime': 9.0,
+        }),
+        report('I2', 'inbound-rtp', <String, dynamic>{
+          'kind': 'audio',
+          'codecId': 'C2',
+          'packetsReceived': 3000,
+          'bytesReceived': 120 * 1024,
+          'packetsLost': 12,
+          'totalSamplesReceived': 2880000,
+          'concealedSamples': 72000,
+          'concealmentEvents': 31,
+          'jitterBufferDelay': 360000.0,
+          'jitterBufferEmittedCount': 2880000,
+          'jitter': 0.0214,
+        }),
+        report('R1', 'remote-inbound-rtp', <String, dynamic>{
+          'kind': 'audio',
+          'roundTripTime': 0.4127,
+          'packetsLost': 5,
+        }),
+      ]);
+      expect(lines[0], startsWith('camera 1280x720, 1440 frames captured'));
+      expect(lines[1], startsWith('video out VP8 960x540 20 fps, '));
+      expect(
+        lines[1],
+        endsWith(
+          ', limit cpu, encode 35.5 ms/frame, 240 camera frames not encoded',
+        ),
+      );
+      expect(lines[2], endsWith(', decode 9.0 ms/frame'));
+      expect(
+        lines[3],
+        'audio in opus, 3000 packets, 120 KB, lost 12, concealed 2.5% '
+        '(31 times), jitter buffer 125 ms, jitter 21 ms',
+      );
+      expect(lines[4], 'audio out reached the other side, rtt 413 ms, lost 5');
     });
   });
 }

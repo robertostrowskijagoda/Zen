@@ -760,26 +760,43 @@ camera runs (`ZenCallCamera.kt`) to the steadiest range the camera offers:
 the highest floor from 15 up to 24 frames (24-24 where there is one), else
 the lowest floor above 24; WebRTC's own pick was the lowest floor (7-30 on
 most phones), and in poor light the camera then sent 5-6 frames, each
-smeared by movement. The camera sender keeps between 150 kbit/s and 2.5
-Mbit/s at up to 24 frames, and keeps its frames before its resolution when
-the path is tight (`MAINTAIN_FRAMERATE`); the estimate of the path starts at
-1 Mbit/s (`x-google-start-bitrate` added to the camera's VP8 and H.264
-formats of the other side's description before it is applied) instead of
-300 kbit/s. What is promised: on a path that carries 1.5 Mbit/s or more
-each way, a sharp 1280 x 720 picture at a steady 24 frames (15 at the least
-in poor light where the camera has no steady range of 24), also when it
-moves; on a worse path the frames keep coming at a lower resolution, and
-below 150 kbit/s the path's own losses decide. A camera sends VP8, in
-software where the phone's WebRTC has no VP8 encoder (the frame encryption
-leaves only VP8 and H.264 readable, and H.264 left pictures black); the
-log line `encoder` says which. The `Call stats` lines (4 s, 15 s and a
-minute after the media connect and after each offer or answer) give the
-camera's size and frames captured, the frames sent with the encoder's aim
+smeared by movement.
+
+The voice comes before the picture (since 1.17.6). The camera sender
+encodes at most 960 x 540 (the camera's 1280 x 720 scaled down by 4/3),
+up to 1.2 Mbit/s with no floor of Zen's own, at up to 24 frames, and keeps
+its frames before its resolution when the path or the processor is tight
+(`MAINTAIN_FRAMERATE`); WebRTC watches the processor
+(`googCpuOveruseDetection`, off from 1.10.0 to 1.17.5) and lowers the
+resolution when the encoder cannot keep up. The estimate of the path
+starts at 500 kbit/s (`x-google-start-bitrate` added to the camera's VP8
+and H.264 formats of the other side's description before it is applied)
+instead of WebRTC's 300 kbit/s. 1.17.5 encoded 1280 x 720 between 150
+kbit/s and 2.5 Mbit/s from a start of 1 Mbit/s with the processor
+unwatched: VP8 is encoded and decoded in software on most phones, every
+frame is sealed and every packet crosses Yggdrasil's encryption in the same
+app, and over Yggdrasil's TCP links whatever the path cannot carry waits in
+a queue ahead of the voice, so calls stuttered, the voice too. What is
+promised: on a path that carries 1.2 Mbit/s or more each way and a phone
+that keeps up, a 960 x 540 picture at a steady 24 frames (15 at the least
+in poor light where the camera has no steady range of 24); otherwise the
+frames keep coming at a lower resolution. A camera sends VP8, in software
+where the phone's WebRTC has no VP8 encoder (the frame encryption leaves
+only VP8 and H.264 readable, and H.264 left pictures black); the log line
+`encoder` says which. The `Call stats` lines (4 s, 15 s and a minute after
+the media connect and after each offer or answer) give the camera's size
+and frames captured; the frames sent with their size and rate, what limits
+them now (`limit cpu`, `bandwidth` or `none`), the encoder's aim
 (`target`), its average quantizer (`qp`, above about 80 blocky), how often
-it changed the resolution and how long the processor or the path held it
-back, and for the picture coming in its frames a second and freezes; a
-`Call camera` line says what the camera was asked for and which frame-rate
-range it offered, ran at and was pinned to.
+it changed the resolution, how long the processor or the path held it
+back, its time per frame (`encode … ms/frame`) and the camera's frames it
+never encoded; for the picture coming in its frames a second, decode time
+per frame and freezes; for the voice coming in the packets lost, the share
+made up for lost or late packets (`concealed`), the average wait in the
+jitter buffer and the jitter; and per stream sent the round trip of the
+media and what the other side lost (`… out reached the other side, rtt`).
+A `Call camera` line says what the camera was asked for and which
+frame-rate range it offered, ran at and was pinned to.
 
 **The screen during a call** (since 1.17.5, `call_screen_awake.dart`,
 `CallScreenKeepOn.kt`): the app's window keeps the screen on
