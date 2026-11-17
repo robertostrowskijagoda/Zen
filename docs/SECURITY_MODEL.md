@@ -974,13 +974,17 @@ inbox.
   account number, needs that many treasurers signing both: provable
   afterwards, not preventable. A number split between orders none of
   which can count any more is freed only by a release most treasurers of
-  the era sign, about an hour after they see the split. Each era is
-  sealed by most of the next era's treasurers with the operations that
-  counted, and an operation dated into a sealed era that its seal does not
-  list counts nowhere, so former treasurers cannot create money or replace
-  a past payment afterwards. Until an era is sealed (an hour or more after
-  it ends) that window is open, and a majority of the next era can leave
-  an operation out of a seal (visibly). Treasurers check the whole ledger
+  the era sign, about an hour after they see the split. Who signs comes
+  from the seals of the eras alone: an operation names the last seal its
+  payer knew and only the treasurers that seal named sign it; each era is
+  sealed by most of its own treasurers with the operations that counted,
+  and one of a sealed era that its seal does not list counts nowhere, so
+  former treasurers cannot create money or replace a past payment
+  afterwards. A change of the tree, however it is dated, reaches the money
+  only from the era after the seal that names it, so a change dated back
+  (new treasurers, a member leaving) undoes no payment. A dishonest
+  majority of an era can leave an operation out of its seal (visibly; its
+  payer orders it again). Treasurers check the whole ledger
   for numbering and balance and every phone checks what it counts, so no
   majority makes money from nothing; but a phone that is not a treasurer
   keeps only the treasurers' signed statements of its balance, and a
@@ -1001,10 +1005,12 @@ inbox.
   and the accused could hide a real one with an overturning of their own;
   an overturning now takes back only its sender's word). A payment a seal
   left out, one signed against the rules and a treasurer who signed two
-  seals of one era are shown in the wallet. **Known limits, not fixed in
-  this version** (the pyramid is not open): the seal of an era can stall
-  after a late change among the treasurers, and a back-dated change in a
-  quiet pyramid can still undo a payment.
+  seals of one era are shown in the wallet. Since 1.17.5 a seal no longer
+  stalls after a late change among the treasurers (the treasurers co-sign
+  one content, the one that dominates, instead of each its own once), and
+  a back-dated change of the tree no longer undoes a payment (the seals,
+  not the records' times, say who signs). An era of the treasurers lasts
+  up to six hours: a new treasurer signs from the next one.
 - Self-update from GitHub takes only a file whose `SHA256SUMS` carries the
   release signing key's signature (one maintainer key is pinned in
   `release.dart`) and, on Android, an APK signed by the installed copy's

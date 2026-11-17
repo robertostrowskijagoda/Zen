@@ -686,7 +686,8 @@ final class PyramidService extends ChangeNotifier {
 
   /// Spans of slots this person signed as a treasurer (one operation each,
   /// another only once the era of the one before was sealed without it;
-  /// one release vote per span; one seal of an era, one close of a vote;
+  /// one release vote per span; the last seal of an era signed (a later
+  /// one only when it dominates it), one close of a vote;
   /// shared with the person's other devices) → what was signed, and the
   /// time it carries ([_signedWhen]); pruned once nothing could be signed
   /// in their place any more ([_pruneSigned]). And own orders and
@@ -1739,9 +1740,8 @@ final class PyramidService extends ChangeNotifier {
         r.at < _keptBefore(t - kPyrLateMs) - kPyrLateMs) {
       // Dated well before records this phone already had for a while:
       // late — back-dated past its wait, or held back. Its wait counts from
-      // now here; a change of the treasurers, a vote's card or vote folds
-      // now here (a past set of treasurers, a vote that ended, stays as it
-      // was).
+      // now here; a vote's card or vote folds now here (a vote that ended
+      // stays as it was).
       _late[r.id] = max(t, r.at);
     }
     _keptAt.putIfAbsent(r.id, () => t);
@@ -1765,17 +1765,8 @@ final class PyramidService extends ChangeNotifier {
   }
 
   /// Whether [r] folds at the time this phone saw it when it comes late
-  /// ([PyrT.foldedLate]): a change of the tree only where it may change the
-  /// treasurers.
-  bool _foldsLate(PyramidRecord r) {
-    if (!PyrT.foldedLate.contains(r.type)) {
-      return false;
-    }
-    if (!PyrT.tree.contains(r.type)) {
-      return true;
-    }
-    return _state?.touchesTreasurers(r) ?? true;
-  }
+  /// ([PyrT.foldedLate]).
+  bool _foldsLate(PyramidRecord r) => PyrT.foldedLate.contains(r.type);
 
   /// Records whose signatures name ML-DSA keys this phone does not hold
   /// yet (the admission or handover that publishes them has not come), by
@@ -4011,6 +4002,9 @@ final class PyramidService extends ChangeNotifier {
         'to': to,
         'amount': amount,
         'seq': seq,
+        // The last seal known here: the order is of the era after it, and
+        // only that era's treasurers sign it ([PyrLedger.eraOf]).
+        'after': s.seals.length,
         // The release of the number this order follows, when it was split
         // before ([PyrLedger.isSplit]).
         'rel': ?_treasury.relFor('$payer|$seq'),
@@ -4102,6 +4096,7 @@ final class PyramidService extends ChangeNotifier {
         'x': transferId,
         'ok': ok,
         if (ok && next != null) 'next': next,
+        'after': s.seals.length,
         'rel': ?_treasury.relFor('x|$transferId'),
         'nc': _newId(24),
       },
@@ -8176,8 +8171,8 @@ final class PyramidService extends ChangeNotifier {
   /// Forgets what [_signedOrders] no longer needs to hold, so it does not
   /// grow with every operation a treasurer ever signed: a span whose
   /// operation counts on this whole ledger ([whole]; nothing else for its
-  /// slot is signed while one counts) or is dated in a sealed era (it
-  /// counts there only if listed; either way another one for its span may
+  /// slot is signed while one counts) or is of a sealed era (it counts
+  /// there only if listed; either way another one for its span may
   /// be signed then); a release vote once the release counts (the next
   /// one follows it); a seal once its era is sealed; a vote's close once
   /// no close of it is signed any more. What is left: the spans of this
@@ -8202,8 +8197,9 @@ final class PyramidService extends ChangeNotifier {
         final PyramidRecord? r = _treasury.ledger.releases[id];
         return r != null && PyrLedger.releaseFinal(r, s);
       }
+      final PyramidRecord? op = _treasury.ledger.ops[id];
       return (whole != null && whole.counted.contains(id)) ||
-          (at != null && s.seals.isNotEmpty && at < s.sealedTo);
+          (op != null && s.sealOfEra(PyrLedger.eraOf(op)) != null);
     });
     _signedWhen.removeWhere(
       (String key, int _) => !_signedOrders.containsKey(key),
@@ -8213,8 +8209,8 @@ final class PyramidService extends ChangeNotifier {
 
   /// Signs [bare] (adding to the signatures already here) and takes it
   /// in, unless this account already signed another record for [slot]:
-  /// one seal of an era, one close of a vote — two would contradict each
-  /// other.
+  /// one close of a vote — two would contradict each other. (A seal of an
+  /// era is signed by dominance instead: `_sealDuty`.)
   Future<void> _signOnce(
     String slot,
     PyramidRecord bare,

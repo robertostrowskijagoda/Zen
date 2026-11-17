@@ -23,6 +23,8 @@ void main() {
 
   setUp(() async {
     w = await FoldWorld.make();
+    // The founder sealed its era: the eight sign (orders of era 2).
+    w.records.add(await w.sealFirst());
   });
 
   Future<PyramidRecord> order(
@@ -42,6 +44,7 @@ void main() {
       'to': w.id(to),
       'amount': amount,
       'seq': seq,
+      'after': 1,
       'memo': memo,
       'cond': ?cond,
     },
@@ -57,7 +60,7 @@ void main() {
     PyrT.settle,
     at,
     <String>[by],
-    <String, dynamic>{'x': x, 'ok': ok, 'next': ?next},
+    <String, dynamic>{'x': x, 'ok': ok, 'next': ?next, 'after': 1},
   );
 
   /// [op] with the treasurer signatures of [who].
@@ -201,6 +204,7 @@ void main() {
         'to': w.id('A1'),
         'amount': 500,
         'seq': 1,
+        'after': 1,
         'memo': '',
       },
     );
@@ -304,6 +308,7 @@ void main() {
         'to': w.id('B1'),
         'amount': 10,
         'seq': 1,
+        'after': 1,
         'memo': '',
       },
     );
@@ -352,8 +357,9 @@ void main() {
     );
     expect(await why(await order(start, 'A1', 'B1', 10, 1)), isNull);
 
-    // A new treasurer (Z under B, level 2): orders made before are not
-    // signed any more (the old majority could have signed them).
+    // A new treasurer (Z under B, level 2): it signs from the era after the
+    // seal that names it, and orders of the era before are not signed any
+    // more (its seal is made: they would be left out).
     final LedgerKeyPair z = await LedgerKeyPair.generate();
     final PyramidRecord admitZ = await signedRecord(
       PyrT.admit,
@@ -368,19 +374,30 @@ void main() {
       },
     );
     final PyramidRecord e = await fund(PyrLedger(), 'A1', 1000);
-    final PyramidState after = w.fold(<PyramidRecord>[
+    final PyramidState waiting = w.fold(<PyramidRecord>[
       e,
       admitZ,
     ], now: start + 3 * h);
+    expect(waiting.treeTreasurers, contains(z.id));
+    expect(waiting.treasurers, isNot(contains(z.id)));
+    final PyramidRecord second = await w.seal(
+      start + 3 * h,
+      more: <PyramidRecord>[e, admitZ],
+    );
+    final PyramidState after = w.fold(<PyramidRecord>[
+      e,
+      admitZ,
+      second,
+    ], now: start + 4 * h);
     expect(after.treasurers, contains(z.id));
     expect(after.treasurersAt(start), isNot(contains(z.id)));
     expect(
       l.problem(
         await order(start + h, 'A1', 'B1', 10, 1),
         after,
-        start + 3 * h,
+        start + 4 * h,
       ),
-      'zlecenie sprzed zmiany skarbników',
+      kPyrOtherEra,
     );
   });
 

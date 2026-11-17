@@ -204,14 +204,17 @@ stricter path:
   devices paying at once), most treasurers of the era vote a **release**
   about an hour after they see it, and the waiting order goes out again. A
   treasurer never moves on to another order by itself.
-- **Sealed eras.** The treasurers of each era (from one change of who the
-  treasurers are to the next) are sealed by most of the next era's treasurers: the
-  seal fixes who they were and lists which transfers dated in that era
-  count. A transfer dated into a sealed era that its seal does not list
-  counts nowhere, so former treasurers cannot create money or replace a
-  past payment. A change at the treasurers' levels or a cell vote that
-  arrives late counts from when it was seen: it cannot move a sealed era,
-  nor a vote that its cell closed with the list of its votes.
+- **Sealed eras.** The treasurers' apps seal each era (at most six hours,
+  or 2000 transfers, or an hour once the treasurers changed): most of the
+  era's treasurers sign one seal that lists which of its transfers count
+  and who the treasurers of the next era are. A transfer belongs to the era
+  after the last seal its payer knew; one its era's seal does not list
+  counts nowhere and the app orders it again in the next era, so former
+  treasurers cannot create money or replace a past payment. A change of
+  the tree (a new treasurer, someone leaving), however it is dated,
+  reaches the money only from the era after the seal that names it, so it
+  undoes no payment. A cell vote that arrives late counts from when it was
+  seen: it cannot turn a vote its cell closed with the list of its votes.
 - **What a seal left out is shown.** A payment a seal left out, one signed
   against the rules and a treasurer who signed two seals of one era were
   computed but shown nowhere; the wallet now lists them.
@@ -343,9 +346,8 @@ pyramid).
   treasurers, two of an even one) could together sign a spending twice,
   and a dishonest **majority** a false statement: it would leave proof, but
   could not be stopped.
-- An era counts as settled only once it is sealed, at least an hour after
-  it ends; until then a phone that syncs late may still see what happened
-  in it in another order.
+- An era counts as settled only once it is sealed (up to six hours); a
+  new treasurer signs from the era after that seal.
 - Below the top, a court is one person, the head of a cell: whoever knows
   who sits at that place knows who decided, cards or not.
 - The anonymous vote request is classical (a ring signature): a future
@@ -358,9 +360,6 @@ pyramid).
   and shows only while a current friend stands by it; an overturning takes
   back only its sender's word (a friend could once make a verdict up, and
   the accused hide a real one with an overturning of their own).
-- **Known limits, not fixed in this version** (the pyramid is not open): the
-  seal of an era can stall after a late change among the treasurers, and a
-  back-dated change in a quiet pyramid can still undo a payment.
 - The power key and the one-time voting cards are made from the account
   key, so a recovered head gets the power key back (and a vote in progress
   keeps its card). Only the founder's very first power key, made outside

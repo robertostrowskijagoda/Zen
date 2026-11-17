@@ -496,6 +496,7 @@ void main() {
               'to': w['A2'].myKey!,
               'amount': 5,
               'seq': 1,
+              'after': w['S'].state!.seals.length,
               'memo': '',
               'nc': 'heap-$i',
             },
@@ -580,7 +581,11 @@ void main() {
     const int start = t0 + 2 * day + h;
     late FoldWorld w;
 
-    setUp(() async => w = await FoldWorld.make());
+    setUp(() async {
+      w = await FoldWorld.make();
+      // The founder sealed its era: the eight sign (orders of era 2).
+      w.records.add(await w.sealFirst());
+    });
 
     Future<PyramidRecord> order(
       int at,
@@ -598,6 +603,7 @@ void main() {
         'to': w.id(to),
         'amount': amount,
         'seq': seq,
+        'after': 1,
         'memo': '',
         if (nc.isNotEmpty) 'nc': nc,
       },
@@ -624,7 +630,7 @@ void main() {
         pyramid: w.py,
         slot: '${w.id('A1')}|1',
         prev: '',
-        at: at ?? st.treasurerEraStart,
+        at: at ?? st.sealedTo,
       );
       return signed(r, who);
     }
@@ -689,6 +695,7 @@ void main() {
             'to': w.id('B1'),
             'amount': 1,
             'seq': 1,
+            'after': 1,
             'memo': '',
             'rel': rel,
           },

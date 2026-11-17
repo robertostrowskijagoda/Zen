@@ -1147,10 +1147,14 @@ who are not treasurers or parties receive nothing.
   (orders waiting, or split) per payer (`kPyrMaxEvidencePerPayer`), and
   answers `ldig` / `lwant` only to the treasurer whose member record names
   the sending address.
-- **Seals of the eras** (`seal`, public, 3.4): once an era of the
-  treasurers ended, most of the next era's treasurers seal it with the
-  operations dated in it that counted for them; an operation dated in a
-  sealed era that its seal does not list counts nowhere.
+- **Eras** (`after`, since 1.17.5): an operation names how many seals its
+  payer knew (`after`) and belongs to the era after the last of them; only
+  that era's treasurers (the `next` of that seal) sign it, and a treasurer
+  signs only operations of the era open on its phone. **Seals** (`seal`,
+  public, 3.4): most of an era's own treasurers seal it with its
+  operations that counted for them; one its seal does not list counts
+  nowhere, and its payer's app orders it again in the era open then (the
+  same number, payee and amount).
 
 ### 2.12 Nearby (Bluetooth LE: Android and computers) [V]
 
@@ -2210,34 +2214,46 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   the parties' phones. The screens and the history name the court of a
   level, never a person. Limit: a court of one person (every level below
   the top) is known by its seat.
-- **Seals of the treasurers' eras** (`seal`, `PyrSeal`): an era is a span
-  in which the treasurers stayed the same. One hour after an era ended
-  (`kPyrSealWaitMs`, and 10 minutes after the treasurer last offered its
-  ledger to the others) each treasurer of the next era that keeps the
-  whole ledger signs {`n` era number (1: the founder's), `prev` the seal
-  before, `from`, `to`, `set` the era's treasurers, `ops` the ids of the
-  private operations dated in it that counted, `ch` what changed the
-  treasurers at `to`}, dated `to`, `by` the next era's treasurers; equal
-  ledgers give equal records, and the signatures meet as it goes round.
-  The seal that counts for an era is the first well-formed one (earliest
-  end, then id) that follows the seal before, is signed by most of the
-  next treasurers and agrees with the tree; a treasurer that signs two
-  different seals of one era is shown with both. A sealed era is fixed for
-  every phone: its treasurers are the sealed ones, an operation dated in
-  it that the seal does not list counts nowhere, a change of the tree that
-  would change the treasurers inside it (or at its end, not among `ch`) is
-  taken as made after the seal and folds after the last seal, and any
-  other record that would change it is refused. Limits: a seal lists at
-  most about 30000 operation ids (the 2 MiB record limit) and cannot be
-  published with more than 100 next treasurers (`kPyrMaxSigners`); until
-  an era is sealed (at least an hour after its end) its past can still
-  move; sealing stalls while the treasurers' ledgers disagree.
+- **Seals of the treasurers' eras** (`seal`, `PyrSeal`, since 1.17.5).
+  The treasurers who sign payments come from the seals alone, never from
+  the time a record claims: era 1 is the founder's, the founder alone its
+  treasurer, and the treasurers of era n + 1 are `next` of the seal of era
+  n. A seal is {`n`, `prev` the seal before, `from` (the end of the one
+  before, or the founding), `to` its end, `set` the era's treasurers,
+  `next` the tree's treasurers at `to`, `ops` the ids of the era's
+  operations that counted (at most 4000, `kPyrMaxSealOps`), `ch` the
+  changes of the tree it takes in: what changed the tree's treasurers
+  after `from` up to `to`, and every departure no seal named yet}, dated
+  `to`, `by` = `set`, and it counts when signed by most of `set`. An era
+  may be sealed after 6 h (`kPyrEraMs`), after 2000 counted operations
+  (`kPyrEraOps`), or after 1 h when the tree's treasurers are no longer the
+  era's (`kPyrEraChangeMs`). A treasurer's app proposes a seal ending 10
+  minutes before its clock (10 minutes after it offered its ledger to the
+  others), and co-signs every seal it can check — the right chain and
+  set, an end at most 10 minutes ahead of its clock by which the era was
+  due, `next` and `ch` as its own tree gives them, every operation listed
+  counting on its ledger — that dominates the one it signed before: a
+  superset of operations, or the same ones with the lower id. It never
+  leaves out an operation it signed that counts, nor, for 40 minutes
+  after its time, one that may still count; from its first seal of an era
+  it signs no more operations of it. Of several seals of an era every
+  phone takes the one the longest chain of later seals rests on, then the
+  one with more operations, then the lower id; who signed two seals of an
+  era neither of which dominates the other is shown with both. A change
+  of the tree reaches the money only from the era after the seal that
+  names it: a change of the treasurers inside a sealed era that its seal
+  does not name folds right after the last seal (a later seal names it),
+  any other record that would change them there is refused, and a member
+  who left by a change no seal before an operation's era named still
+  counts as a member for that operation, so a departure dated back
+  undoes no payment either. Limit: a seal cannot be published with more
+  than 100 treasurers in its era (`kPyrMaxSigners`).
 - **Late records** (`PyrT.foldedLate`, `kPyrLateMs`, 30 min): the timed
-  kinds (below), a change of the tree at the treasurers' levels (or right
-  below them) and a cell vote's ballot and votes, seen by a phone more than
-  30 minutes after their date, fold at the time that phone saw them, so
-  they cannot move a past set of treasurers or turn a vote that ended; the
-  seals and the closes then fix the same on every phone.
+  kinds (below) and a cell vote's ballot and votes, seen by a phone more
+  than 30 minutes after their date, fold at the time that phone saw them,
+  so they cannot turn a vote that ended; the closes then fix the same on
+  every phone. Changes of the tree fold at their own time (the seals keep
+  them from the money).
 - **Closing a cell vote** (`vclose` {`elect` the vote, `votes` the ids of
   the votes that count}, dated at the vote's end, `by` its ring): once a
   vote ended by time, each ring member's app signs the votes that had come

@@ -32,6 +32,8 @@ void main() {
       await w.join(w.net[head], p);
     }
     await w.sync();
+    // X signs payments from the era after the seal that names it.
+    await w.sealEra();
     return w;
   }
 
@@ -135,6 +137,7 @@ void main() {
     final SimPhone q = w.add('Q');
     await w.join(w.net['A2'], q);
     await w.sync();
+    await w.sealEra();
     await w.sealKeys();
     // Publishing its key already offered its (empty) ledger for sync.
     expect(w['Q'].isTreasurer, isTrue);

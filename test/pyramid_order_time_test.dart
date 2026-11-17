@@ -50,6 +50,8 @@ void main() {
     await w.join(w.net['X'], addSlow(w, 'Y', 9 * 60 * 1000));
     await w.join(w.net['X'], w.add('Z'));
     await w.sync();
+    // X signs payments from the era after the seal that names it.
+    await w.sealEra();
     await w.fund('A1', 10000);
     expect(w['Y'].isTreasurer, isFalse);
     expect(w['Z'].isTreasurer, isFalse);
