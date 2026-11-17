@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.18.0 — 17.11.2026
+
 ### What's new
 - [en] Calls no longer stutter: the voice comes first and the picture adapts to the phone and the connection.
 - [en] With Wi-Fi and mobile data off, Zen rests instead of using the battery.
