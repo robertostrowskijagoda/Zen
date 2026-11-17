@@ -673,7 +673,10 @@ final class LockedReceiver {
   }) : _transport = transport,
        _beat = beat,
        _meshLinked = meshLinked,
-       _onNetwork = onNetwork ?? onAnyNetwork,
+       _onNetwork =
+           onNetwork ??
+           (() async =>
+               !(beat?.offline ?? ZenWake.offline) && await onAnyNetwork()),
        _capability = capability,
        _inbox = inbox,
        _notices = notices,
@@ -808,7 +811,10 @@ final class LockedReceiver {
   /// most [relinkWait] for it (looking every [relinkStep]).
   final Future<bool> Function()? _meshLinked;
 
-  /// Whether the phone is on any network at all ([onAnyNetwork]): without
+  /// Whether the phone is on any network at all: Android's connectivity
+  /// callback has not said there is none ([WakeBeat.offline]), and an
+  /// interface holds an address ([onAnyNetwork]; with mobile data off a
+  /// phone may keep one for calls over LTE, so this alone may say yes). Without
   /// one no link can come up within [relinkWait], so the wake does not wait
   /// for it. The locked node links only over IP networks (public peers, the
   /// shared Wi-Fi), never Bluetooth or Wi-Fi Direct.
@@ -972,6 +978,7 @@ final class LockedReceiver {
               mailboxPollInterval,
               _pollOnWake,
               hold: hold,
+              needsNetwork: true,
             )
           : beat.add(
               'mailbox-poll',
@@ -979,6 +986,7 @@ final class LockedReceiver {
               _pollOnWake,
               hold: hold,
               whileIdle: true,
+              needsNetwork: true,
             );
     }
     if (presenceRoundEvery > Duration.zero && _presence.shownTo.isNotEmpty) {
@@ -993,6 +1001,7 @@ final class LockedReceiver {
               presenceRoundEvery,
               _presenceRound,
               hold: hold,
+              needsNetwork: true,
             )
           : beat.add(
               'presence-round',
@@ -1000,6 +1009,7 @@ final class LockedReceiver {
               _presenceRound,
               hold: hold,
               whileIdle: true,
+              needsNetwork: true,
             );
     }
     logZenMessage(

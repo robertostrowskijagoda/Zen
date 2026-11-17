@@ -233,13 +233,20 @@ final class LockedOutbox {
       const Duration hold = Duration(seconds: 10);
       final WakeBeat? beat = _beat;
       _timer = beat == null
-          ? ZenWake.beat('locked-outbox', wait, _roundOnWake, hold: hold)
+          ? ZenWake.beat(
+              'locked-outbox',
+              wait,
+              _roundOnWake,
+              hold: hold,
+              needsNetwork: true,
+            )
           : beat.add(
               'locked-outbox',
               wait,
               _roundOnWake,
               hold: hold,
               whileIdle: true,
+              needsNetwork: true,
             );
     } else if (timer.every != wait) {
       timer.setEvery(wait);

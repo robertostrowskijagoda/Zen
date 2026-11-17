@@ -27,7 +27,9 @@ friends and only while Zen is on the screen, and **after 5 minutes in the
 background only receives** (no pings, scans or sync), with or without the
 lock, though it still holds friends' mail as one of their mailboxes; it
 wakes for short, timed moments instead of holding the processor or
-Wi-Fi awake. While the phone sleeps (Doze), mail from mailboxes can come a
+Wi-Fi awake. With no network at all it rests: no polls or checks and no
+wakes for them until a network is back, then at once (see
+[Settings and peers](guide/settings-and-peers.md)). While the phone sleeps (Doze), mail from mailboxes can come a
 few minutes late. A computer on battery stops being a bridge for others and
 keeps only 4 public peers; plugged in, everything comes back. Animations
 run at a low frame rate and stop when the window is not visible; a setting

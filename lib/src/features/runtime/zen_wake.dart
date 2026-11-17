@@ -230,6 +230,10 @@ final class AndroidWakePlatform implements ZenWakePlatform {
         }
       case 'appGone':
         _appGone.add(null);
+      case 'network':
+        // Android's default-network callback (ZenPower.kt): told once when
+        // this engine starts listening, then on every change.
+        ZenWake.networkChanged(up: event['up'] != false);
     }
   }
 
@@ -450,6 +454,7 @@ final class _BeatWork implements BeatTimer {
     this.tick, {
     required this.hold,
     required this.whileIdle,
+    required this.needsNetwork,
     required this.dueAt,
   });
 
@@ -459,6 +464,11 @@ final class _BeatWork implements BeatTimer {
   final Future<void> Function() tick;
   final Duration hold;
   final bool whileIdle;
+
+  /// It talks to the network (a poll, a round, a check): with no network
+  /// at all it waits, and wakes nothing, until one comes back
+  /// ([WakeBeat.networkChanged]).
+  final bool needsNetwork;
 
   /// When it runs next (wall time, milliseconds).
   int dueAt;
@@ -544,13 +554,106 @@ final class WakeBeat {
   /// the alarms are planned once, after them.
   bool _firing = false;
 
+  /// The phone has no network at all ([networkChanged]).
+  bool _offline = false;
+
+  /// Whether the phone has no network at all, as the platform last said
+  /// (`false` until it says so: where it never does, nothing changes).
+  bool get offline => _offline;
+
+  /// The works that may run now: with no network, only those that do not
+  /// need one (the look around nearby, the parked service's watchdog).
+  Iterable<_BeatWork> get _active =>
+      _offline ? _works.where((_BeatWork w) => !w.needsNetwork) : _works;
+
+  /// How long the wake that comes with a network back holds the phone at
+  /// most: the link check's limit and the polls' wait for their answers.
+  static const Duration resumeHold = Duration(seconds: 30);
+
   /// What runs on the next wake (tests).
   List<String> get planned {
-    final int? at = _nextAt(_works);
+    final int? at = _nextAt(_active);
     return <String>[
       if (at != null)
         for (final _BeatWork w in _dueBy(at)) w.name,
     ];
+  }
+
+  /// The phone has a network again ([up]) or none at all. Without one,
+  /// every work that needs it waits and wakes nothing: no alarm is set for
+  /// it, and a wake that comes anyway (for the look around, or set just
+  /// before) runs none of it nor the work alongside, so it lets the phone
+  /// sleep at once. Polls, rounds and checks that dial a network that is
+  /// not there cost a wake and a hold each, every few minutes, and found
+  /// nothing. Once a network is back, what came due meanwhile runs at once
+  /// with the work alongside (the link check, which has the node redial
+  /// its peers), under a hold of its own: mail waiting goes out within
+  /// seconds, not on the next wake. Each then keeps its place on the grid
+  /// (it moves on by whole periods).
+  void networkChanged({required bool up}) {
+    if (_offline == !up) {
+      return;
+    }
+    _offline = !up;
+    if (_offline) {
+      logZenMessage(
+        'No network: Zen rests (no polls, rounds or link checks) until a '
+        'network comes back.',
+      );
+      _plan();
+      return;
+    }
+    unawaited(
+      ZenWake.holdWhile(_resume, tag: 'network-back', limit: resumeHold),
+    );
+  }
+
+  /// The wake that comes with a network back ([networkChanged]).
+  Future<void> _resume() {
+    final int now = ZenWake.nowMillis();
+    final Map<String, int> took = <String, int>{};
+    final Stopwatch wake = Stopwatch()..start();
+    final List<Future<void>> running = <Future<void>>[];
+    void start(String name, Future<void> Function() tick) => running.add(
+      Future<void>.sync(tick)
+          .catchError((Object error, StackTrace st) {
+            logZenError('Work on the wake ($name) failed', error, st);
+          })
+          .whenComplete(() => took[name] = wake.elapsedMilliseconds),
+    );
+    final List<_BeatWork> waited = <_BeatWork>[
+      for (final _BeatWork w in _works)
+        if (w.needsNetwork && !w._cancelled && w.dueAt - w.slackMs <= now) w,
+    ];
+    logZenMessage(
+      'A network is back: Zen resumes (${waited.length} waiting jobs now).',
+    );
+    _firing = true;
+    try {
+      // The redial first: the polls then find a link sooner.
+      for (final _BeatCompanion c in List<_BeatCompanion>.of(_companions)) {
+        start(c.name, c.tick);
+      }
+      for (final _BeatWork w in waited) {
+        final int every = w.every.inMilliseconds;
+        if (every > 0) {
+          final int behind = now - (w.dueAt - w.slackMs);
+          w.dueAt += (behind ~/ every + 1) * every;
+        } else {
+          w.dueAt = now;
+        }
+        start(w.name, w.tick);
+      }
+    } finally {
+      _firing = false;
+    }
+    _plan();
+    return Future.wait(running).whenComplete(
+      () => ZenTechLog.event('network-back', <String, Object?>{
+        'ms': wake.elapsedMilliseconds,
+        'jobs': took,
+      }),
+    );
   }
 
   BeatTimer add(
@@ -559,6 +662,7 @@ final class WakeBeat {
     Future<void> Function() tick, {
     required Duration hold,
     required bool whileIdle,
+    bool needsNetwork = false,
   }) {
     final _BeatWork work = _BeatWork(
       this,
@@ -567,6 +671,7 @@ final class WakeBeat {
       tick,
       hold: hold,
       whileIdle: whileIdle,
+      needsNetwork: needsNetwork,
       dueAt: ZenWake.nowMillis() + every.inMilliseconds,
     );
     _works.add(work);
@@ -576,7 +681,8 @@ final class WakeBeat {
 
   /// Runs [tick] on every wake of this beat, beside the work due then; it
   /// never wakes the phone itself. The wake lets the phone sleep once
-  /// [tick]'s future completes too.
+  /// [tick]'s future completes too. Such work needs the network (the link
+  /// check): with none it waits ([networkChanged]).
   WakeTimer alongside(String name, Future<void> Function() tick) {
     final _BeatCompanion companion = _BeatCompanion(this, name, tick);
     _companions.add(companion);
@@ -592,6 +698,7 @@ final class WakeBeat {
     _works.clear();
     _companions.clear();
     _firing = false;
+    _offline = false;
     _cancelAlarms();
   }
 
@@ -606,7 +713,8 @@ final class WakeBeat {
     final List<_BeatWork> due = <_BeatWork>[];
     final List<_BeatWork> early = <_BeatWork>[];
     final bool offGrid = ZenWake.alarmTiming() != null && !_nearGrid(at);
-    for (final _BeatWork w in _works) {
+    final List<_BeatWork> active = _active.toList(growable: false);
+    for (final _BeatWork w in active) {
       if (w.dueAt <= at) {
         due.add(w);
       } else if (w.dueAt - w.slackMs <= at && !(offGrid && _gridPeriod(w))) {
@@ -617,7 +725,7 @@ final class WakeBeat {
     for (final _BeatWork w in early) {
       // The next wake without it: what runs now comes again a period on.
       int? next;
-      for (final _BeatWork other in _works) {
+      for (final _BeatWork other in active) {
         if (identical(other, w)) {
           continue;
         }
@@ -674,7 +782,7 @@ final class WakeBeat {
     }
     _cancelAlarms();
     _clampDue(ZenWake.nowMillis());
-    final int? at = _nextAt(_works);
+    final int? at = _nextAt(_active);
     if (at == null) {
       return;
     }
@@ -685,7 +793,7 @@ final class WakeBeat {
     if (inDoze) {
       return;
     }
-    final int? dozeAt = _nextAt(_works.where((_BeatWork w) => w.whileIdle));
+    final int? dozeAt = _nextAt(_active.where((_BeatWork w) => w.whileIdle));
     if (dozeAt != null) {
       _dozeAlarm = _wake('beat-doze', dozeAt, _dueBy(dozeAt), whileIdle: true);
     }
@@ -911,14 +1019,15 @@ final class WakeBeat {
         from != null && now < from - kWakeGridLead.inMilliseconds;
     final List<_BeatWork> dueNow = early
         ? <_BeatWork>[
-            for (final _BeatWork w in _works)
+            for (final _BeatWork w in _active)
               if (w.dueAt <= now) w,
           ]
         : _dueBy(now);
     final bool asPlanned = from != null && now >= from;
-    // In the order they were added, as always.
+    // In the order they were added, as always. With no network, nothing
+    // that needs one: it keeps its due time and runs once one is back.
     final List<_BeatWork> works = <_BeatWork>[
-      for (final _BeatWork w in _works)
+      for (final _BeatWork w in _active)
         if (dueNow.contains(w) ||
             (!early &&
                 planned.contains(w) &&
@@ -950,7 +1059,7 @@ final class WakeBeat {
               .whenComplete(() => took[w.name] = wake.elapsedMilliseconds),
         );
       }
-      if (running.isNotEmpty) {
+      if (running.isNotEmpty && !_offline) {
         for (final _BeatCompanion c in List<_BeatCompanion>.of(_companions)) {
           running.add(
             Future<void>.sync(c.tick)
@@ -1057,13 +1166,32 @@ abstract final class ZenWake {
   /// It holds the phone for at most [hold] and lets it sleep once [tick]'s
   /// future completes. [whileIdle] false: this work alone does not wake the
   /// phone in Doze. The period may change later ([BeatTimer.setEvery]).
+  /// [needsNetwork]: it talks to the network, and waits while the phone has
+  /// none ([WakeBeat.networkChanged]).
   static BeatTimer beat(
     String name,
     Duration every,
     Future<void> Function() tick, {
     Duration hold = defaultHold,
     bool whileIdle = true,
-  }) => _beat.add(name, every, tick, hold: hold, whileIdle: whileIdle);
+    bool needsNetwork = false,
+  }) => _beat.add(
+    name,
+    every,
+    tick,
+    hold: hold,
+    whileIdle: whileIdle,
+    needsNetwork: needsNetwork,
+  );
+
+  /// Whether the phone has no network at all, as Android's connectivity
+  /// callback last said (`false` elsewhere, and until it says so).
+  static bool get offline => _beat.offline;
+
+  /// The phone has a network again, or none at all (Android's connectivity
+  /// callback, through [AndroidWakePlatform]; tests).
+  static void networkChanged({required bool up}) =>
+      _beat.networkChanged(up: up);
 
   /// Runs [tick] on every wake of the shared beat, whatever work it is for,
   /// and never wakes the phone itself ([WakeBeat.alongside]): work worth

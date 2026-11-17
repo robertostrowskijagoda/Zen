@@ -9,6 +9,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -66,6 +68,14 @@ object ZenPower {
     /** A call's hold, renewed while the call runs (a safety limit). */
     private const val CALL_HOLD_MS = 6 * 60 * 60_000L
 
+    /**
+     * How long a network that came back holds the phone awake, until Dart
+     * takes its own hold for the work that waited (zen_wake.dart,
+     * WakeBeat.networkChanged, under the same tag).
+     */
+    private const val NETWORK_BACK_HOLD_MS = 5_000L
+    private const val NETWORK_BACK_TAG = "network-back"
+
     /** How long the service may take to start a node once the app is gone. */
     private const val APP_GONE_HOLD_MS = 30_000L
 
@@ -96,6 +106,13 @@ object ZenPower {
 
     private val main = Handler(Looper.getMainLooper())
 
+    /**
+     * The default network as Android's callback last told it (`null`: none
+     * at all, such as with Wi-Fi and mobile data off). Main thread only.
+     */
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var defaultNetwork: Network? = null
+
     /** Where the alarms arrive: it only takes holds and hands work on. */
     private val wakeHandler: Handler by lazy {
         Handler(HandlerThread("zen-wake").apply { start() }.looper)
@@ -109,11 +126,15 @@ object ZenPower {
         clients.removeAll { it.engine === engine }
         val client = Client(engine, background)
         clients.add(client)
+        watchNetwork(app)
         val messenger = engine.dartExecutor.binaryMessenger
         EventChannel(messenger, "zen/power/events").setStreamHandler(
             object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) {
                     client.sink = sink
+                    if (networkCallback != null) {
+                        sink?.success(networkEvent())
+                    }
                 }
 
                 override fun onCancel(arguments: Any?) {
@@ -297,6 +318,65 @@ object ZenPower {
                 client.sink?.success(mapOf("type" to "appGone"))
             } catch (error: Exception) {
                 Log.w(TAG, "Telling the service the app is gone failed", error)
+            }
+        }
+    }
+
+    private fun networkEvent(): Map<String, Any> =
+        mapOf("type" to "network", "up" to (defaultNetwork != null))
+
+    /**
+     * Follows whether the phone has a network at all, by Android's
+     * default-network callback (no polling): with none, the engines' wakes
+     * rest instead of dialling, polling and checking a network that is not
+     * there, each wake held for its timeouts; once one is back, the work
+     * that waited runs at once, and the phone is held awake for it until
+     * Dart takes its own hold. A switch from one network to another (Wi-Fi
+     * to mobile data) is no change: only none at all is. Main thread,
+     * once per process; before Android 8 nothing is told and every engine
+     * works as if there were a network.
+     */
+    private fun watchNetwork(context: Context) {
+        if (networkCallback != null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return
+        }
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val wasNone = defaultNetwork == null
+                defaultNetwork = network
+                if (wasNone) {
+                    hold(context, NETWORK_BACK_TAG, NETWORK_BACK_HOLD_MS)
+                    sendToAll(networkEvent())
+                }
+            }
+
+            override fun onLost(network: Network) {
+                // A network that was replaced as the default is no loss.
+                if (network == defaultNetwork) {
+                    defaultNetwork = null
+                    sendToAll(networkEvent())
+                }
+            }
+        }
+        try {
+            defaultNetwork = connectivity.activeNetwork
+            // The callback on the main thread, where the event sinks are.
+            connectivity.registerDefaultNetworkCallback(callback, main)
+            networkCallback = callback
+        } catch (error: Exception) {
+            defaultNetwork = null
+            Log.w(TAG, "Following the network failed", error)
+        }
+    }
+
+    /** Main thread: every engine hears [event]. */
+    private fun sendToAll(event: Map<String, Any>) {
+        for (client in clients.toList()) {
+            try {
+                client.sink?.success(event)
+            } catch (error: Exception) {
+                Log.w(TAG, "A network change could not be delivered", error)
             }
         }
     }

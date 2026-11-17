@@ -2597,7 +2597,9 @@ const Duration kLinkCheckHold = Duration(seconds: 20);
 /// half an hour later: now until its next wake (about a quarter of an
 /// hour), and the stand-in is up before the phone sleeps again. The phone
 /// stays awake for the check ([kLinkCheckHold] at most): a link that is
-/// there answers within a second or so.
+/// there answers within a second or so. With no network at all it waits
+/// ([WakeBeat.networkChanged]) and runs first once one is back: the check
+/// has the node redial its peers at once (link_check.go).
 WakeTimer checkLinksOnWakes(
   Future<Map<String, dynamic>> Function() check, {
   WakeBeat? beat,
