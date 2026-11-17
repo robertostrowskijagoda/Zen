@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_video_quality.dart';
 
 /// Android-only hooks the call UI needs but Flutter does not expose.
@@ -204,6 +205,12 @@ void bindIncomingCallPlatformHandler(
           await pictureInPictureHangUp?.call();
         }
         return;
+      case 'onCallAudioRoute':
+        final CallAudioOutput? output = callAudioOutputForRoute(call.arguments);
+        if (output != null) {
+          callAudioRouteChanged?.call(output);
+        }
+        return;
     }
     if (call.method != 'onIncomingCallAction') {
       return;
@@ -223,6 +230,11 @@ void bindIncomingCallPlatformHandler(
 
 /// Picture-in-picture entered (true) or left (false); set by the call UI.
 void Function(bool inPip)? pictureInPictureChanged;
+
+/// A running call's sound went elsewhere by itself (a headset plugged in
+/// or out, a Bluetooth headset coming or going: ZenCallAudioRoute.kt), told
+/// as soon as it happens; set by the call UI.
+void Function(CallAudioOutput output)? callAudioRouteChanged;
 
 /// "Rozłącz" pressed in the picture-in-picture window; set by the call UI.
 Future<void> Function()? pictureInPictureHangUp;

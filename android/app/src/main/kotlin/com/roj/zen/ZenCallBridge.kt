@@ -97,6 +97,9 @@ object ZenCallBridge {
                     }
                     val window = applyKeepScreenOn(context)
                     val proximity = ZenCallProximity.hold(context, mode == "proximity")
+                    // While a call decides the screen, a headset plugged in
+                    // or out is told at once, so the decision follows it.
+                    ZenCallAudioRoute.watch(context, mode != "normal") { dispatchAudioRoute(it) }
                     result.success(if (mode == "proximity") proximity else window)
                 }
                 "setRingingCallActive" -> {
@@ -268,6 +271,18 @@ object ZenCallBridge {
             for (channel in channels) {
                 try {
                     channel.invokeMethod("onPipChanged", inPip)
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    /** The call's sound went elsewhere by itself ([ZenCallAudioRoute]): `bluetooth`, `wired`, `speaker`, `earpiece`. */
+    private fun dispatchAudioRoute(route: String) {
+        mainHandler.post {
+            for (channel in channels) {
+                try {
+                    channel.invokeMethod("onCallAudioRoute", route)
                 } catch (_: Exception) {
                 }
             }

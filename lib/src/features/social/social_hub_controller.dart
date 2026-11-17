@@ -31,6 +31,7 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/signal_routing_policy.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';

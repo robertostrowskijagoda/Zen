@@ -78,6 +78,10 @@ abstract class CallMediaSessionController extends ChangeNotifier {
   /// earphones): out loud, hands free, so "Głośnik" shows on.
   bool get audioOnHeadset => false;
 
+  /// The call's sound went to [output] by itself (a headset plugged in or
+  /// out): remembered as where it is now.
+  void noteAudioRoute(CallAudioOutput output) {}
+
   CallMediaStatusListener? get onStatusChanged;
   set onStatusChanged(CallMediaStatusListener? value);
 
@@ -1489,6 +1493,11 @@ final class WebRtcCallMediaSessionController
 
   @override
   bool get audioOnHeadset => _audioOutput == CallAudioOutput.headset;
+
+  @override
+  void noteAudioRoute(CallAudioOutput output) {
+    _audioOutput = output;
+  }
 
   /// The camera of a video call could not be opened (the call went on
   /// with sound only): tried again by [recoverCamera].

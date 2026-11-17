@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
+import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_screen_awake.dart';
 
 /// The screen stays on for the whole of a video call and of a call heard
@@ -203,6 +204,100 @@ void main() {
         CallScreenMode.proximity,
         CallScreenMode.normal,
       ]);
+    });
+  });
+
+  group('the sound moving by itself during the call', () {
+    // What Android tells at once (ZenCallAudioRoute.kt), as the app reads it.
+    CallSession moved(CallSession session, String route) {
+      final CallAudioOutput? output = callAudioOutputForRoute(route);
+      expect(output, isNotNull, reason: route);
+      return callSessionOnAudioRoute(session, output!) ?? session;
+    }
+
+    late List<CallScreenMode> asked;
+    late CallScreenAwake awake;
+
+    setUp(() {
+      asked = <CallScreenMode>[];
+      awake = CallScreenAwake(
+        setter: (CallScreenMode mode) async {
+          asked.add(mode);
+          return true;
+        },
+      );
+    });
+
+    test('earpiece to wired headset and back', () {
+      CallSession session = call(kind: CallInviteKind.audio);
+      awake.update(session);
+      expect(awake.mode, CallScreenMode.proximity);
+      session = moved(session, 'wired');
+      expect(session.isSpeakerOn, isTrue);
+      awake.update(session);
+      expect(awake.mode, CallScreenMode.keepOn);
+      session = moved(session, 'earpiece');
+      expect(session.isSpeakerOn, isFalse);
+      awake.update(session);
+      expect(awake.mode, CallScreenMode.proximity);
+      expect(asked, <CallScreenMode>[
+        CallScreenMode.proximity,
+        CallScreenMode.keepOn,
+        CallScreenMode.proximity,
+      ]);
+    });
+
+    test('earpiece to the loudspeaker', () {
+      final CallSession session = moved(
+        call(kind: CallInviteKind.audio),
+        'speaker',
+      );
+      awake.update(session);
+      expect(awake.mode, CallScreenMode.keepOn);
+    });
+
+    test('a Bluetooth headset connecting and going away', () {
+      CallSession session = call(kind: CallInviteKind.audio);
+      awake.update(session);
+      session = moved(session, 'bluetooth');
+      awake.update(session);
+      expect(awake.mode, CallScreenMode.keepOn);
+      session = moved(session, 'earpiece');
+      awake.update(session);
+      expect(awake.mode, CallScreenMode.proximity);
+    });
+
+    test('a headset taken out with the loudspeaker on keeps it on', () {
+      CallSession session = call(kind: CallInviteKind.audio, speaker: true);
+      session = moved(session, 'speaker');
+      expect(callScreenModeFor(session).mode, CallScreenMode.keepOn);
+    });
+
+    test('a video call keeps the screen on whatever the route', () {
+      for (final String route in <String>[
+        'earpiece',
+        'wired',
+        'bluetooth',
+        'speaker',
+      ]) {
+        expect(
+          callScreenModeFor(moved(call(), route)).mode,
+          CallScreenMode.keepOn,
+          reason: route,
+        );
+      }
+    });
+
+    test('the same route changes nothing; an unknown one is not read', () {
+      final CallSession atEar = call(kind: CallInviteKind.audio);
+      expect(callSessionOnAudioRoute(atEar, CallAudioOutput.earpiece), isNull);
+      final CallSession outLoud = call(
+        kind: CallInviteKind.audio,
+        speaker: true,
+      );
+      expect(callSessionOnAudioRoute(outLoud, CallAudioOutput.headset), isNull);
+      expect(callAudioOutputForRoute('hdmi'), isNull);
+      expect(callAudioOutputForRoute(null), isNull);
     });
   });
 }
