@@ -10,6 +10,32 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### What's new
+- [en] Your backup with friends is safer: a lost phone's copy stays, and switching passwords off removes them from friends at once.
+- [en] Photos sent from a computer no longer carry where they were taken, and plugging in earphones during a call switches the screen at once.
+- [en] Fixes to privacy over Bluetooth and Wi-Fi nearby, and nothing a friend did is lost during a busy start.
+- [pl] Kopia u znajomych jest bezpieczniejsza: kopia zgubionego telefonu zostaje, a wyłączenie haseł od razu usuwa je u znajomych.
+- [pl] Zdjęcia wysłane z komputera nie zdradzają już, gdzie je zrobiono, a podłączenie słuchawek w trakcie rozmowy od razu przełącza ekran.
+- [pl] Poprawki prywatności przez Bluetooth i Wi-Fi w pobliżu, a nic, co zrobił znajomy, nie ginie przy zajętym starcie.
+
+### Fixes and changes
+**Read this first.** These fixes come from a second review of the last audit's fixes on 1.18.0. None was tried on a phone. Some need this version on both sides, as each entry says.
+- **A thief's device no longer counts at once with someone who befriends you shortly after it appeared**: a phone meeting an account took at once every device it saw in the first hour, including one nobody co-signed, and that device could then cut your own device off there. Now the new friend takes at once only the device it met you by and the devices that co-signed it; any other device waits its day, as with your older friends. A phone restored from the account key alone may now wait about two days before friends hand it what they hold for the account.
+- **The copy your lost phone made stays with your friends after you cut that phone off**: friends dropped any copy signed by a device cut off later, so losing a phone, recovering and cutting it off could destroy the only copy. Now only new copies from such a device are refused; a copy taken while its device counted stays until a newer one replaces it.
+- **Restoring from a backup file no longer replaces your friends' newer copy**: that way of restoring did not mark a restore, so the phone's own nearly empty copy went to friends at once. Now the phone looks for the friends' copy first, as after any recovery.
+- **Switching "Hasła w kopii u znajomych" off no longer leaves your passwords with friends for a month**: when the new copy was much smaller, friends kept the old one, passwords included, for 30 days. The new copy now says, signed, when the passwords were switched off, and friends keep no older copy (friends need this version).
+- **A hidden account can no longer be told apart by what it stores**: the decoy accounts had no `circle-backup/previous`, and five more stored names (meeting notes and albums, alarm sounds, people hidden by you) had no decoy either. Now they all do.
+- **A HEIC photo sent from a computer or an older Android phone no longer carries where it was taken**: where no decoder could read it, it went with its whole EXIF, GPS included. Its EXIF and XMP are now overwritten in place without decoding the picture, and a photo, film or recording that still goes unchanged says so every time.
+- **Nothing a friend did is lost in a busy start**: while the friend list could not be read, only messages were held back; a group leave, a friend removal, a deletion or a reaction was confirmed to its sender and dropped. Now everything a person did waits until the app has kept it.
+- **A banned or hidden dating profile no longer announces itself**: it was kept out of the lists but still sent "Nowe dopasowanie".
+- **In a very large group, a friend who is not a member can no longer make a locked phone ring**: past the size the locked phone's notice kit can list, the locked phone now stays quiet for that group; the app shows everything once open.
+- **A chat's file is no longer swept as unused because its address was spelled differently**.
+- **Plugging in or removing earphones or a Bluetooth headset during a call switches the screen at once**: the app knew the route only from its own choices, so the screen went dark with the phone on the table, or stayed lit at the ear, until the call's next change. Android now tells the app every new route as it happens, and "Głośnik" and the screen follow (Android).
+- **Someone listening over Bluetooth can no longer follow an Android phone from one advert to the next**: the phone put the number of its Bluetooth channel in every advert, and that number stayed the same for days. Now only a phone that is about to connect reads it. Linux computers, which cannot answer that question, still send it.
+- **Three holes in the local links are closed**: a household's door could use the same public node operator as its owner's phone while its link worked; a stranger on the Wi-Fi could hold every handshake slot with four hosts that stalled after a valid opening; and a forged LAN beacon could make the phone dial any host and port. The door now moves either way; each handshake step has its own short deadline, with three starts per address in 15 seconds; and a beacon can only make the phone dial Zen's link ports (39320–39335), at most four times in 15 seconds. A device of an older version that listens on another port is reached over the internet until it is updated.
+- **A pyramid treasurer using two devices is no longer at risk of being shown as having signed two seals of one era**: the second device sealed with the same key from a ledger it never fully received; now only the device at the address in the treasurer's member record seals.
+- **A seal made at a heavier password cost is no longer refused**: a recovery piece or a full account copy sealed with 128 MiB of memory and 3 passes was rejected as unknown. Opening accepts that cost besides the usual 64 MiB and 2 passes; every other cost is still refused before any work is done.
+
 ## 1.18.0 — 17.11.2026
 
 ### What's new
