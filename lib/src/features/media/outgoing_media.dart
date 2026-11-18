@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:zen/src/core/utils/background_work.dart';
 import 'package:zen/src/features/feed/video_metadata.dart';
 import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/heif_metadata.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 
 // What leaves this device keeps the picture, the film or the sound, never
@@ -15,6 +16,8 @@ import 'package:zen/src/features/media/media_guard.dart';
 // of every kind it knows without re-encoding anything:
 //  - films and recordings in MP4 / MOV / 3GP / M4A: `video_metadata.dart`
 //    (the place, the dates, the maker and model, XMP);
+//  - HEIC/HEIF and AVIF the phone could not decode: the bytes of their
+//    EXIF and XMP items blanked in place (`heif_metadata.dart`);
 //  - JPEG: EXIF (GPS, camera, dates), XMP, IPTC, comments, maker data and
 //    whatever follows the picture (the second pictures and trailers phones
 //    add, with an EXIF of their own); the turn of the picture is kept;
@@ -22,13 +25,19 @@ import 'package:zen/src/features/media/media_guard.dart';
 //  - GIF: comments and application data (`gif_files.dart`);
 //  - MP3: ID3 and APE tags; WAV: everything but the sound's own chunks;
 //    FLAC: tags, pictures and application blocks.
-// A kind this does not know (an Ogg recording, a WebM film, a HEIC photo
-// the phone could not decode, a document) is left as it is:
-// [canStripMetadata] says which ones Zen cannot clean, and the attach flow
-// says so to the person.
+// A kind this does not know (an Ogg recording, a WebM film, a document) is
+// left as it is, and so is a HEIC/AVIF picture whose boxes are not what
+// `heif_metadata.dart` understands: [canStripMetadata] says which kinds
+// Zen cannot clean, and the attach flow says so to the person.
 
-/// The largest film, recording or file read whole to take its metadata
-/// out before it is sent; a bigger one goes as it is.
+/// The largest photo, film, recording or file read whole to take its
+/// metadata out before it is sent; a bigger one goes as it is, and the
+/// attach flow says so every time for a photo, a film or a recording
+/// (`tellFilesGoUnchanged`). A photo can be that large (a stitched
+/// panorama, a scan) but none reaches anyone: a friend's app takes no chat
+/// attachment over `kMaxIncomingAttachmentBytes` (22 MB), a group none over
+/// `kMaxGroupAttachmentBytes`, and a post re-encodes its photos and takes
+/// films up to `kMaxVideoBytes`.
 const int kMaxCleanedTransferBytes = 64 * 1024 * 1024;
 
 /// Whether [head] (the first bytes of a file) is a kind whose location,
@@ -42,9 +51,10 @@ bool canStripMetadata(Uint8List head) {
     return true; // BMP: no metadata
   }
   if (isIsoMedia(head)) {
-    // A HEIC picture's metadata sits beside the picture in its `meta` box:
-    // only decoding it leaves the picture alone.
-    return !isIsoPicture(head);
+    // A film's boxes (`video_metadata.dart`) or a HEIC/AVIF picture's
+    // (`heif_metadata.dart`; one whose boxes it does not understand stays
+    // as it is, and the attach flow says so).
+    return true;
   }
   return _startsWithText(head, '#!AMR') ||
       _isMp3(head) ||
@@ -68,7 +78,9 @@ Uint8List stripOutgoingMetadata(Uint8List bytes) {
     } else if (looksLikeGif(bytes)) {
       clean = stripGifMetadata(bytes);
     } else if (isIsoMedia(bytes)) {
-      clean = isIsoPicture(bytes) ? null : stripVideoMetadata(bytes);
+      clean = isIsoPicture(bytes)
+          ? stripHeifMetadata(bytes)
+          : stripVideoMetadata(bytes);
     } else if (_isWav(bytes)) {
       clean = _stripRiff(bytes, (String id) => !_wavKept.contains(id));
     } else if (_startsWithText(bytes, 'fLaC')) {
@@ -118,6 +130,11 @@ Uint8List stripOutgoingMetadata(Uint8List bytes) {
 // suspended frame along, which cannot be sent to another isolate.
 Future<Uint8List> stripOutgoingMetadataSized(Uint8List bytes) =>
     runSizedWork<Uint8List>(bytes.length, () => stripOutgoingMetadata(bytes));
+
+/// [stripHeifMetadata] off the UI thread when [bytes] are big: null when
+/// the picture's boxes are not understood and nothing was cleaned.
+Future<Uint8List?> stripHeifMetadataSized(Uint8List bytes) =>
+    runSizedWork<Uint8List?>(bytes.length, () => stripHeifMetadata(bytes));
 
 bool _same(Uint8List a, Uint8List b) {
   if (identical(a, b)) {

@@ -454,7 +454,8 @@ final class OutgoingAttachment {
     this.path,
     this.gifProblem,
     this.unchanged = false,
-  });
+    this.unchangedMedia = false,
+  }) : assert(!unchangedMedia || unchanged);
 
   final OutgoingKind kind;
   final String fileName;
@@ -477,6 +478,13 @@ final class OutgoingAttachment {
   /// ([tellFilesGoUnchanged]).
   final bool unchanged;
 
+  /// It is a photo, a film or a recording that goes [unchanged], with the
+  /// place, time and device data written in it: a HEIC/AVIF photo whose
+  /// boxes Zen does not understand, a kind of recording or film it cannot
+  /// clean (Ogg, WebM), or one over [kMaxCleanedTransferBytes]. Said every
+  /// time, not once like other files.
+  final bool unchangedMedia;
+
   /// The kind of chat message it goes as.
   ChatMessageType get chatType => switch (kind) {
     OutgoingKind.photo || OutgoingKind.gif => ChatMessageType.image,
@@ -492,10 +500,14 @@ const int kMaxTransferPhotoBytes = 40 * 1024 * 1024;
 /// files, a drop, the clipboard, the keyboard): a photo as a fresh JPEG
 /// without metadata, a HEIC or AVIF photo too once the phone's own decoder
 /// read it ([decode], `platform_picture.dart`), a GIF still animated
-/// (without metadata, see `gif_files.dart`), a film and any other file
-/// without the location, device and time data Zen knows how to remove
+/// (without metadata, see `gif_files.dart`), a HEIC or AVIF photo the
+/// phone cannot decode (Windows, Linux, Android before 9) as a file with
+/// its EXIF and XMP blanked (`heif_metadata.dart`), a film and any other
+/// file without the location, device and time data Zen knows how to remove
 /// (`outgoing_media.dart`); a file it cannot clean goes as it is, marked
-/// [OutgoingAttachment.unchanged]. Null when it cannot be read.
+/// [OutgoingAttachment.unchanged] (and [OutgoingAttachment.unchangedMedia]
+/// when it is a photo, a film or a recording). Null when it cannot be
+/// read.
 Future<OutgoingAttachment?> prepareOutgoing(
   TransferItem item, {
   PlatformPictureDecoder decode = decodeWithPlatform,
@@ -601,21 +613,31 @@ Future<OutgoingAttachment?> prepareOutgoing(
         // Not a picture this can read: it goes as a file below.
       }
     }
-    // A film, a recording or a file: its metadata out where Zen knows the
-    // kind, kept from the path when there was nothing to remove.
+    // A film, a recording, a photo no decoder here read, or a file: its
+    // metadata out where Zen knows the kind, kept from the path when there
+    // was nothing to remove.
     final bool video = kind == MediaKind.video;
+    final bool isoPicture = isIsoPicture(head);
+    OutgoingAttachment asItIs() => OutgoingAttachment(
+      kind: video ? OutgoingKind.video : OutgoingKind.file,
+      fileName: item.name,
+      mimeType: sniffMimeType(head) ?? (video ? 'video/mp4' : null),
+      bytes: given,
+      path: given == null ? path : null,
+      unchanged: true,
+      unchangedMedia: kind != MediaKind.file || isoPicture,
+    );
     if (!canStripMetadata(head) || size > kMaxCleanedTransferBytes) {
-      return OutgoingAttachment(
-        kind: video ? OutgoingKind.video : OutgoingKind.file,
-        fileName: item.name,
-        mimeType: sniffMimeType(head) ?? (video ? 'video/mp4' : null),
-        bytes: given,
-        path: given == null ? path : null,
-        unchanged: true,
-      );
+      return asItIs();
     }
     final Uint8List original = await whole();
-    final Uint8List clean = await stripOutgoingMetadataSized(original);
+    final Uint8List? clean = isoPicture
+        ? await stripHeifMetadataSized(original)
+        : await stripOutgoingMetadataSized(original);
+    if (clean == null) {
+      // A HEIC/AVIF picture whose boxes are not understood.
+      return asItIs();
+    }
     final bool kept = identical(clean, original) && given == null;
     return OutgoingAttachment(
       kind: video ? OutgoingKind.video : OutgoingKind.file,
@@ -632,30 +654,49 @@ Future<OutgoingAttachment?> prepareOutgoing(
 /// Whether this run of the app already said that a file goes unchanged.
 bool _toldFilesGoUnchanged = false;
 
-/// Says once in a run of the app, as [attachment] goes, that a file Zen
-/// cannot clean goes exactly as it is, with what is written in it (the
-/// author, sometimes the place). Photos, films and recordings never come
-/// here: they go without that data.
+/// Says, as [attachment] goes, that a file Zen cannot clean goes exactly
+/// as it is, with what is written in it: for a photo, a film or a
+/// recording ([OutgoingAttachment.unchangedMedia]: a HEIC/AVIF photo whose
+/// boxes Zen does not understand, an Ogg or WebM, one over
+/// [kMaxCleanedTransferBytes]) every time, as it may carry the place; for
+/// any other file once in a run of the app (the author, sometimes the
+/// place).
 void tellFilesGoUnchanged(BuildContext context, OutgoingAttachment attachment) {
-  if (!attachment.unchanged || _toldFilesGoUnchanged || !context.mounted) {
+  final bool media = attachment.unchangedMedia;
+  if (!attachment.unchanged ||
+      (!media && _toldFilesGoUnchanged) ||
+      !context.mounted) {
     return;
   }
   final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
   if (messenger == null) {
     return;
   }
-  _toldFilesGoUnchanged = true;
+  if (!media) {
+    _toldFilesGoUnchanged = true;
+  }
+  final Map<String, Object> name = <String, Object>{
+    'name': attachment.fileName,
+  };
   messenger.showSnackBar(
     SnackBar(
-      key: const Key('file-goes-unchanged'),
+      key: Key(media ? 'media-goes-unchanged' : 'file-goes-unchanged'),
       duration: const Duration(seconds: 8),
       content: Text(
-        t(
-          '„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane '
-          'urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, '
-          'więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).',
-          <String, Object>{'name': attachment.fileName},
-        ),
+        media
+            ? t(
+                '„{name}” idzie bez zmian: Zen nie umiał usunąć z niego '
+                'miejsca, czasu i danych urządzenia, więc idą razem z nim, '
+                'jeśli je zapisano.',
+                name,
+              )
+            : t(
+                '„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane '
+                'urządzenia ze zdjęć, filmów i nagrań; z innych plików nie '
+                'umie, więc idą z tym, co w nich zapisano (np. autor, czasem '
+                'miejsce).',
+                name,
+              ),
       ),
     ),
   );
