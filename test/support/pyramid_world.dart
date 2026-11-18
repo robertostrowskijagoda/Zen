@@ -121,6 +121,7 @@ final class PyramidWorld {
     LedgerDisk? disk,
     FriendLevel? Function(String address)? friendLevelOf,
     bool fromAccount = false,
+    Iterable<String> Function()? otherDevices,
   }) {
     final SimPhone p = net.phone(name);
     final LedgerDisk d = disk ?? MemoryLedgerDisk();
@@ -133,6 +134,7 @@ final class PyramidWorld {
       tallyWait: const Duration(minutes: 30),
       recordSegmentEntries: recordSegmentEntries,
       friendLevelOf: friendLevelOf,
+      otherDevices: otherDevices,
       // Friends' friend lists, as the app's address book shares them.
       friendsOf: (String f) => <String, String>{
         for (final String a in net.byAddress[f]?.friendSet ?? const <String>{})
