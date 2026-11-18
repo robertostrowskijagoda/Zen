@@ -173,9 +173,12 @@ void main() {
     final String spelled = _otherSpelling(w['A'].address);
     expect(spelled, isNot(w['A'].address));
     expect(PeerShareCodec.addressesEqual(spelled, w['A'].address), isTrue);
+    final MediaVault vault = w['B'].container.read(mediaVaultProvider);
     await w['B'].hub.sendLocalAttachment(
       peerAddress: spelled,
-      bytes: Uint8List.fromList(utf8.encode('plik f6')),
+      attachmentPath: await vault.put(
+        Uint8List.fromList(utf8.encode('plik f6')),
+      ),
       fileName: 'lista.txt',
       mimeType: 'text/plain',
     );
