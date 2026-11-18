@@ -822,8 +822,10 @@ a computer's tray too) writes its own notice kit, and a runner without one
 stays quiet (it used to ring and show the call card with "Połączenia" off,
 with "Powiadomienia z tego konta" off and for muted chats, and a hidden
 account gave itself away). "Odbierz" opens the account that is called, a
-muted friend's other devices stay quiet, and groups past the kit's size no
-longer go silent. One test runs the same signals through the app and
+muted friend's other devices stay quiet, and in groups past the kit's size
+(whose members it cannot list) nothing rings or is told of while locked:
+the background capability's word let any friend ring there, in a group they
+are not in. One test runs the same signals through the app and
 through every runner. Within an account: nothing with "Połączenia" off; a call
 only from a friend, or a group call from someone who speaks in that joined
 group; a group message only from someone who speaks in that group; a

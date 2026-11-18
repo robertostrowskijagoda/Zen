@@ -693,6 +693,8 @@ final class FriendsPhone implements RelayPeerSource {
       _appFrames.add(next);
       final String? from = _speakerOf(next.from);
       if (from == null) {
+        // Settled for the relay layer, as AccountRoutingTransport does.
+        await reportReliableKept(next.payload, kept: true);
         continue;
       }
       final Object? type = next.payload['type'];
@@ -711,6 +713,7 @@ final class FriendsPhone implements RelayPeerSource {
             p is Map<String, dynamic>) {
           await (mirrored ?? hub.recordMirroredSend)(to, p);
         }
+        await reportReliableKept(next.payload, kept: true);
         continue;
       }
       final bool? keeps = appKeeps == null ? true : appKeeps!(next);

@@ -3432,8 +3432,11 @@ final class DatingService extends ChangeNotifier {
     );
     _profiles[profile.key] = seen;
     await _save();
-    // Nothing about a profile the filter keeps out of view.
-    if (had == null && _passes(seen)) {
+    // Nothing about a profile the filter keeps out of view, nor about one
+    // that may not reach this person ([_shown]: switched off by the
+    // pyramid or by a report, hidden after one). It is kept all the same,
+    // and shows in the lists once that ends.
+    if (had == null && _shown(profile.key) && _passes(seen)) {
       final String name = profile.name;
       await host.notify(
         RuntimeSystemNotification(

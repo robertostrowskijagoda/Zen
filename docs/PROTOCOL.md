@@ -614,7 +614,9 @@ decided yet is put off and comes again, not dropped and confirmed: while the
 friend list could not be read (a busy start) a message was dropped and still
 confirmed (the sender saw "delivered" for a message that was gone); the same
 for a message that overtook its sender's acceptance, and an edit that came
-before its message was confirmed while it waited in memory only.
+before its message was confirmed while it waited in memory only. A group
+invite or leave, a friend removal, a deletion, a reaction or a timer change
+that came while the friend list could not be read is put off the same way.
 
 **Disappearing timers** carry a stamp: a message carries when its sender's
 timer was set (`ttlAt`, beside `ttl`), and `disappear_timer` carries it as
@@ -1614,15 +1616,20 @@ account's other devices take in what it lists, and its removals.
   `sender|_rid` for 14 days. Types that must go direct only
   (`_directOnlyPayloadTypes`: `friend_request`, `flat_*`) are never mailboxed.
   `_once: true` marks a payload to send once, not queued.
-- **Acknowledged once stored:** a chat message (`message`, `group_message`)
-  is acknowledged to its sender (`rly_ack`), remembered as seen and taken
-  out of the mailboxes only once the app said it has it on its disk
-  (`reportReliableKept`). A message the app failed to store (killed in
-  between, a full disk, a locked store) is not acknowledged: the sender or
-  a mailbox brings it again, and that copy is handed to the app again.
-  Further copies wait for the app's word for at most 1 minute
-  (`appKeepWait`); after a restart nothing was acknowledged. Every other
-  reliable payload is acknowledged as it arrives.
+- **Acknowledged once stored:** everything a person did
+  (`relayIsPersonalPayload`: a chat or group message, an edit, a deletion,
+  a reaction, a timer change, a group invite or leave, a friend removal
+  and the rest) is acknowledged to its sender (`rly_ack`), remembered as
+  seen and taken out of the mailboxes only once the app said it kept it or
+  refused it for good (`reportReliableKept`). One the app failed to store
+  (killed in between, a full disk, a locked store) or put off (the friend
+  list could not be read) is not acknowledged: the sender or a mailbox
+  brings it again, and that copy is handed to the app again. Further
+  copies wait for the app's word for at most 1 minute (`appKeepWait`);
+  after a restart nothing was acknowledged. What the app sends by itself
+  and gets again anyway, parts and blob manifests (taken in by the relay
+  layer) are acknowledged as they arrive; an own device's copy and a frame
+  from an unlinked device once the account routing has taken them.
 - The payload is written to disk before the first direct attempt. Direct
   retry schedule: 3 s, 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, 4 h, then
   every 4 h; any sign of life of the recipient, and a restart or 10 minutes
@@ -1816,8 +1823,9 @@ relays.
   a member, at most 5 per sender in 10 minutes; muted conversations; the
   group id as the app reads it. Who speaks in each joined group is in the
   kit as tags (`gt`: the first 32 hex of SHA-256(`group key + "\n" +
-  address`), unkeyed), so the kit names no member. What the kit does not
-  know counts as "no". A kit written before 1.16.5 has no tags: until the
+  address`), unkeyed), so the kit names no member; at most 20000 tags, and
+  a group whose tags do not fit (`gx`) is quiet while locked. What the kit
+  does not know counts as "no". A kit written before 1.16.5 has no tags: until the
   app is unlocked once and writes a new one, the background capability's
   friends and group members count, as before.
 - **Mail for a locked phone** (`rly_mail` to the locked service) is kept

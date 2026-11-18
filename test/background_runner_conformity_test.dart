@@ -672,8 +672,8 @@ void main() {
     expect(own.callCardFor(_ada), (name: 'Ada', route: ''));
   });
 
-  test('groups past the kit\'s member tags still ring and tell, from the '
-      'capability\'s word, not from nobody\'s', () async {
+  test('groups past the kit\'s member tags stay quiet while locked: no '
+      'friend outside them, nor anyone, rings or is told of there', () async {
     // 120 groups of 200 members: more than the kit keeps tags for.
     final Map<String, GroupProfile> groups = <String, GroupProfile>{
       for (int g = 0; g < 120; g++)
@@ -726,7 +726,36 @@ void main() {
         'callId': 'g119',
       },
     );
-    expect(await onRunner(_node(home), call), 'ring');
+    // Who speaks in it is not known while locked: the app's rule (only
+    // someone who speaks in the group rings or is told of) cannot be
+    // applied, so nobody does, a friend who is no member least of all.
+    expect(await onRunner(_node(home), call), 'nothing');
+    expect(
+      await onRunner(_node(home), (
+        name: 'a friend outside the last group calling in it',
+        from: _ada,
+        payload: <String, dynamic>{
+          'type': 'group_call_invite',
+          'groupId': 'grp119',
+          'callId': 'g119a',
+        },
+      )),
+      'nothing',
+    );
+    expect(
+      await onRunner(_node(home), (
+        name: 'a friend outside the last group writing in it',
+        from: _ada,
+        payload: <String, dynamic>{
+          'type': 'group_message',
+          'groupId': 'grp119',
+          'msgId': 'm119a',
+          '_rid': 'm119a',
+          'text': 'Kto idzie?',
+        },
+      )),
+      'nothing',
+    );
     // A made-up group stays quiet.
     expect(
       await onRunner(_node(home), (
