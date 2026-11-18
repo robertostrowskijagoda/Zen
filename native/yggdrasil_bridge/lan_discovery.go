@@ -9,6 +9,7 @@ import (
 	"net"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,7 +38,28 @@ import (
 // mobile data. iPhone: sending broadcasts needs Apple's multicast
 // entitlement, so the iPhone only answers links started by others.
 const (
-	lanBeaconPort            = 39319
+	lanBeaconPort = 39319
+	// Links go to a TCP port among these (the first one free), and a beacon
+	// makes a device dial nothing else: with any port above 1023, a forged
+	// beacon had a phone connect to whatever service on the LAN its sender
+	// wanted to learn of.
+	lanLinkPortFirst = 39320
+	lanLinkPorts     = 16
+	// Dials beacons lead to, in all, at most per window: each dial goes to
+	// the beacon's own source, but anyone on the Wi-Fi can make that up,
+	// and a new made-up source each time pulled a dial each time. Devices
+	// not linked yet beyond these wait for the next window.
+	lanDialWindow        = 15 * time.Second
+	lanMaxDialsPerWindow = 4
+	// A TCP connection on the LAN is made in milliseconds; a dial to an
+	// address where nothing answers gives its handshake slot back soon.
+	lanDialTimeout = 2 * time.Second
+	// A recognised beacon counts once while its advert is good (its slot,
+	// give or take localLinkMaxSlotSkew): the same beacon again, from
+	// another source above all, is someone playing back a friend's beacon
+	// to be dialled.
+	lanHeardSaltMemory = localLinkSlot * (2*localLinkMaxSlotSkew + 1)
+
 	lanDefaultBeaconInterval = 10 * time.Second
 	lanMinBeaconInterval     = 5 * time.Second
 	lanMaxBeaconInterval     = 5 * time.Minute
@@ -51,7 +73,16 @@ const (
 	// Handshakes with one address at once: a dial and an accept may cross,
 	// but one device cannot take every slot.
 	lanMaxHandshakesPerSource = 2
-	lanMaxDatagram            = 1472
+	// Handshakes one address may start in lanHandshakeStartWindow. A
+	// stranger's handshake ends within localFirstFrameTimeout plus
+	// localStageTimeout (4 s), but one that reconnected at once kept its
+	// slots for good, and four addresses held all eight. Rationed, one
+	// address holds a slot 3 × 4 s in 15 s, 0.8 of one on average, so ten
+	// are needed to hold them all. A friend's device starts one every
+	// lanDialInterval at most (two when a dial and an accept cross).
+	lanHandshakeStartWindow     = 15 * time.Second
+	lanHandshakeStartsPerSource = 3
+	lanMaxDatagram              = 1472
 	// Own beacons come back on some systems; their salts are remembered.
 	lanOwnSaltMemory = 2 * time.Minute
 	// Senders remembered per rate limit before the old ones are dropped.
@@ -237,8 +268,14 @@ type lanDiscovery struct {
 	lastDial    map[string]time.Time
 	handshakes  int
 	perSource   map[string]int
+	starts      map[string]lanStarts
 	windowStart time.Time
 	windowCount int
+	// Dials in the window that began at dialWindowStart.
+	dialWindowStart time.Time
+	dialWindowCount int
+	// Salts of the recognised beacons heard lately.
+	heardSalts map[[4]byte]time.Time
 	// Nearby adverts heard while the app looks around (lan_nearby.go).
 	nearby map[[lanNearbyAdvertBytes]byte]lanNearbyHeard
 
@@ -267,7 +304,7 @@ func startLanDiscovery(m *localLinkManager, beaconSeconds int) (*lanDiscovery, e
 	if err != nil {
 		return nil, fmt.Errorf("beacon port %d: %w", lanBeaconPort, err)
 	}
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := listenLanLinks("")
 	if err != nil {
 		_ = udp.Close()
 		return nil, err
@@ -291,6 +328,25 @@ func startLanDiscovery(m *localLinkManager, beaconSeconds int) (*lanDiscovery, e
 	go lan.readLoop()
 	go lan.acceptLoop()
 	return lan, nil
+}
+
+// listenLanLinks listens for links on host ("": every interface), on the
+// first free one of the link ports.
+func listenLanLinks(host string) (net.Listener, error) {
+	var last error
+	for port := lanLinkPortFirst; port < lanLinkPortFirst+lanLinkPorts; port++ {
+		listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+		if err == nil {
+			return listener, nil
+		}
+		last = err
+	}
+	return nil, fmt.Errorf("link ports %d-%d: %w", lanLinkPortFirst, lanLinkPortFirst+lanLinkPorts-1, last)
+}
+
+// lanLinkPort tells whether a beacon may make this device dial port.
+func lanLinkPort(port int) bool {
+	return port >= lanLinkPortFirst && port < lanLinkPortFirst+lanLinkPorts
 }
 
 func (lan *lanDiscovery) stop() {
@@ -487,10 +543,11 @@ func lanShouldDial(self string, candidates []*localPeer) bool {
 
 // lanBeaconFromNearby tells whether a beacon from src naming port may come
 // from a Zen device on one of this device's local networks: every beacon
-// goes out from the beacon port, and names the TCP port the system gave
-// the device's listener (never a well-known one). Anything else would have
-// this device answer hosts far away (a computer with a public address), or
-// connect to a printer's or a router's port and write there.
+// goes out from the beacon port, and names no well-known port (a dial goes
+// only to a link port, lanLinkPort; a device of an older version names a
+// port the system gave it, and is still answered). Anything else would
+// have this device answer hosts far away (a computer with a public
+// address), or connect to a printer's or a router's port and write there.
 func (lan *lanDiscovery) lanBeaconFromNearby(src *net.UDPAddr, port int) bool {
 	return src != nil && src.IP.To4() != nil && src.Port == lanBeaconPort && port >= 1024 && lan.onLan(src.IP)
 }
@@ -521,8 +578,12 @@ func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
 		// Someone looks around: this device answers at once.
 		lan.reply(src.IP, now)
 	}
+	matched := matchLocalAdvert(lan.m.peers(), beacon.advert, now)
+	if len(matched) == 0 || !lan.firstHearing(beacon.advert, now) {
+		return
+	}
 	var candidates []*localPeer
-	for _, peer := range matchLocalAdvert(lan.m.peers(), beacon.advert, now) {
+	for _, peer := range matched {
 		if !lan.m.hasLink(peer.address) && lan.m.mayLink(peer.address) {
 			candidates = append(candidates, peer)
 		}
@@ -535,6 +596,33 @@ func (lan *lanDiscovery) handleBeacon(packet []byte, src *net.UDPAddr) {
 		return
 	}
 	lan.reply(src.IP, now)
+}
+
+// firstHearing tells whether a recognised beacon's advert is heard for the
+// first time, and remembers its salt (lanHeardSaltMemory). A beacon proves
+// no key (it has no field to answer a challenge with), but a friend's real
+// one reaches this device as its broadcast goes out: a copy played back
+// from a made-up source comes after it and is dropped.
+func (lan *lanDiscovery) firstHearing(advert []byte, now time.Time) bool {
+	var salt [4]byte
+	copy(salt[:], advert[3:7])
+	lan.mu.Lock()
+	defer lan.mu.Unlock()
+	if lan.heardSalts == nil {
+		lan.heardSalts = map[[4]byte]time.Time{}
+	}
+	if at, ok := lan.heardSalts[salt]; ok && now.Sub(at) < lanHeardSaltMemory {
+		return false
+	}
+	lan.heardSalts[salt] = now
+	if len(lan.heardSalts) > lanMaxRemembered {
+		for s, at := range lan.heardSalts {
+			if now.Sub(at) >= lanHeardSaltMemory {
+				delete(lan.heardSalts, s)
+			}
+		}
+	}
+	return true
 }
 
 // reply sends a beacon straight back, so the other device can connect;
@@ -558,17 +646,46 @@ func (lan *lanDiscovery) reply(ip net.IP, now time.Time) {
 	}
 }
 
+// lanStarts counts the handshakes one address started in the window that
+// began at since.
+type lanStarts struct {
+	since time.Time
+	count int
+}
+
 // takeHandshake takes one of the handshake slots for the address source:
 // at most lanMaxHandshakes in all and lanMaxHandshakesPerSource for one
-// address.
+// address at once, and lanHandshakeStartsPerSource for one address in a
+// window.
 func (lan *lanDiscovery) takeHandshake(source string) bool {
+	return lan.takeHandshakeAt(source, time.Now())
+}
+
+func (lan *lanDiscovery) takeHandshakeAt(source string, now time.Time) bool {
 	lan.mu.Lock()
 	defer lan.mu.Unlock()
-	if lan.handshakes >= lanMaxHandshakes || lan.perSource[source] >= lanMaxHandshakesPerSource {
+	if lan.starts == nil {
+		lan.starts = map[string]lanStarts{}
+	}
+	started := lan.starts[source]
+	if now.Sub(started.since) >= lanHandshakeStartWindow {
+		started = lanStarts{since: now}
+	}
+	if lan.handshakes >= lanMaxHandshakes || lan.perSource[source] >= lanMaxHandshakesPerSource ||
+		started.count >= lanHandshakeStartsPerSource {
 		return false
 	}
 	lan.handshakes++
 	lan.perSource[source]++
+	started.count++
+	lan.starts[source] = started
+	if len(lan.starts) > lanMaxRemembered {
+		for key, entry := range lan.starts {
+			if now.Sub(entry.since) >= lanHandshakeStartWindow {
+				delete(lan.starts, key)
+			}
+		}
+	}
 	return true
 }
 
@@ -583,7 +700,13 @@ func (lan *lanDiscovery) releaseHandshake(source string) {
 	lan.mu.Unlock()
 }
 
+// dial connects to a device whose beacon this one recognised, at the
+// beacon's source: only on a link port, on a local network, once per
+// address per lanDialInterval and lanMaxDialsPerWindow in all.
 func (lan *lanDiscovery) dial(ip net.IP, port int, now time.Time) {
+	if !lanLinkPort(port) {
+		return
+	}
 	key := ip.String()
 	lan.mu.Lock()
 	if last, ok := lan.lastDial[key]; ok && now.Sub(last) < lanDialInterval {
@@ -593,13 +716,23 @@ func (lan *lanDiscovery) dial(ip net.IP, port int, now time.Time) {
 	lan.lastDial[key] = now
 	pruneLanTimes(lan.lastDial, now, lanDialInterval)
 	ifi, onLan := lanInterfaceFor(lan.interfaces, ip)
+	if onLan {
+		if now.Sub(lan.dialWindowStart) >= lanDialWindow {
+			lan.dialWindowStart, lan.dialWindowCount = now, 0
+		}
+		if lan.dialWindowCount >= lanMaxDialsPerWindow {
+			onLan = false
+		} else {
+			lan.dialWindowCount++
+		}
+	}
 	lan.mu.Unlock()
 	if !onLan || !lan.takeHandshake(key) {
 		return
 	}
 	go func() {
 		defer lan.releaseHandshake(key)
-		conn, err := net.DialTimeout("tcp", (&net.TCPAddr{IP: ip, Port: port}).String(), 5*time.Second)
+		conn, err := net.DialTimeout("tcp", (&net.TCPAddr{IP: ip, Port: port}).String(), lanDialTimeout)
 		if err != nil {
 			return
 		}

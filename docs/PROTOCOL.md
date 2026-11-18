@@ -69,7 +69,9 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   same next one. A computer's built-in selection is spread the same way
   (countries first, each country's peers in its own order). The door host
   (`door_node.go`) takes a peer of a different operator than the main
-  node's, so no operator links the sticker on a door with the person.
+  node's, so no operator links the sticker on a door with the person; when
+  the main node's rotation reaches the door host's operator, the door host
+  moves to another at its next check, even while its link works.
 - **Port mapping** (`port_mapper.dart`): the SSDP search is believed only
   from the default gateway (the router that forwards a port to this
   computer is the gateway), its `LOCATION` must name that same address,
@@ -339,7 +341,8 @@ device keys, label `zen.local.v1`); a stranger has none.
   starts a new pairing; until one completes, the classical secret is used.
 
 - **Transports:** the same Wi-Fi, cable or hotspot network (UDP beacons on
-  port 39319 every 10 s while the app is used, 30 s otherwise, then TCP);
+  port 39319 every 10 s while the app is used, 30 s otherwise, then TCP on
+  one of ports 39320-39335);
   a Wi-Fi Direct group (Android, Windows), which is only a network the LAN
   discovery then runs over (the group's name and passphrase sit in the
   service record, so anyone nearby can join the group but cannot link);
@@ -405,8 +408,11 @@ device keys, label `zen.local.v1`); a stranger has none.
   one sent back to its sender names the wrong address. A device on
   version 2 sends its hello where the opening belongs; either side then
   closes, so the two link only over the internet until both have version
-  3. On a network stream the opening must come within two seconds, else
-  the slot is freed. Each side then encapsulates a secret to the other's
+  3. On a network stream the opening must come within two seconds, and
+  each later step (the hello, the ciphertext, the first record) within two
+  seconds more (four on a Bluetooth stream), all within eight; else the
+  slot is freed, so a side that sends a valid opening and then stalls holds
+  it for seconds, not for the whole handshake. Each side then encapsulates a secret to the other's
   ML-KEM key; the stream keys come from HKDF over the X25519 result and both
   ML-KEM secrets (the lower side's first), salt the pair's link key, info
   both hellos and both ciphertexts. So the stream is hybrid post-quantum,
@@ -417,15 +423,25 @@ device keys, label `zen.local.v1`); a stranger has none.
   sealed again by 1.5. The link counts the frames it carries for the device
   at its other end (`local_link_traffic.go`); a stream that names a frame
   longer than a node takes (1 MiB) is no longer counted.
-- A LAN beacon is taken only when it comes from the beacon port of an
-  address on one of this device's local networks and names the TCP port the
-  system gave the listener (never a well-known one), and a beacon is
-  answered only on the local network (the socket listens on every
-  interface, and a host with a public address would otherwise be answered
-  or dialled). An iPhone takes at most two waiting Bluetooth streams from
-  one device, as Android and the bridge do.
-- Limits: 2048 devices, 16 streams, 8 handshakes at once, 2 per source,
-  beacon rate limits per sender and in all.
+- A LAN beacon is taken only when it comes from the beacon port (UDP
+  39319) of an address on one of this device's local networks and names no
+  well-known port, and a beacon is answered only on the local network (the
+  socket listens on every interface, and a host with a public address
+  would otherwise be answered or dialled). Links are taken on the first
+  free TCP port of 39320-39335, and a beacon makes a device dial only its
+  own source address, only on one of those ports, at most 4 dials in 15 s
+  in all, and a recognised beacon counts once (its salt is remembered while
+  its advert is good): a beacon proves no key, but a copy of a friend's
+  played back from a made-up address comes after the real one and is
+  dropped. So a forged beacon cannot have a phone probe the LAN's hosts and
+  services. A device of an earlier version names a port the system gave
+  it; a later one does not dial it (that pair links when the earlier one
+  dials, or over the internet). An iPhone takes at most two waiting
+  Bluetooth streams from one device, as Android and the bridge do.
+- Limits: 2048 devices, 16 streams, 8 handshakes at once, 2 per source at
+  once and 3 per source in 15 s (a stranger holds a slot 4 s at most, so
+  one address holds 0.8 of a slot on average and ten are needed to hold
+  them all), a 2 s dial timeout, beacon rate limits per sender and in all.
 
 ### 1.7 Local interfaces and the update check [V]
 

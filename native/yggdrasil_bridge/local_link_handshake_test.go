@@ -230,6 +230,64 @@ func TestSilentConnectionsLeaveTheLanSlotsSoon(t *testing.T) {
 	}
 }
 
+// Connections that send a valid opening and then stall give their LAN
+// handshake slots back within a stage's time: they held them for the rest
+// of the whole handshake's eight seconds, so four hosts kept every slot.
+func TestStallingConnectionsLeaveTheLanSlotsSoon(t *testing.T) {
+	_, _, managerA, _ := testManagers(t)
+	lan := testLan(t, managerA)
+	var conns []net.Conn
+	defer func() {
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	}()
+	opened := make(chan error, 8)
+	for i := 0; i < 4; i++ {
+		for j := 0; j < 2; j++ {
+			d := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, byte(10+i))}}
+			c, err := d.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", lan.tcpPort))
+			if err != nil {
+				t.Skip(err)
+			}
+			conns = append(conns, c)
+			go func(c net.Conn) {
+				// A valid opening at once, the device's opening and hello
+				// read, then nothing more.
+				opening := make([]byte, localOpeningSize)
+				opening[0] = localHandshakeVersion
+				_, _ = rand.Read(opening[1:])
+				if err := writeLocalFrame(c, opening); err != nil {
+					opened <- err
+					return
+				}
+				_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+				if _, err := readLocalFrame(c, 1<<16); err != nil {
+					opened <- err
+					return
+				}
+				_, err := readLocalFrame(c, 1<<16)
+				opened <- err
+			}(c)
+		}
+	}
+	start := time.Now()
+	for range conns {
+		if err := <-opened; err != nil {
+			t.Fatalf("the device did not answer the opening: %v", err)
+		}
+	}
+	if lan.handshakesHeld() == 0 {
+		t.Fatal("the stalling connections took no slot")
+	}
+	for lan.handshakesHeld() > 0 && time.Since(start) < 10*time.Second {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if held := time.Since(start); held > localStageTimeout+time.Second {
+		t.Fatalf("stalling connections held the slots for %v", held)
+	}
+}
+
 func (lan *lanDiscovery) handshakesHeld() int {
 	lan.mu.Lock()
 	defer lan.mu.Unlock()
