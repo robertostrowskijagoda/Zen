@@ -1,0 +1,9 @@
+{
+  "zen_rewrite_panic_stand_in_salt": "8032eb670419a58e5c82be41b49d5d353ad6c29dbec9df88c01c119807f294a6",
+  "zen_rewrite_master_key_fingerprint": "16b395d8d9043fc2d48670a9b61d1a44d7e163423161f41cf4ad0fea7f78441b",
+  "zen_rewrite_password_kdf": "{\"a\":\"argon2id\",\"m\":64,\"t\":1,\"p\":1}",
+  "zen_rewrite_password_salt": "f89703fbee9614aebc8ea884dc71672ec5660b76f6eeadb45450bd5dcaae341f",
+  "zen_rewrite_password_hash": "fcf13375728206ff731072a3391ad01eb4a3ec2b500f3f17adc0ac11df59b6dc",
+  "zen_rewrite_wrapped_master_key": "66965c8ba902b7f731d5bfd4b0c9cf49d5b7376311a9ab793ef655d3f214d6d7204810ae64e1151c0712787857b70d746cd305c54617e76b2be234cb",
+  "zen_rewrite_guarded_settings": "{\"v\":1,\"lock\":\"background\",\"delay\":300,\"resume\":false,\"secure\":true,\"notify\":\"senderAndContent\",\"noPassword\":false}"
+}
