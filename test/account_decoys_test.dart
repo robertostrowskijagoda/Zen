@@ -136,7 +136,9 @@ void main() {
     int decoyFolders = 0;
     for (int seed = 1; seed <= 12; seed++) {
       final _Device d = await device(seed);
-      await d.runs(20);
+      // Enough sessions for the rarer names (a quarter of accounts or
+      // fewer) to come up among the decoys.
+      await d.runs(30);
       for (final String folder in await d.folders()) {
         decoyFolders++;
         decoyNames.addAll(_shapes(await d.folder(folder)));
@@ -210,9 +212,12 @@ void main() {
       'p',
       'h',
       'i',
+      // A label hashed into a pebble's id, not a key.
+      'zen-pebble',
     };
-    final RegExp key = RegExp(r"'([a-z][a-z0-9_]*(?:/[a-z0-9_]+)+)'");
-    final RegExp keyPrefix = RegExp(r"'([a-z][a-z0-9_]*/(?:[a-z0-9_]+/)*)\$");
+    // Hyphens too: 'circle-backup/...' is a key like any other.
+    final RegExp key = RegExp(r"'([a-z][a-z0-9_-]*(?:/[a-z0-9_-]+)+)'");
+    final RegExp keyPrefix = RegExp(r"'([a-z][a-z0-9_-]*/(?:[a-z0-9_-]+/)*)\$");
     final RegExp backgroundFile = RegExp(
       r"'([a-z][a-z0-9_-]*\.(?:zenbg|zbox))'",
     );

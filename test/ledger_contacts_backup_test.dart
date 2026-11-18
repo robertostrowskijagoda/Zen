@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/device_trust.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
@@ -62,6 +64,9 @@ final String _author = _a('200::a1');
 final String _holder = _a('200::b');
 final String _fresh = _a('200::a9');
 
+/// How far the wall clock of every node here runs ahead of the real one.
+int _ahead = 0;
+
 Future<LedgerNode> _node(
   String address, {
   required List<String> friends,
@@ -76,6 +81,9 @@ Future<LedgerNode> _node(
     friendAddresses: () => friends,
     bridges: BridgeBook(probe: (String _) async => null),
     localAddress: () => t.address,
+    clock: HlcClock(
+      wallClock: () => DateTime.now().millisecondsSinceEpoch + _ahead,
+    ),
     syncInterval: Duration.zero,
   );
   addTearDown(n.stop);
@@ -146,6 +154,7 @@ Future<(LedgerNode, LedgerNode, MemoryLedgerDisk)> _authorAndHolder() async {
 Future<LedgerNode> _restoreOnNewPhone(
   LedgerNode author,
   MemoryLedgerDisk authorDisk,
+  LedgerNode holder,
 ) async {
   _Linked.nodes.remove(_author);
   final MemoryLedgerDisk disk = MemoryLedgerDisk();
@@ -153,7 +162,46 @@ Future<LedgerNode> _restoreOnNewPhone(
     disk,
     (await LedgerIdentity.loadOrCreate(authorDisk)).accountKey!.seed,
   );
-  return _node(_fresh, friends: <String>[_holder], disk: disk);
+  final LedgerNode phone = await _node(
+    _fresh,
+    friends: <String>[_holder],
+    disk: disk,
+  );
+  await _dayAfterSeen(holder, phone, author);
+  return phone;
+}
+
+/// [phone], a device of [author]'s account nobody co-signed (restored from
+/// the key alone), counts with [holder] a day after it first saw it; the
+/// phone learns the author's device only from the holder, after its own
+/// first hour, and takes it a day after that.
+Future<void> _dayAfterSeen(
+  LedgerNode holder,
+  LedgerNode phone,
+  LedgerNode author,
+) async {
+  await _until(
+    () =>
+        holder.store.directory.certificateOf(
+          phone.account,
+          phone.identity.deviceKey.id,
+        ) !=
+        null,
+  );
+  _ahead += kNewDeviceWait.inMilliseconds + 3600 * 1000;
+  phone.greet(_holder);
+  holder.greet(_fresh);
+  await _until(
+    () =>
+        phone.store.directory.certificateOf(
+          phone.account,
+          author.identity.deviceKey.id,
+        ) !=
+        null,
+  );
+  _ahead += kNewDeviceWait.inMilliseconds + 3600 * 1000;
+  phone.greet(_holder);
+  holder.greet(_fresh);
 }
 
 /// Whether [n] holds what [author]'s private log holds.
@@ -200,7 +248,7 @@ void main() {
         isTrue,
       );
 
-      final LedgerNode phone = await _restoreOnNewPhone(author, disk);
+      final LedgerNode phone = await _restoreOnNewPhone(author, disk, holder);
       await _until(() => phone.latestContacts() != null);
       expect(jsonEncode(phone.latestContacts()), jsonEncode(snapshot));
     }, timeout: const Timeout(Duration(minutes: 4)));
@@ -378,7 +426,7 @@ void main() {
       'KiB (one backup ${one ~/ 1024} KiB)',
     );
 
-    final LedgerNode phone = await _restoreOnNewPhone(author, disk);
+    final LedgerNode phone = await _restoreOnNewPhone(author, disk, holder);
     await _until(() => phone.latestContacts() != null);
     expect(jsonEncode(phone.latestContacts()), jsonEncode(now));
     await _until(() => phone.contactRemovals().isNotEmpty);
@@ -486,6 +534,8 @@ void main() {
       friends: <String>[_holder],
       disk: siblingDisk,
     );
+    // It meets the author only through the holder, nobody co-signed it.
+    await _dayAfterSeen(holder, sibling, author);
     final LogEntry? removal = await author.publishForOwnDevices(
       kContactRemovedKind,
       <String, dynamic>{'a': _friend(3)},

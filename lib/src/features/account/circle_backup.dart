@@ -132,6 +132,12 @@ final class CircleBackupManifest {
   /// newer build made (held as it is, not restored here).
   int get version => json['v'] as int;
 
+  /// When the person took something out of the copy on purpose (switched
+  /// the passwords off), if the device that made it was told: a holder
+  /// keeps no copy made before then as the one before this
+  /// ([kCircleBackupPreviousKept]), since it may hold what was taken out.
+  int? get shrunkAt => json['sh'] is int ? json['sh'] as int : null;
+
   /// [json] as a manifest, if it is well-formed (not yet verified).
   static CircleBackupManifest? parse(Object? json) {
     if (json is! Map<String, dynamic> ||
@@ -307,7 +313,9 @@ Uint8List _jsonBytes(Object? value) =>
 
 /// Builds [content] into a signed copy for [account] at [at], at most
 /// [maxBytes] in all: when it does not fit, whole months of conversation
-/// text go, oldest first (everything else always stays).
+/// text go, oldest first (everything else always stays). [shrunkAt]: when
+/// the person last took something out of the copy on purpose
+/// ([CircleBackupManifest.shrunkAt]).
 Future<CircleBackupBuild> buildCircleBackup({
   required CircleBackupContent content,
   required String account,
@@ -316,6 +324,7 @@ Future<CircleBackupBuild> buildCircleBackup({
   required DeviceCertificate certificate,
   required int at,
   int maxBytes = kCircleBackupMaxBytes,
+  int? shrunkAt,
 }) async {
   final CircleBackupKeys keys = await CircleBackupKeys.of(selfKey);
   final List<_Piece> pieces = <_Piece>[
@@ -417,6 +426,8 @@ Future<CircleBackupBuild> buildCircleBackup({
     'ch': order,
     'ix': index,
     'cert': certificate.toJson(),
+    // Signed with the rest; builds before it keep it as it is.
+    'sh': ?shrunkAt,
   };
   final Uint8List signature = await deviceKey.sign(_signedBytes(body));
   final CircleBackupManifest manifest = CircleBackupManifest.parse(

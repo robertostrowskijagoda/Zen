@@ -167,10 +167,39 @@ const List<_Name> _names = <_Name>[
   _Name('meet/food', used: 0.05, min: 90, max: 3000),
   _Name('meet/circles', used: 0.15, min: 90, max: 4000),
   _Name('meet/vouched', used: 0.3, min: 90, max: 6000),
+  // The graph's private notes (graph_notes.dart): written once the graph
+  // was opened with friends; a date or two per friend (some 150 bytes)
+  // and the friends of friends seen far off.
+  _Name('meet/graph-notes', used: 0.35, min: 90, max: 40000),
+  // "Otwarci na poznanie" (open_to_meet.dart): started with the app, saved
+  // whenever a friend's flag comes or ours goes out (a day apart), about
+  // 100 bytes a friend.
+  _Name('meet/graph-open', used: 0.5, min: 90, max: 20000),
+  // An event's photos (event_service.dart): base64 JPEGs of up to 240 KiB,
+  // a few for an ordinary event, under the event's 16-character id.
+  _Name(
+    'meet/event-album/{b36}',
+    used: 0.03,
+    min: 20000,
+    max: 1500000,
+    many: true,
+  ),
+  // The sound recorded with an alarm (meet_service.dart): up to six clips
+  // of up to 200 KiB under the alarm's id and the clip's number.
+  _Name(
+    'meet/alarm-audio/{clip}',
+    used: 0.01,
+    min: 4000,
+    max: 200 * 1024,
+    many: true,
+  ),
   _Name('pebbles/index', used: 0.1, min: 90, max: 2000),
   _Name('pebbles/door', used: 0.1, min: 90, max: 200),
   _Name('pebbles/profile_hash', used: 0.1, min: 90, max: 200),
   _Name('pebbles/design/{b32}', used: 0.08, min: 120, max: 3000, many: true),
+  // What the person hid after a report (hidden_by_me.dart): a list of
+  // keys of some 40 characters, a few for most who ever used it.
+  _Name('moderation/hidden-by-me', used: 0.05, min: 90, max: 6000),
   _Name('pyramid/ledger', used: 0.05, min: 120, max: 9000),
   _Name('pyramid/me', used: 0.08, min: 90, max: 2000),
   _Name('pyramid/records', used: 0.03, min: 90, max: 4000),
@@ -338,6 +367,9 @@ const List<_Name> _names = <_Name>[
   _Name('circle-backup/status', used: 0.6, min: 90, max: 200),
   _Name('circle-backup/held', used: 0.4, min: 120, max: 12000),
   _Name('circle-backup/restore', used: 0.01, min: 90, max: 400),
+  // The copies kept from before a much smaller one (from 1.17.0): now and
+  // then, a manifest or two with their dates.
+  _Name('circle-backup/previous', used: 0.05, min: 300, max: 40000),
   _Name(
     'circle-backup/k/{h32}/{h32}',
     used: 0.4,
@@ -727,37 +759,53 @@ final class ZenAccountDecoys {
     return count;
   }
 
-  String _expand(String template) =>
-      template.replaceAllMapped(RegExp(r'\{(\w+)\}'), (Match m) {
-        switch (m.group(1)) {
-          case 'h32':
-            return _hex(16);
-          case 'h64':
-            return _hex(32);
-          case 'n':
-            return '${_random.nextInt(40)}';
-          case 'io':
-            return _random.nextBool() ? 'in' : 'out';
-          case 'blob':
-            return const <String>['o', 'p', 'h', 'i'][_random.nextInt(4)];
-          case 'sync':
-            return _syncIds[_random.nextInt(_syncIds.length)];
-          case 'b32':
-            const String alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
-            return <String>[
-              for (int i = 0; i < 26; i++) alphabet[_random.nextInt(32)],
-            ].join();
-          case 'rid':
-            // relay_engine.dart: `r`, the time and two random numbers in
-            // base 36, kept under its base64url form.
-            final String rid =
-                'r${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}'
-                '${_random.nextInt(1 << 32).toRadixString(36)}'
-                '${_random.nextInt(1 << 32).toRadixString(36)}';
-            return base64Url.encode(utf8.encode(rid)).replaceAll('=', '');
-        }
-        return m.group(0)!;
-      });
+  String _expand(String template) => template.replaceAllMapped(
+    RegExp(r'\{(\w+)\}'),
+    (Match m) {
+      switch (m.group(1)) {
+        case 'h32':
+          return _hex(16);
+        case 'h64':
+          return _hex(32);
+        case 'n':
+          return '${_random.nextInt(40)}';
+        case 'io':
+          return _random.nextBool() ? 'in' : 'out';
+        case 'blob':
+          return const <String>['o', 'p', 'h', 'i'][_random.nextInt(4)];
+        case 'sync':
+          return _syncIds[_random.nextInt(_syncIds.length)];
+        case 'b32':
+          const String alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+          return <String>[
+            for (int i = 0; i < 26; i++) alphabet[_random.nextInt(32)],
+          ].join();
+        case 'b36':
+          // event_service.dart: 16 characters of base 36.
+          return <String>[
+            for (int i = 0; i < 16; i++) _random.nextInt(36).toRadixString(36),
+          ].join();
+        case 'clip':
+          // meet_service.dart: the alarm's id (the time and a random
+          // number in base 36), then the clip's number.
+          final int t =
+              DateTime.now().millisecondsSinceEpoch -
+              _random.nextInt(365 * 86400000);
+          return '${t.toRadixString(36)}'
+              '${_random.nextInt(1 << 30).toRadixString(36)}'
+              '-${_random.nextInt(6)}';
+        case 'rid':
+          // relay_engine.dart: `r`, the time and two random numbers in
+          // base 36, kept under its base64url form.
+          final String rid =
+              'r${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}'
+              '${_random.nextInt(1 << 32).toRadixString(36)}'
+              '${_random.nextInt(1 << 32).toRadixString(36)}';
+          return base64Url.encode(utf8.encode(rid)).replaceAll('=', '');
+      }
+      return m.group(0)!;
+    },
+  );
 
   /// `ZENENC2`, the nonce and the tag of a sealed file, and the store's
   /// envelope inside it.

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/device_trust.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
@@ -62,10 +64,12 @@ LedgerNode _node(
   _Linked t, {
   MemoryLedgerDisk? disk,
   List<String> friends = const <String>[],
+  HlcClock? clock,
 }) {
   final LedgerNode n = LedgerNode(
     transport: t,
     disk: disk ?? MemoryLedgerDisk(),
+    clock: clock,
     friendAddresses: () => friends,
     bridges: BridgeBook(probe: (String _) async => null),
     localAddress: () => t.address,
@@ -110,19 +114,33 @@ void main() {
     final _Linked ta2 = await _transport(a2);
     final _Linked tb = await _transport(b);
     final MemoryLedgerDisk d1 = MemoryLedgerDisk();
+    int now = DateTime.now().millisecondsSinceEpoch;
+    final HlcClock clock = HlcClock(wallClock: () => now);
     // Bob added Ania by scanning the code on her phone (a1).
-    final LedgerNode phone = _node(ta1, disk: d1, friends: <String>[b]);
-    final LedgerNode bob = _node(tb, friends: <String>[a1]);
+    final LedgerNode phone = _node(
+      ta1,
+      disk: d1,
+      friends: <String>[b],
+      clock: clock,
+    );
+    final LedgerNode bob = _node(tb, friends: <String>[a1], clock: clock);
     final List<String> warned = <String>[];
     bob.onDeviceUnlinked = warned.add;
     await phone.start();
     await bob.start();
     await _settle();
-    // Her laptop joins the account (and has Bob among its friends).
+    // Her laptop joins the account, linked from the phone (and has Bob
+    // among its friends).
+    await phone.expectOwnDevice(a2);
     final MemoryLedgerDisk d2 = MemoryLedgerDisk();
     final LedgerIdentity first = await LedgerIdentity.loadOrCreate(d1);
     await LedgerIdentity.adoptAccount(d2, first.accountKey!.seed);
-    final LedgerNode laptop = _node(ta2, disk: d2, friends: <String>[b]);
+    final LedgerNode laptop = _node(
+      ta2,
+      disk: d2,
+      friends: <String>[b],
+      clock: clock,
+    );
     await laptop.start();
     await laptop.rememberDeviceAddresses(<String>[a1]);
     await _settle(200);
@@ -130,7 +148,9 @@ void main() {
     expect(bob.accountOfAddress(a2), phone.account);
     final String keyBefore = bob.keyring.current(Audience.all).id;
 
-    // The phone is stolen: Ania cuts it off from the laptop.
+    // Days later the phone is stolen (the laptop counts with Bob by then
+    // without the phone's word): Ania cuts it off from the laptop.
+    now += kNewDeviceWait.inMilliseconds + 3600 * 1000;
     await laptop.unlinkDevice(phone.identity.deviceKey.id);
     await _settle(200);
 

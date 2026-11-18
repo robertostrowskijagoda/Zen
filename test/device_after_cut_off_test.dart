@@ -119,6 +119,8 @@ void main() {
     await bob.start();
     await _settle();
 
+    // Linked from the first device.
+    await first.expectOwnDevice(a2);
     final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
     await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
     final LedgerNode second = _node(
@@ -151,16 +153,14 @@ void main() {
     await _settle(160);
     final String thirdDevice = third.identity.deviceKey.id;
 
-    // Not one of the owner's devices: listed, but unconfirmed.
+    // Not one of the owner's devices: listed as waiting (nobody co-signed
+    // it), unconfirmed.
     expect(first.siblingAddresses, isNot(contains(a3)));
     expect(first.isFriendAddress(a3), isFalse);
-    final AccountDevice listed = _deviceOf(first, thirdDevice)!;
-    expect(listed.confirmed, isFalse);
-    expect(listed.address, a3);
-    expect(
-      first.unconfirmedDevices.map((AccountDevice d) => d.device),
-      <String>[thirdDevice],
+    final AccountDevice listed = first.pendingOwnDevices.singleWhere(
+      (AccountDevice d) => d.device == thirdDevice,
     );
+    expect(listed.confirmed, isFalse);
 
     // Nothing the owner's devices share goes there.
     final LogEntry mine = (await first.publishForOwnDevices(
@@ -172,8 +172,9 @@ void main() {
     expect(_sent(t1, a3, kLedgerSiblingType), 0);
     expect(_sent(t1, a3, kLedgerKeysType), 0);
 
-    // What it writes for the account's devices is not taken (it reaches
-    // the owner through a friend, who keeps a copy of the private space).
+    // What it writes for the account's devices is not taken: not by the
+    // friend (nobody co-signed it, it waits its day there), nor, through
+    // anyone, by the owner's devices.
     final LogEntry its = (await third.publishForOwnDevices(
       'contacts',
       <String, dynamic>{'friends': <Object>[]},
@@ -182,16 +183,24 @@ void main() {
     bob.greet(a1);
     first.greet(b);
     await _settle(160);
-    final LogEntry? arrived = first.store.entryById(its.space, its.id);
-    expect(arrived, isNotNull, reason: 'the friend passed it on');
-    expect(first.bodyOf(arrived!), isNull);
+    expect(
+      bob.store.directory.pendingUntil(first.account, thirdDevice),
+      isNotNull,
+    );
+    final LogEntry? early = first.store.entryById(its.space, its.id);
+    expect(early == null || first.bodyOf(early) == null, isTrue);
 
     // The person says it is theirs: from now on it is an own device.
     await first.confirmDevice(thirdDevice);
     await _settle(120);
     expect(_deviceOf(first, thirdDevice)!.confirmed, isTrue);
+    // It counts now: greeted again, it is one of the account's devices.
+    third.greet(a1);
+    await _settle(160);
     expect(first.siblingAddresses, contains(a3));
-    expect(first.bodyOf(arrived), isNotNull);
+    final LogEntry? arrived = first.store.entryById(its.space, its.id);
+    expect(arrived, isNotNull);
+    expect(first.bodyOf(arrived!), isNotNull);
     expect(first.unconfirmedDevices, isEmpty);
 
     // And it stays so after a restart.
@@ -220,6 +229,8 @@ void main() {
     final LedgerNode first = _node(t1, disk: d1, clock: clock);
     await first.start();
     final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
+    // Linked from the first device.
+    await first.expectOwnDevice(a2);
     final MemoryLedgerDisk d2 = MemoryLedgerDisk();
     await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
     final LedgerNode laptop = _node(t2, disk: d2, name: 'Laptop', clock: clock);

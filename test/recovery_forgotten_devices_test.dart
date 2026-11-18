@@ -152,6 +152,7 @@ void main() {
     final _Device first = _Device('200::a1', MemoryLedgerDisk());
     await first.start();
     final _Device second = _Device('200::a2', MemoryLedgerDisk());
+    await first.node.expectOwnDevice(_a('200::a2'));
     await LedgerIdentity.adoptAccount(
       second.disk,
       (await LedgerIdentity.loadOrCreate(first.disk)).accountKey!.seed,

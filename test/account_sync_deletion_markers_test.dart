@@ -232,6 +232,8 @@ Future<(_Device, _Device)> _twoDevices() async {
   final _Device first = _Device('200::b1');
   await first.start();
   final _Device second = _Device('200::b2');
+  // Linked from the first device, which co-signs it.
+  await first.node.expectOwnDevice(_a('200::b2'));
   await LedgerIdentity.adoptAccount(
     second.disk,
     (await LedgerIdentity.loadOrCreate(first.disk)).accountKey!.seed,

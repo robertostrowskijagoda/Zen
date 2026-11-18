@@ -334,14 +334,15 @@ final Provider<CircleBackupService?> circleBackupServiceProvider =
       );
       // The passwords put into the copy or taken out of it (here, or on
       // another device of the account): a new copy at once, which replaces
-      // the friends' copy.
+      // the friends' copy. Taken out, the friends keep no copy from before
+      // that still holds them.
       ref.listen<bool>(
         appSettingsControllerProvider.select(
           (AppSettings s) => s.passwordsInCircleBackup,
         ),
         (bool? previous, bool next) {
           if (previous != null && previous != next) {
-            service.contentChanged();
+            service.contentChanged(shrunk: !next);
           }
         },
       );

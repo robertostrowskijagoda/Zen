@@ -106,7 +106,8 @@ void main() {
     final MemoryLedgerDisk d2 = MemoryLedgerDisk();
     final LedgerNode first = _node(t1, d1);
     await first.start();
-    // Link the second device to the same account.
+    // Link the second device to the same account (the first co-signs it).
+    await first.expectOwnDevice(a2);
     final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
     await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
     final LedgerNode second = _node(t2, d2);

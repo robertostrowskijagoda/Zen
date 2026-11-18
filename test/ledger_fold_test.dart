@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/device_trust.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_author.dart';
 import 'package:zen/src/core/ledger/ledger_store.dart';
@@ -68,6 +70,9 @@ int _heldOf(LedgerNode n, String kind, String account) {
 final class _Net {
   final Map<String, _Linked> nodes = <String, _Linked>{};
 
+  /// How far the wall clock of every node here runs ahead of the real one.
+  int ahead = 0;
+
   Future<LedgerNode> node(
     String address,
     List<String> friends, {
@@ -81,6 +86,9 @@ final class _Net {
       friendAddresses: () => friends,
       bridges: BridgeBook(probe: (String _) async => null),
       localAddress: () => address,
+      clock: HlcClock(
+        wallClock: () => DateTime.now().millisecondsSinceEpoch + ahead,
+      ),
       syncInterval: Duration.zero,
       helloInterval: Duration.zero,
     );
@@ -322,6 +330,36 @@ void main() {
     final LedgerNode restored = await net.node(bobNew, <String>[
       ada,
     ], disk: fresh);
+    // Restored from the key alone, nobody co-signed it: Ada takes it a day
+    // after she first saw it.
+    for (
+      int i = 0;
+      i < 10 &&
+          a.store.directory.certificateOf(
+                restored.account,
+                restored.identity.deviceKey.id,
+              ) ==
+              null;
+      i++
+    ) {
+      await net.sync(<LedgerNode>[a, restored], rounds: 1);
+    }
+    net.ahead += kNewDeviceWait.inMilliseconds + 3600 * 1000;
+    // It learns Bob's lost phone only from Ada, after its own first hour:
+    // it takes that one a day after it first saw it too.
+    for (
+      int i = 0;
+      i < 10 &&
+          restored.store.directory.certificateOf(
+                restored.account,
+                b.identity.deviceKey.id,
+              ) ==
+              null;
+      i++
+    ) {
+      await net.sync(<LedgerNode>[a, restored], rounds: 1);
+    }
+    net.ahead += kNewDeviceWait.inMilliseconds + 3600 * 1000;
     await net.sync(<LedgerNode>[a, restored], rounds: 4);
     expect(_wall(restored), bobBefore);
     expect(latestProfile(restored, restored.account)?.name, 'Bob 2');

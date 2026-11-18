@@ -1438,10 +1438,15 @@ key pieces) opens it.
   at most 10 MB (+10 %) per account and 100 MB in all; a copy goes when
   neither holds any more (the piece went, the friendship ended). A copy
   whose size is under half of the one kept does not replace it at once: the
-  holder keeps the larger previous copy for 30 days. A manifest dated ahead
-  of the holder's clock, or signed by a device that was cut off, is refused
-  (it used to block every real copy), and the owner is told when friends
-  refuse.
+  holder keeps the larger previous copy for 30 days, unless the new
+  manifest's signed `sh` (when the person last took a part out on purpose,
+  the passwords switched off) is not older than it: then no copy made
+  before `sh` is kept. A manifest dated ahead of the holder's clock, or
+  offered by a device that does not count (cut off, or still waiting), is
+  refused (it used to block every real copy), and the owner is told when
+  friends refuse. A copy taken while its device counted stays when that
+  device is cut off later (the lost phone's copy after a recovery), until a
+  newer one replaces it, and a recovering phone takes it.
 - **A phone that is looking for its copy never replaces it with its own.** A
   search that gave up (a copy from a newer Zen, or thirty days without
   finding one) let the new phone make a copy of its nearly empty data, of

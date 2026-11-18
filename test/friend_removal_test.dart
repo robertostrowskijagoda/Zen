@@ -558,6 +558,8 @@ final class _Device implements ChatSyncTarget {
     await link.start();
     final MemoryLedgerDisk disk = MemoryLedgerDisk();
     if (accountOf != null) {
+      // Linked from that device, which co-signs it.
+      await accountOf.node.expectOwnDevice(address);
       await LedgerIdentity.adoptAccount(
         disk,
         accountOf.node.identity.accountKey!.seed,

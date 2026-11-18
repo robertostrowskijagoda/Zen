@@ -102,7 +102,9 @@ void main() {
         await first.seal(Audience.all, <String, dynamic>{'text': 'tajne'}),
       );
 
-      // Link: the new device takes the account key and greets the old one.
+      // Link: the new device takes the account key and greets the old one,
+      // which co-signs it (friends count it at once by that).
+      await first.expectOwnDevice(a2);
       final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
       await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
       final LedgerNode second = _node(

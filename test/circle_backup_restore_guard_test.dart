@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
@@ -16,7 +17,8 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// never replaces that copy with its own on its own: not when the copy was
 /// made by a newer Zen, not when nothing was found for a month. A copy
 /// dated ahead (a device whose clock ran ahead, perhaps cut off since)
-/// does not keep a holder from taking the real ones.
+/// does not keep a holder from taking the real ones. A copy made by a
+/// device cut off since is not dropped for that.
 void main() {
   late int now;
 
@@ -192,8 +194,8 @@ void main() {
   });
 
   test('a copy dated in the future is refused, and one kept from before '
-      'stops counting: dated ahead, or signed by a device the account cut '
-      'off', () async {
+      'dated ahead stops counting; one signed by a device the account cut '
+      'off since stays', () async {
     final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
       MemoryLedgerDisk(),
     );
@@ -272,7 +274,8 @@ void main() {
     await owner.stop();
 
     // Again a copy of the other device (kept while the clock was ahead),
-    // then the account cuts that device off: the holder drops it.
+    // then the account cuts that device off: the holder keeps it (it was
+    // taken while the device counted) until a newer copy replaces it.
     holderNow = DateTime.utc(2036, 1, 2).millisecondsSinceEpoch;
     final CircleBackupBuild later = await buildCircleBackup(
       content: _empty(),
@@ -286,8 +289,119 @@ void main() {
     holderNow = now;
     revoked.add(otherKey.id);
     await holder.tick();
-    expect(holder.holder.manifestOf(me.account), isNull);
+    expect(holder.holder.manifestOf(me.account)!.id, later.manifest.id);
     for (final CircleBackupService s in <CircleBackupService>[holder]) {
+      await s.stop();
+    }
+  });
+
+  test('a phone that took the account from a backup file looks for the '
+      'friends\' copy first: its own nearly empty one does not replace the '
+      'newer copy the friend keeps', () async {
+    final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
+      MemoryLedgerDisk(),
+    );
+    final _Linked tHolder = _Linked('200::b');
+    final _Linked tNew = _Linked('200::c');
+    await tHolder.start();
+    await tNew.start();
+    final CircleBackupService holder = holderOf(tHolder, me);
+    await holder.start();
+    final CircleBackupBuild full = await _build(me, at: now - 3600 * 1000);
+    await _keep(holder, full);
+
+    // The account comes onto a new phone from an old backup file.
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final LedgerIdentity taken = await LedgerIdentity.adoptAccount(
+      disk,
+      me.accountKey!.seed,
+    );
+    await markAccountTakenFromCopy(disk, withPyramid: false);
+    final _MemoryData data = _MemoryData(_empty());
+    final CircleBackupService fresh = CircleBackupService(
+      transport: tNew,
+      disk: disk,
+      data: data,
+      identity: () => _idOf(taken),
+      holders: () => const <String>[],
+      isInCircle: (_) => false,
+      restoreCandidates: () => <String>[tHolder.address],
+      friendHolders: () => <String>[tHolder.address],
+      clock: () => now,
+    );
+    await fresh.start();
+    await _settle(<CircleBackupService>[fresh, holder]);
+    expect(_offersFrom(tNew), isEmpty);
+    expect(holder.holder.manifestOf(me.account)!.id, full.manifest.id);
+    expect(fresh.restore.value.phase, CircleBackupRestorePhase.done);
+    expect(
+      data.restoredContent!.sections[CircleBackupSections.passwords],
+      <String, dynamic>{'bank': 'tajne'},
+    );
+    for (final CircleBackupService s in <CircleBackupService>[fresh, holder]) {
+      await s.stop();
+    }
+  });
+
+  test('the lost phone\'s copy stays with the friend after the phone is cut '
+      'off: the recovery takes it back, and the new phone\'s own small copy '
+      'keeps it as the one before', () async {
+    final LedgerIdentity lost = await LedgerIdentity.loadOrCreate(
+      MemoryLedgerDisk(),
+    );
+    final _Linked tHolder = _Linked('200::b');
+    final _Linked tNew = _Linked('200::c');
+    await tHolder.start();
+    await tNew.start();
+    final Set<String> revoked = <String>{};
+    final CircleBackupService holder = holderOf(
+      tHolder,
+      lost,
+      revoked: revoked,
+    );
+    await holder.start();
+    final CircleBackupBuild full = await _build(lost, at: now - 3600 * 1000);
+    await _keep(holder, full);
+
+    // The phone is lost; the account comes back on a new one, which cuts
+    // the lost phone off before its copy came back.
+    revoked.add(lost.deviceKey.id);
+    now += const Duration(minutes: 15).inMilliseconds;
+    await holder.tick();
+    expect(holder.holder.manifestOf(lost.account)!.id, full.manifest.id);
+    final (CircleBackupService fresh, _MemoryData restored) = await recovering(
+      lost,
+      tNew,
+      tHolder.address,
+      since: now,
+      revoked: revoked,
+    );
+    await fresh.start();
+    await _settle(<CircleBackupService>[fresh, holder]);
+    expect(fresh.restore.value.phase, CircleBackupRestorePhase.done);
+    expect(
+      restored.restoredContent!.sections[CircleBackupSections.passwords],
+      <String, dynamic>{'bank': 'tajne'},
+    );
+
+    // A nearly empty copy of a device that counts replaces it, and the
+    // whole one stays as the one before.
+    final LedgerIdentity again = await LedgerIdentity.adoptAccount(
+      MemoryLedgerDisk(),
+      lost.accountKey!.seed,
+    );
+    final CircleBackupBuild small = await buildCircleBackup(
+      content: _empty(),
+      account: again.account,
+      selfKey: again.selfKey!,
+      deviceKey: again.deviceKey,
+      certificate: again.certificate,
+      at: now,
+    );
+    await _keep(holder, small);
+    expect(holder.holder.manifestOf(lost.account)!.id, small.manifest.id);
+    expect(holder.holder.previousOf(lost.account)!.id, full.manifest.id);
+    for (final CircleBackupService s in <CircleBackupService>[holder, fresh]) {
       await s.stop();
     }
   });
