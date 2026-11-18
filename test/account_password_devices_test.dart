@@ -317,6 +317,7 @@ void main() {
     final LedgerNode first = _node(t1, d1);
     final LedgerNode second = _node(t2, d2);
     await first.start();
+    await first.expectOwnDevice(t2.address);
     await second.start();
     await second.rememberDeviceAddresses(<String>[t1.address]);
     await _settle(120);

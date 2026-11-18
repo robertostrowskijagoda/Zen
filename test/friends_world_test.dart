@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/device_trust.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/friends/peer_presence.dart';
@@ -1018,6 +1019,7 @@ void main() {
       expect(w['B'].accounts.accountOf(a2.address), isNull);
 
       await w.setOnline(a2, true);
+      await _dayAfterSeen(w, a2, <String>['B', 'C']);
       await w.until(
         () async =>
             w['B'].accounts.accountOf(a2.address) == account &&
@@ -1070,6 +1072,7 @@ void main() {
           .read(userProfileControllerProvider.notifier)
           .updateProfile(displayName: 'Ania');
       await w.setOnline(a2, true);
+      await _dayAfterSeen(w, a2, <String>['B']);
 
       await w.until(
         () async =>
@@ -1112,4 +1115,28 @@ void main() {
       );
     });
   });
+}
+
+/// The restored phone [phone], co-signed by nobody, counts with the friends
+/// [names] a day after they first saw it ([kNewDeviceWait]): seen, then the
+/// day passes.
+Future<void> _dayAfterSeen(
+  FriendsWorld w,
+  FriendsPhone phone,
+  List<String> names,
+) async {
+  final LedgerNode own = phone.ledger!;
+  await w.until(
+    () async => names.every(
+      (String n) =>
+          w[n].ledger!.store.directory.certificateOf(
+            own.account,
+            own.identity.deviceKey.id,
+          ) !=
+          null,
+    ),
+    within: const Duration(minutes: 1),
+    reason: 'the friends seeing the restored phone',
+  );
+  await w.advance(kNewDeviceWait + const Duration(hours: 1));
 }
