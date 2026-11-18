@@ -338,6 +338,9 @@ const List<_Name> _names = <_Name>[
   _Name('circle-backup/status', used: 0.6, min: 90, max: 200),
   _Name('circle-backup/held', used: 0.4, min: 120, max: 12000),
   _Name('circle-backup/restore', used: 0.01, min: 90, max: 400),
+  // The copies kept from before a much smaller one (from 1.17.0): now and
+  // then, a manifest or two with their dates.
+  _Name('circle-backup/previous', used: 0.05, min: 300, max: 40000),
   _Name(
     'circle-backup/k/{h32}/{h32}',
     used: 0.4,

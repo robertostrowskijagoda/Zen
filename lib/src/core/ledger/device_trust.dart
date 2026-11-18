@@ -9,14 +9,10 @@
 /// have is the device keys of the owner's other devices, and time:
 ///
 /// * a device co-signed by a device that counts, counts at once;
-/// * the device this phone met the account by (the first it took), and the
-///   devices that co-signed it, count at once: nobody could veto them for a
-///   new friend;
 /// * any other device (restored from paper, a file or friends, or made by
 ///   a thief) counts only [kNewDeviceWait] after this phone first saw it,
-///   even when it came in the same hour as the first, and a device that
-///   counts can cut it off in that time (a veto, which the vetoed device
-///   can never answer);
+///   and a device that counts can cut it off in that time (a veto, which
+///   the vetoed device can never answer);
 /// * a cut-off counts only when a device that could count signed it;
 /// * a cut-off names the devices its signer keeps: what its target
 ///   co-signed, and any device certified before it without a co-signature
@@ -35,6 +31,11 @@ library;
 /// How long a device without a co-signature waits before it counts, and
 /// how long a cut-off can be answered.
 const Duration kNewDeviceWait = Duration(hours: 24);
+
+/// Devices first seen within this time of the first device of an account
+/// a phone ever saw count at once: when someone meets an account, its
+/// devices come one by one, and nobody could veto them for a new friend.
+const Duration kFirstContactWindow = Duration(hours: 1);
 
 /// One device of the account as this phone knows it.
 final class TrustDevice {
@@ -55,8 +56,7 @@ final class TrustDevice {
   final int issued;
 
   /// From when it counts without a co-signature (ms): first seen here plus
-  /// [kNewDeviceWait], or first seen for the device this phone met the
-  /// account by and those that co-signed it.
+  /// [kNewDeviceWait], or first seen when it came with the first contact.
   /// The smallest int for this phone itself.
   final int readyAt;
 }

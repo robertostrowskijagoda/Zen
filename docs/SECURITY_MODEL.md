@@ -159,12 +159,8 @@ computer could break. So Zen does not rely on it for identity:
     only **24 hours after that friend first saw it**. Friends tell your
     devices about it; "Urządzenia" shows it with "To moje" (your device
     co-signs it, it counts at once) and "Odłącz" (a veto: it never
-    counts). For a new friend, the device it meets the account by (the
-    first one of the account it takes, whose hello brought it) counts at
-    once, with the devices that co-signed it: nobody could have vetoed
-    them for a new friend. Any other device follows the rules above even
-    when it comes in the same hour, so a device nobody co-signed waits its
-    24 hours there too.
+    counts). Devices a friend sees within an hour of first meeting the
+    account count at once: nobody could have vetoed them for a new friend.
   - "Odłącz" is signed by the device that cuts, with the list of devices
     it keeps. Once an account co-signs, **a cut-off by the account key
     alone is refused**, and one counts only when its signer could count. A
@@ -183,8 +179,8 @@ computer could break. So Zen does not rely on it for identity:
   device of their own counts after 24 hours if you do not cut it off in
   that time; with the stolen device, before you cut it off, they can cut
   yours off, and whichever of your devices answers within the day goes
-  with it; a new friend who meets the account through their own device
-  takes it as the device it met the account by. They cannot add a device that counts at once, cut your devices off
+  with it; a new friend meeting the account in that hour takes what it is
+  shown. They cannot add a device that counts at once, cut your devices off
   with the account key alone, or bring a cut-off device back.
 - A hello from a stranger that only names a certificate is dropped without
   an answer, so nobody can probe whom you know.
@@ -473,9 +469,14 @@ friend list or device record names it only as a hint, see above).
   back only to a device the account certified and has not cut off (a
   signed request, made within the hour). A copy that is much smaller than
   the one kept (under half) does not replace it at once: the holder keeps
-  the larger previous copy for 30 days. A copy dated ahead of the holder's
-  clock, or signed by a device that was cut off, is refused and no longer
-  blocks every real copy, and the owner is told when friends refuse one. After a recovery, and after a key
+  the larger previous copy for 30 days, except when the new copy says
+  (signed) that the person switched the passwords off after the old one
+  was made: then the old one goes at once. A copy dated ahead of the
+  holder's clock, or offered by a device that was cut off, is refused and
+  no longer blocks every real copy, and the owner is told when friends
+  refuse one. A copy taken while its device counted is not dropped when
+  that device is cut off later: after losing a phone it may be the only
+  one; a newer copy replaces it. After a recovery, and after a key
   copy is restored (where one friend's invitation code, typed there, gives
   a new phone someone to ask), Zen asks the holders and friends, gathers
   the copies offered for 30 seconds, takes the newest, checks it and
