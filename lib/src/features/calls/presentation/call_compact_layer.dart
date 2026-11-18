@@ -10,8 +10,10 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
+import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_compact_mode.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
+import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_screen_awake.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -43,6 +45,9 @@ class _CallCompactLayerState extends ConsumerState<CallCompactLayer> {
   void initState() {
     super.initState();
     _mode.onHangUp = _hangUp;
+    // A headset plugged in or out moves the sound by itself: "Głośnik" and
+    // the screen ([CallScreenAwake], through [_sync]) follow at once.
+    callAudioRouteChanged = _audioRouteChanged;
     _sync(ref.read(socialHubControllerProvider).activeCall);
   }
 
@@ -51,7 +56,18 @@ class _CallCompactLayerState extends ConsumerState<CallCompactLayer> {
     if (_mode.onHangUp == _hangUp) {
       _mode.onHangUp = null;
     }
+    if (callAudioRouteChanged == _audioRouteChanged) {
+      callAudioRouteChanged = null;
+    }
     super.dispose();
+  }
+
+  void _audioRouteChanged(CallAudioOutput output) {
+    unawaited(
+      ref
+          .read(socialHubControllerProvider.notifier)
+          .reportCallAudioRoute(output),
+    );
   }
 
   Future<void> _hangUp() async {

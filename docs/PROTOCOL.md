@@ -812,7 +812,17 @@ on the earpiece holds the proximity sensor instead
 `ZenCallProximity.kt`): the screen goes dark and ignores touches at the
 ear and lights up away from it; released (once nothing is close) when the
 call ends, goes to the loudspeaker or a headset, or becomes a video call.
-One decision (`callScreenModeFor`) chooses between the two. The technical
+One decision (`callScreenModeFor`) chooses between the two. Since 1.18.1
+the sound moving by itself is part of it at once: while a call decides the
+screen, Android tells the app every new route (`ZenCallAudioRoute.kt`,
+method `onCallAudioRoute` on `zen/calls` with `bluetooth`, `wired`,
+`speaker` or `earpiece`), read a moment after the communication device
+changes (Android 12 and later), an audio device comes or goes, or (below
+Android 12) a headset is plugged or a Bluetooth SCO link changes; it
+listens and never polls. A headset or the loudspeaker is the sound out
+loud ("Głośnik" on, the screen kept on), the earpiece the phone at the ear
+(`callSessionOnAudioRoute`). Up to 1.18.0 a headset plugged in or out
+during a call was noticed only at the call's next change. The technical
 log says `Call screen kept on (reason)`, `Call screen keep-on released`,
 `Call screen dark at the ear` and `Call screen proximity released`, with
 whether the window or the sensor took it. Up to 1.17.1 only a ringing

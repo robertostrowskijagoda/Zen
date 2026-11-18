@@ -413,7 +413,10 @@ picture-in-picture sizes; `test/call_screen_awake_test.dart` which calls keep
 the screen on (video, loudspeaker or headset, from the first ring of an
 outgoing call) and which hold the proximity sensor (a voice call on the
 earpiece), and that it is asked of the platform once per change and
-released when the call ends; `test/call_tones_test.dart` which tone each
+released when the call ends, also when a wired or Bluetooth headset comes
+or goes or the sound moves to the loudspeaker during the call (with
+`test/social_hub_controller_test.dart` for "Głośnik" following it and
+`CallAudioRoutesTest.kt` for how Android names the route); `test/call_tones_test.dart` which tone each
 change of a call asks for (ringback, busy, reconnecting, the chimes), that
 every one goes to the call audio in every ringer mode, and that silent mode
 still silences the message sounds; `test/zen_motion_unfocused_test.dart`

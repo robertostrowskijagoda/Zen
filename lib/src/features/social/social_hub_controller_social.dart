@@ -1513,6 +1513,27 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _persistState();
   }
 
+  /// The call's sound went to [output] by itself (a headset plugged in or
+  /// out, a Bluetooth headset coming or going): "Głośnik" and the screen
+  /// follow at once ([callSessionOnAudioRoute]), not at the call's next
+  /// change.
+  Future<void> reportCallAudioRoute(CallAudioOutput output) async {
+    final CallSession? session = state.activeCall;
+    if (session == null) {
+      return;
+    }
+    if (!session.isGroup) {
+      _callMedia.noteAudioRoute(output);
+    }
+    final CallSession? next = callSessionOnAudioRoute(session, output);
+    if (next == null) {
+      return;
+    }
+    logZenMessage('Call audio went to the ${output.name} by itself');
+    state = state.copyWith(activeCall: next);
+    await _persistState();
+  }
+
   Future<void> toggleActiveCallSpeaker() async {
     if (state.activeCall?.isGroup ?? false) {
       return _toggleGroupCall(GroupCallToggle.speaker);

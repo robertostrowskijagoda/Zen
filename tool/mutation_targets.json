@@ -182,7 +182,8 @@
   {
     "file": "lib/src/features/calls/call_audio_route.dart",
     "tests": [
-      "test/call_audio_route_test.dart"
+      "test/call_audio_route_test.dart",
+      "test/call_screen_awake_test.dart"
     ]
   },
   {
