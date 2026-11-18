@@ -19,9 +19,13 @@ enum BrowserAutofillNeeds {
   /// WebView). Not verified here.
   nothing,
 
-  /// Probably never asks Zen: Bitwarden's configuration lists it among the
-  /// browsers that need Android's accessibility-based "compatibility mode",
-  /// which Zen does not declare (res/xml/zen_autofill_service.xml).
+  /// Hands no form to the autofill service itself: Android serves it in
+  /// its accessibility-based "compatibility mode", which Zen declares for
+  /// it (res/xml/zen_autofill_service.xml), and the page's address is what
+  /// its address bar shows (`compatibilityWebOrigin` in
+  /// ZenAutofillTrust.kt). Only where Android's own list allows the browser,
+  /// which Zen cannot read. A switch of its own like Chrome's is not known;
+  /// it is read in case the browser has one.
   compatibilityMode,
 
   /// Nothing verified is known.
@@ -75,13 +79,38 @@ const List<KnownBrowser> kKnownBrowsers = <KnownBrowser>[
     BrowserAutofillNeeds.compatibilityMode,
   ),
   KnownBrowser(
+    'com.microsoft.emmx.beta',
+    'Edge Beta',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
+    'com.microsoft.emmx.dev',
+    'Edge Dev',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
+    'com.microsoft.emmx.canary',
+    'Edge Canary',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
     'com.sec.android.app.sbrowser',
     'Samsung Internet',
     BrowserAutofillNeeds.compatibilityMode,
   ),
   KnownBrowser(
+    'com.sec.android.app.sbrowser.beta',
+    'Samsung Internet Beta',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
     'com.opera.browser',
     'Opera',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
+    'com.opera.browser.beta',
+    'Opera Beta',
     BrowserAutofillNeeds.compatibilityMode,
   ),
   KnownBrowser(

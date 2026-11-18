@@ -42,7 +42,9 @@ import androidx.autofill.inline.v1.InlineSuggestionUi
  * What the request carries to that activity is fixed here, in an immutable
  * PendingIntent the requesting app cannot change: the app's package as the
  * system reports it, the page's address only from a known browser signed
- * with its maker's certificate ([trustedWebOrigin]), and the ids of the fields the form has (the login,
+ * with its maker's certificate ([trustedWebOrigin]; in Android's
+ * compatibility mode only from its address bar, [compatibilityWebOrigin]),
+ * and the ids of the fields the form has (the login,
  * the password, or both: [chooseLoginFields]). Each new suggestion
  * cancels the one before it (one request code, FLAG_CANCEL_CURRENT).
  *
@@ -97,13 +99,17 @@ class ZenAutofillService : AutofillService() {
         // The page of the password field, or of the login when the form
         // asks for the login alone (the first step of two).
         val anchor = form.fields[chosen.password ?: chosen.username ?: return null]
-        val web = trustedWebOrigin(
-            client,
-            anchor.webDomain,
-            anchor.webScheme,
-            PackageSigningCertificates(packageManager),
-            Build.VERSION.SDK_INT,
-        )
+        val certificates = PackageSigningCertificates(packageManager)
+        // In compatibility mode (a browser that hands no form to the
+        // service itself, res/xml/zen_autofill_service.xml) the form comes
+        // from the browser's accessibility tree, where the page makes the
+        // nodes: no web domain on them counts, only the address bar's.
+        val compatibility = (request.flags and FillRequest.FLAG_COMPATIBILITY_MODE_REQUEST) != 0
+        val web = if (compatibility) {
+            compatibilityWebOrigin(client, addressBars(structure, client), certificates, Build.VERSION.SDK_INT)
+        } else {
+            trustedWebOrigin(client, anchor.webDomain, anchor.webScheme, certificates, Build.VERSION.SDK_INT)
+        }
 
         val intent = Intent(this, ZenAutofillActivity::class.java).apply {
             putExtra(ZenAutofillActivity.EXTRA_PACKAGE, client)
@@ -225,6 +231,41 @@ class ZenAutofillService : AutofillService() {
         }
     }
 
+    /**
+     * Every view of [structure] with one of [client]'s address bar ids
+     * ([isAddressBarId]), hidden ones too (a hidden copy is still one too
+     * many), up to [MAX_ADDRESS_BARS].
+     */
+    @RequiresApi(Build.VERSION_CODES.P)
+    private fun addressBars(structure: AssistStructure, client: String): List<AddressBarView> {
+        val found = mutableListOf<AddressBarView>()
+        var visited = 0
+        fun visit(node: AssistStructure.ViewNode, depth: Int) {
+            if (depth > MAX_DEPTH || visited++ >= MAX_NODES || found.size >= MAX_ADDRESS_BARS) {
+                return
+            }
+            if (isAddressBarId(client, node.idEntry)) {
+                found.add(
+                    AddressBarView(
+                        idEntry = node.idEntry,
+                        idPackage = node.idPackage,
+                        idType = node.idType,
+                        focused = node.isFocused,
+                        webDomain = node.webDomain,
+                        webScheme = node.webScheme,
+                    ),
+                )
+            }
+            for (i in 0 until node.childCount) {
+                visit(node.getChildAt(i), depth + 1)
+            }
+        }
+        for (i in 0 until structure.windowNodeCount) {
+            visit(structure.getWindowNodeAt(i).rootViewNode, 0)
+        }
+        return found
+    }
+
     /** The text fields of a form, in the order on the screen, with their ids. */
     @RequiresApi(Build.VERSION_CODES.P)
     private class FormReader {
@@ -297,6 +338,14 @@ class ZenAutofillService : AutofillService() {
         /** Bounds for a form built to be heavy; a login form is far below. */
         private const val MAX_DEPTH = 64
         private const val MAX_FIELDS = 200
+
+        /**
+         * Views looked at for the address bar. A page with more nodes than
+         * this gives no second bar beyond them, but Android puts the
+         * address only on the first view with the bar's id (breadth
+         * first), so a page's node far down never gets it.
+         */
+        private const val MAX_NODES = 20000
 
         // The suggestion's colours: light and dark surfaces with text well
         // above 4.5:1 on them.
