@@ -1,4 +1,4 @@
 /// This build of Zen (kept equal to `version:` in pubspec.yaml; a test
 /// checks it). Network updates only offer a higher [kAppBuild].
-const String kAppVersion = '1.18.0';
-const int kAppBuild = 36;
+const String kAppVersion = '1.18.1';
+const int kAppBuild = 37;

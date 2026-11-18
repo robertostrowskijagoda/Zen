@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.18.1 — 18.11.2026
+
 ### What's new
 - [en] Your backup with friends is safer: a lost phone's copy stays, and switching passwords off removes them from friends at once.
 - [en] Photos sent from a computer no longer carry where they were taken, and plugging in earphones during a call switches the screen at once.
