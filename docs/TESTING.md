@@ -96,10 +96,15 @@ The bridge's local links and peers have tests of their own:
 `local_link_handshake_test.go` (handshake version 3: a recorded hello answers
 nothing played back later or elsewhere, a version 2 hello makes both sides
 close, hellos of one size, a connection that says nothing leaves its slot
-after two seconds), `local_link_advert_test.go` (an advert holds only as
+after two seconds, one that sends a valid opening and then stalls after two
+more), `local_link_advert_test.go` (an advert holds only as
 many tags as keep a false match rare, a filter too full matches nothing on
 any transport, the eight devices go in turns, a forged advert with every bit
-set matches no phone), `public_peer_order_test.go` (every node's own order of
+set matches no phone, a spoofed beacon has a phone dial no port but a link
+port, a friend's beacon played back from another address dials nothing,
+and few dials go out in a window), `lan_discovery_test.go` (handshake slots
+per address at once and per window, against the handshake's timing),
+`public_peer_order_test.go` (every node's own order of
 the public peers, one pick per operator, the same after a restart, a peer
 added or dropped moves no other) and `stranger_signals_test.go` (the budget
 that a receive-only node gives senders it does not name before the app is
