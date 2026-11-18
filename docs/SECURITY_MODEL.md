@@ -147,9 +147,10 @@ computer could break. So Zen does not rely on it for identity:
   does not hold it in the clear.
 - **Cutting a device off.** Every device of an account holds the account
   key, so the account key alone cannot decide which devices are yours.
-  Phones of this version (both sides need it; a friend on an older version
-  takes certificates and cut-offs by the account key alone, as before)
-  judge them by device keys and time (`device_trust.dart`):
+  Phones of this version (co-signatures need 1.18.0 or later on both
+  sides, the rule for a new friend's first device 1.18.1 or later on the
+  friend's side; a friend on an older version takes certificates and
+  cut-offs by the account key alone, as before) judge them by device keys and time (`device_trust.dart`):
   - A device you link (or copy the account to) from one of yours is
     **co-signed** by that device and counts with friends at once. Every
     device also marks its own certificate, which says the account
@@ -547,7 +548,8 @@ friend list or device record names it only as a hint, see above).
   a block still finds it. **The honest limit:** an account costs nothing, so
   a new account, a new device key or a new dating key of the same person
   cannot be recognised; Zen refuses what it knows to be theirs, never the
-  person.
+  person. For Dating that means keys their own phone told yours (a new key
+  that only a mutual friend vouches for is not known to be theirs).
 - **What leaves with a file you send.** Photos, films and recordings sent in
   a chat leave without place, time and device data (EXIF and the like),
   whichever way they were picked (gallery, camera, drop, paste, recording);
@@ -1066,5 +1068,63 @@ inbox.
   data is yours anyway, but it could make the copy smaller. Holders also
   see when and how much your copy changes. Someone with your unlocked phone
   can change who your close friends are, and with them who holds pieces.
+- A locked phone is quiet for a group whose members its notice kit cannot
+  list: the kit holds at most 20,000 member tags (`maxMemberTags`, one per
+  member device, all joined groups together) and a group goes in whole or as
+  unlisted (at most 2,000 of those; past that it is not named at all, with
+  the same result). For an unlisted group no message or call rings or is
+  told of while locked (the frames are kept for the app and show once it is
+  unlocked). The alternative, the capability's word "a friend, or a member
+  of some joined group", would let any friend make the phone ring by
+  claiming to speak in a group they are not in, which the app's own rule
+  never allows.
+- Bluetooth link adverts: an Android phone's advert carries no L2CAP
+  channel number (PSM); it is on GATT (`…0003`) and is read by any device
+  that connects, so an active party can read it. A Linux computer (no GATT
+  server) and a phone on 1.18.0 or older still advertise it (`"ZL"`); on
+  Linux it is the first free one from `0x80`, nearly the same on every
+  computer, so it does not tell one from another. That a Zen device is near
+  stays visible (the service UUID, the manufacturer data's `"ZG"`/`"ZL"`).
+- Outgoing photos, films and recordings are cleaned of place, time and
+  device data without re-encoding, so what the cleaner does not walk goes
+  unchanged: a file over 64 MB, an Ogg or WebM file, a HEIC/AVIF whose boxes
+  `heif_metadata.dart` does not understand, any other kind. The attach
+  sheet says so each time for a photo, a film or a recording, but it is a
+  warning, not a block, and the file may carry that data.
+- Local links over Wi-Fi use fixed ports: UDP 39319 for beacons and TCP
+  39320 to 39335 for links (a firewall rule can name them). A device
+  before 1.18.1 names a port the system gave it, which a newer device no
+  longer dials: such a pair links over the LAN only when the older device
+  dials, else through the internet until it is updated.
+- Account devices: someone who holds the account key and password cannot
+  be told from the owner beyond the 24-hour wait and the veto, and within
+  that day a thief who holds a stolen device can cut off the owner's device
+  that answers him (see "Cutting a device off"). A phone restored from the
+  account key alone is a device nobody co-signed, so friends hand it the
+  copy they hold only after it counts (24 hours) and at its next daily
+  search: about two days. Co-signatures need 1.18.0 or later on both sides,
+  the rule for a new friend's first device 1.18.1 or later on the friend's
+  side.
+- Dating, hiding: a profile hidden *only from* a direct friend is answered
+  to questions that come through that friend from further away, because
+  the phone must take his word about whose question it is (the first
+  phone on the way vouches for the asker's key); a friend with a modified
+  app can present his own question as someone else's and so is not hidden
+  from. Hiding him with his circle closes it (nothing that reaches the
+  profile through him is answered). Blocking recognises a dating key as a
+  person's only when that person's own phone told it (`date_key`, from
+  their address); a new dating key that a mutual friend vouches for, or
+  that reaches the phone otherwise, is a new person to a block. The 1.17.0
+  note on blocks said more for Dating than this.
+- Pyramid seals: a seal needs most of the era's treasurers (`n ~/ 2 + 1`),
+  which is all of them when there are two, so with two treasurers (or one)
+  a single one that does not sign holds the seal and with it the end of the
+  era; changes of the tree reach the money only after the seal that names
+  them. An operation counts by the same majority.
+- Synced deletions: besides the tombstones written again for 30 days (and
+  the bounded markers of the dating profile, the profile and the
+  meetings), each device keeps its own record of every deletion in the
+  synced states for good, with no value in it, and it only grows. It names
+  what was deleted, not what it held.
 
 Found something? Please report it privately: [SECURITY.md](../SECURITY.md).

@@ -254,6 +254,12 @@ guide.
 
 ## Limits
 
+- With no network Zen rests, but not entirely: the look for friends nearby
+  over Bluetooth goes on, as Bluetooth works without a network. By default
+  that is at most 12 short wakes an hour (fewer when it finds nobody; the
+  interval you set under *Looking around in the background* decides) and
+  none when it is switched off; if your battery matters more than meeting
+  friends nearby, switch it off.
 - Any Yggdrasil node answers debug questions about its direct neighbours.
   This cannot be switched off without a change in Yggdrasil itself; for a
   computer bridge it reveals the keys of friends' phones connected to it.

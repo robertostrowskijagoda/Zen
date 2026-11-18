@@ -10,6 +10,9 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+### Fixes and changes
+- **Correction to 1.17.0 on blocks in Dating**: that entry said a block of a person applied in every feature and that a new dating key no longer beat a block in Dating, which claimed more than was done. A block covers the dating keys the person's own phone told yours, and a new dating key that only a mutual friend vouches for is a new person to it, until their phone tells you. Documents: the known limits that follow from the decisions of 1.17.0 to 1.18.1 (a locked phone and very large groups, Bluetooth adverts, files that go unchanged, the ports of local links, calls, account devices, Dating, the pyramid's seal, battery with no network, the media vault sweep, recorded deletions) are written in the guide pages and the security model.
+
 ## 1.18.1 — 18.11.2026
 
 ### What's new

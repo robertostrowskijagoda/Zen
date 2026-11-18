@@ -2628,7 +2628,19 @@ From 1.12.0 on, older formats are kept readable (the rules are in
   address is a claim.
 - Local-link adverts and Bluetooth/Wi-Fi Direct records show that *a* Zen
   device with local links is nearby (and roughly how many devices it links
-  with), not whose it is.
+  with), not whose it is. The L2CAP channel number (PSM) is on GATT for an
+  Android phone, readable by anyone who connects; Linux computers and phones
+  on 1.18.0 or older still advertise it (see Transports in the local links entry).
+- LAN links use UDP 39319 and TCP 39320-39335, so a firewall rule can name
+  them. A device before 1.18.1 names a port of the system's choice that a
+  newer one does not dial: that pair links over the LAN only when the older
+  device dials, else through the internet.
+- A locked receiver's notice kit lists at most 20,000 member tags; a group
+  that does not fit is quiet while locked, so that no friend can make the
+  phone ring by claiming to speak in a group (SECURITY_MODEL.md, Honest
+  limits).
+- A seal of an era needs `n ~/ 2 + 1` of its `n` treasurers: with two, one
+  that does not sign holds it.
 
 ## 7. Open items for this document
 

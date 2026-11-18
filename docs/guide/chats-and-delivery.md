@@ -338,13 +338,16 @@ timeout when the call ends. A voice call held at the ear on the earpiece
 turns the screen off and ignores touches while the phone is at the ear,
 and lights it again when you take it away (Android, where the phone has a
 proximity sensor). Earphones or a Bluetooth headset plugged in or taken
-away during a call switch between the two at once, and "Głośnik" shows
-where the sound is.
+away during a call switch between the two (Android: it hears the change
+about 0.3 seconds after it happens), and "Głośnik" shows where the sound
+is.
 
-When you call someone you hear the ringing tone while their phone rings,
-and a busy tone if they decline, are busy or do not answer; a short signal
-when a call drops and Zen tries to bring it back; and the chimes when it
-connects and ends. These sounds belong to the call: they play on the call's
+When you call someone from an Android phone you hear the ringing tone
+while their phone rings, and a busy tone if they decline, are busy or do
+not answer; a short signal when a call drops and Zen tries to bring it back;
+and the chimes when it connects and ends (an iPhone plays none of these
+sounds, and a computer plays only the two chimes, when the call connects and
+when it ends). These sounds belong to the call: they play on the call's
 volume and route (earpiece, loudspeaker or headset) also on a phone set to
 silent or vibrate. An incoming call's ringing and message sounds still
 follow silent mode and Zen's notification settings. Before, only a call that was still
@@ -429,6 +432,41 @@ to be theirs, never the person.
 - While an Android phone sleeps (Doze), mail from the mailboxes can come a
   few minutes late.
 - Read receipts exist only in one-to-one chats.
+- **A locked phone and a lot of group members.** A locked phone lets a
+  group message or a group call ring only when the sender is a member of
+  that group, and it knows who is a member from a short list it keeps for
+  every group you are in (one entry per member's device, at most 20,000
+  entries in all your groups together). A group that does not fit is left
+  out whole: for it the locked phone gives no notice and does not ring, calls
+  included. Nothing is lost: the messages are kept and show when you open
+  Zen. The reason is that without that list any friend could make your
+  phone ring by claiming to write in a group they are not in. With groups of
+  up to 256 people this only happens when you are in many big groups; if a
+  group of yours stays quiet on the lock screen, open Zen to read it.
+- **Photos, films and recordings that go as they are.** Zen takes the place,
+  time and device data out of what you send in a chat, but it cannot do it
+  for a file over 64 MB, for Ogg and WebM files (an Ogg recording, a WebM
+  film) and for a HEIC or AVIF photo whose layout it does not understand;
+  these go unchanged and may carry that data. The attach sheet warns you
+  each time, before you send; if it matters, send another copy (a
+  screenshot of a photo carries none).
+- **Calls.** The screen goes dark at your ear only in a voice call on the
+  earpiece, and only on Android. An iPhone does not turn the screen off at
+  the ear and plays no ringing or busy tone; a computer plays only the two
+  chimes of connecting and ending. A change of headset is noticed about 0.3
+  seconds late. The picture is at most 960 x 540 and gets smaller when the
+  phone or the connection cannot keep up; on most phones the picture is
+  encoded in software (VP8), which is work for a weak phone, and that is
+  why the voice comes first.
+- **Cleaning of leftover files.** When you leave Zen (at most once a day
+  while it runs) it removes encrypted files nothing refers to any more: at
+  least two days old, left by a crash or an unfinished transfer. To know
+  what is in use it reads the messages of every conversation once in that
+  run, which takes a moment on a phone with many chats. If it cannot read
+  everything, or when more than half of more than 20 files look unused, it
+  deletes nothing and only says so in the diagnostic log (it then trusts
+  its list of files in use less than the files); such files stay until a
+  later run finds the list whole.
 - Leaving a group removes its chat, its files and its notifications from
   **every device of your account**, not only this phone (the dialog says
   so); declining a group or **Clear history** in a group removes them from

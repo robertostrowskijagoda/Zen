@@ -162,6 +162,10 @@ never your address.
 - Nearby works on Android and on computers with Bluetooth LE (a Mac only
   looks around); not on iPhone. Writing to people nearby, the Bluetooth
   wave and looking around while the phone is locked are Android only.
+- With no network at all Zen rests, except for the looks around in the
+  background: they go on (by default at most 12 short wakes an hour, none
+  when *Keep looking in the background too* is off), because Bluetooth
+  needs no network.
 - Dinner reminders are checked while Zen runs (every 15 minutes) and, on
   Android, by the background service while the phone is locked.
 - A go-between in food sharing or Table for six could swap the key in a
