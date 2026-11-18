@@ -133,6 +133,15 @@ be the head.
 - A vote cast before the ballot is ready waits on your phone and goes out
   by itself. If someone stays silent, after a third of the voting time the
   cards of two people are enough.
+- The end of the vote is fixed when it is asked for. A vote counts only
+  when it was cast before the end and reached most of the cell by the end
+  plus ten minutes (phone clocks differ a little). After the end the apps
+  of the cell's members say, each by itself, which votes reached them in
+  time, and most of the cell then sign one close with every vote most of
+  them got: members who saw different votes still close it, and a vote
+  sent after the end with an earlier date does not count, even if one
+  member says it came in time. Someone who signs two different closes of
+  one vote is shown with both, as for the treasurers' seals.
 
 ## Referendums
 
@@ -214,7 +223,8 @@ stricter path:
   the tree (a new treasurer, someone leaving), however it is dated,
   reaches the money only from the era after the seal that names it, so it
   undoes no payment. A cell vote that arrives late counts from when it was
-  seen: it cannot turn a vote its cell closed with the list of its votes.
+  seen: it cannot turn a vote its cell closed with the list of its votes;
+  one the close lists (most of the cell got it in time) counts everywhere.
 - **What a seal left out is shown.** A payment a seal left out, one signed
   against the rules and a treasurer who signed two seals of one era were
   computed but shown nowhere; the wallet now lists them.

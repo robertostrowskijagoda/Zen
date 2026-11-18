@@ -141,10 +141,19 @@ abstract final class PyrT {
   /// folds after the seals.
   static const String seal = 'seal';
 
-  /// The close of a cell vote that ended by time: signed by most of the
-  /// vote's ring, it lists the votes that count. A vote it does not list
-  /// counts nowhere, whenever and however it comes.
+  /// The close of a cell vote once it ended: signed by most of the vote's
+  /// ring, it lists the votes that count — those most of the ring saw in
+  /// time ([voteSeen]). A vote it does not list counts nowhere, whenever
+  /// and however it comes; one it lists counts on every phone, also one
+  /// that got it late.
   static const String voteClose = 'vclose';
+
+  /// What one member of a cell vote's ring saw in time: the votes dated
+  /// before the vote's end that reached its phone before the end and
+  /// [kPyrMaxSkewMs] more. Signed by that member alone; a vote goes into
+  /// the close only when most of the ring list it, so a vote dated back
+  /// and sent after the end, which one member alone claims, never does.
+  static const String voteSeen = 'vseen';
 
   /// Kinds published through a friend outside the cell (or the court), so
   /// the first phone to show them is not the author's: the anonymous
