@@ -654,6 +654,12 @@
     ]
   },
   {
+    "file": "lib/src/features/media/heif_metadata.dart",
+    "tests": [
+      "test/heif_metadata_test.dart"
+    ]
+  },
+  {
     "file": "lib/src/features/passwords/public_suffix.dart",
     "tests": [
       "test/password_public_suffix_test.dart"

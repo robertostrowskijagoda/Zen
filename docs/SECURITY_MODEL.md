@@ -541,8 +541,13 @@ friend list or device record names it only as a hint, see above).
   a chat leave without place, time and device data (EXIF and the like),
   whichever way they were picked (gallery, camera, drop, paste, recording);
   one module (`outgoing_media.dart`) cleans them as posts already were. A
-  file of another kind goes unchanged, and so does one that cannot be
-  cleaned (the attach sheet says so), and it may carry such data.
+  HEIC/AVIF photo no decoder on the device reads keeps its picture bytes
+  and loses its EXIF and XMP items, overwritten in place by a bounded walk
+  of its boxes (`heif_metadata.dart`). A file of another kind goes
+  unchanged, and so does one that cannot be cleaned (a HEIC whose boxes
+  that walk does not understand, anything over 64 MB); the attach sheet
+  says so, every time for a photo, a film or a recording, and it may carry
+  such data. Nothing over 22 MB reaches a friend in a chat anyway.
 - **What friends keep of you.** Friends hold your ledger: `feed` (posts),
   `acts` (reactions, comments and the like), `profile`, and `private`
   (sealed to your own devices: the copy of your friends and groups, saved

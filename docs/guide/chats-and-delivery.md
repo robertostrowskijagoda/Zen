@@ -29,8 +29,12 @@
   (EXIF and the like), however you picked them: from the gallery or the
   camera, dropped, pasted or recorded (a film used to go as it was, and a
   HEIC photo as a file with its whole EXIF, while posts already stripped
-  both). A file of another kind goes unchanged, and so does one that cannot
-  be cleaned; the attach sheet says so before you send. More kinds of
+  both). A HEIC or AVIF photo the device cannot decode (Windows, Linux,
+  Android before 9) goes as a file with its EXIF and XMP overwritten in
+  place, the picture itself untouched. A file of another kind goes
+  unchanged, and so does one that cannot be cleaned (a HEIC whose layout
+  Zen does not know, a file over 64 MB); the attach sheet says so before
+  you send, every time for a photo, a film or a recording. More kinds of
   received files warn before opening.
 - On a computer, **drop** files anywhere on a conversation or **paste** them
   with Ctrl+V (⌘V on a Mac): photos, GIFs, videos, files. Text in the

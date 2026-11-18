@@ -356,7 +356,7 @@ void main() {
       expect(watch.elapsed, lessThan(const Duration(seconds: 5)));
     });
 
-    test('random damage never throws, and only ever blanks', () {
+    test('random damage never throws and only overwrites in place', () {
       final Random random = Random(_seed);
       final List<Uint8List> seeds = <Uint8List>[
         _sample(),
