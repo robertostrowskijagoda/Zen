@@ -6189,6 +6189,7 @@
   "„{name}” chce pobrać Twoje konto.": "“{name}” ingin mengunduh akun Anda.",
   "„{name}” działa na innym urządzeniu": "“{name}” aktif di perangkat lain",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "“{name}” dikirim apa adanya. Zen menghapus lokasi, waktu, dan data perangkat dari foto, video, dan rekaman; dari berkas lain tidak bisa, jadi berkas itu dikirim dengan apa pun yang tersimpan di dalamnya (mis. penulis, kadang lokasi).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "“{name}” dikirim apa adanya: Zen tidak bisa menghapus lokasi, waktu, dan data perangkat darinya, jadi semuanya ikut terkirim jika tercatat.",
   "„{name}” jest odłączone.": "“{name}” telah diputus.",
   "„{name}” jest potwierdzone.": "“{name}” sudah dikonfirmasi.",
   "„{name}” już są na liście.": "“{name}” sudah ada di daftar.",

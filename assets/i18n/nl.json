@@ -6317,6 +6317,7 @@
   "„{name}” chce pobrać Twoje konto.": "“{name}” wil je account downloaden.",
   "„{name}” działa na innym urządzeniu": "“{name}” is actief op een ander apparaat",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "“{name}” gaat ongewijzigd. Zen haalt locatie, tijd en apparaatgegevens uit foto’s, video’s en opnamen; uit andere bestanden kan het dat niet, dus die gaan mee met wat erin staat (bijv. de auteur, soms de locatie).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "“{name}” gaat ongewijzigd: Zen kon er locatie, tijd en apparaatgegevens niet uit halen, dus die gaan mee als ze zijn opgeslagen.",
   "„{name}” jest odłączone.": "“{name}” is losgekoppeld.",
   "„{name}” jest potwierdzone.": "“{name}” is bevestigd.",
   "„{name}” już są na liście.": "“{name}” staat al op de lijst.",

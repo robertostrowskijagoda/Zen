@@ -6333,6 +6333,7 @@
   "„{name}” chce pobrać Twoje konto.": "“{name}” quiere descargar tu cuenta.",
   "„{name}” działa na innym urządzeniu": "“{name}” está activo en otro dispositivo",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "«{name}» sale sin cambios. Zen quita la ubicación, la hora y los datos del dispositivo de fotos, videos y grabaciones; en otros archivos no puede, así que salen con lo que lleven guardado (p. ej. el autor, a veces la ubicación).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "«{name}» sale sin cambios: Zen no pudo quitarle la ubicación, la hora y los datos del dispositivo, así que salen con él si estaban guardados.",
   "„{name}” jest odłączone.": "“{name}” está desvinculado.",
   "„{name}” jest potwierdzone.": "«{name}» está confirmado.",
   "„{name}” już są na liście.": "“{name}” ya están en la lista.",

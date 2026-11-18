@@ -6317,6 +6317,7 @@
   "„{name}” chce pobrać Twoje konto.": "„{name}” le szeretné tölteni a fiókodat.",
   "„{name}” działa na innym urządzeniu": "„{name}” egy másik eszközön működik",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "„{name}” változatlanul megy el. A Zen eltávolítja a helyet, az időt és az eszközadatokat a fotókból, videókból és hangfelvételekből; más fájlokból nem tudja, ezért azok azzal mennek el, ami bennük van (pl. a szerző, néha a hely).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "„{name}” változatlanul megy el: a Zen nem tudta eltávolítani belőle a helyet, az időt és az eszközadatokat, ezért ezek vele mennek, ha el voltak mentve.",
   "„{name}” jest odłączone.": "„{name}” leválasztva.",
   "„{name}” jest potwierdzone.": "„{name}” megerősítve.",
   "„{name}” już są na liście.": "„{name}” már rajta van a listán.",

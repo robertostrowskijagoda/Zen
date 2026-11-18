@@ -6189,6 +6189,7 @@
   "„{name}” chce pobrać Twoje konto.": "「{name}」があなたのアカウントをダウンロードしようとしています。",
   "„{name}” działa na innym urządzeniu": "「{name}」は別の端末で動いています",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "「{name}」はそのまま送られます。Zenは写真、動画、録音から位置、時刻、端末のデータを取り除きますが、ほかのファイルでは取り除けないため、中に保存されているもの（例：作成者、場合によっては位置）と一緒に送られます。",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "「{name}」はそのまま送られます。Zenは位置、時刻、端末のデータを取り除けなかったため、記録されている場合はいっしょに送られます。",
   "„{name}” jest odłączone.": "「{name}」を切り離しました。",
   "„{name}” jest potwierdzone.": "「{name}」は確認済みです。",
   "„{name}” już są na liście.": "「{name}」はすでにリストにあります。",

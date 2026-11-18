@@ -6317,6 +6317,7 @@
   "„{name}” chce pobrać Twoje konto.": "“{name}” आपका खाता डाउनलोड करना चाहता है।",
   "„{name}” działa na innym urządzeniu": "“{name}” दूसरे डिवाइस पर चल रहा है",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "“{name}” बिना बदलाव के जाता है। Zen फ़ोटो, वीडियो और रिकॉर्डिंग से जगह, समय और डिवाइस की जानकारी हटा देता है; दूसरी फ़ाइलों से नहीं हटा सकता, इसलिए वे उसमें सहेजी चीज़ों के साथ जाती हैं (जैसे लेखक, कभी-कभी जगह)।",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "“{name}” बिना बदलाव के जाता है: Zen उसमें से जगह, समय और डिवाइस की जानकारी नहीं हटा सका, इसलिए अगर वे दर्ज थे तो वे उसके साथ जाते हैं।",
   "„{name}” jest odłączone.": "“{name}” अनलिंक हो गया है।",
   "„{name}” jest potwierdzone.": "“{name}” की पुष्टि हो गई।",
   "„{name}” już są na liście.": "“{name}” पहले से सूची में हैं।",

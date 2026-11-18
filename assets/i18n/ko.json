@@ -6189,6 +6189,7 @@
   "„{name}” chce pobrać Twoje konto.": "‘{name}’님이 내 계정을 내려받으려고 해요.",
   "„{name}” działa na innym urządzeniu": "“{name}”이(가) 다른 기기에서 작동 중이에요",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "“{name}”은(는) 그대로 전송돼요. Zen은 사진, 동영상, 녹음에서 위치, 시간, 기기 데이터를 제거하지만 다른 파일은 제거하지 못해서, 그 안에 저장된 내용(예: 작성자, 때로는 위치)과 함께 전송돼요.",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "“{name}”은(는) 그대로 전송돼요. Zen이 위치, 시간, 기기 데이터를 제거하지 못해서, 기록되어 있다면 함께 전송돼요.",
   "„{name}” jest odłączone.": "“{name}”의 연결이 해제됐어요.",
   "„{name}” jest potwierdzone.": "“{name}”이(가) 확인되었어요.",
   "„{name}” już są na liście.": "“{name}” 이웃은 이미 목록에 있어요.",
