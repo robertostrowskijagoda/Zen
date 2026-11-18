@@ -6445,6 +6445,7 @@
   "„{name}” chce pobrać Twoje konto.": "„{name}“ chce stáhnout tvůj účet.",
   "„{name}” działa na innym urządzeniu": "„{name}“ běží na jiném zařízení",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "„{name}“ odchází beze změny. Zen z fotek, videí a nahrávek odstraňuje polohu, čas a údaje o zařízení; z ostatních souborů to neumí, takže odcházejí s tím, co je v nich uloženo (např. autor, někdy poloha).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "„{name}“ odchází beze změny: Zen z něj neuměl odstranit polohu, čas a údaje o zařízení, takže odcházejí s ním, pokud byly uloženy.",
   "„{name}” jest odłączone.": "„{name}“ je odpojeno.",
   "„{name}” jest potwierdzone.": "„{name}“ je potvrzeno.",
   "„{name}” już są na liście.": "„{name}“ už je na seznamu.",

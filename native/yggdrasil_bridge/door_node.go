@@ -336,7 +336,8 @@ func (host *doorHost) drain() {
 	}
 }
 
-// watch moves the host to other public peers while it is off the mesh.
+// watch moves the host to other public peers while it is off the mesh, and
+// whenever it dials an operator the main node dials too.
 func (host *doorHost) watch() {
 	missed := 0
 	ticker := time.NewTicker(doorHostCheckInterval)
@@ -347,25 +348,38 @@ func (host *doorHost) watch() {
 			return
 		case <-ticker.C:
 		}
-		if host.meshUp(host.core.GetPeers()) {
-			missed = 0
-			continue
-		}
-		missed++
-		if missed >= doorHostMissedChecks || host.peerCount() == 0 {
-			missed = 0
+		var skip, repeer bool
+		missed, skip, repeer = doorHostCheck(host.meshUp(host.core.GetPeers()), missed, host.peerCount(), host.sharesWithMain())
+		if skip {
 			host.mu.Lock()
 			host.offset += doorHostPeerCount
 			host.mu.Unlock()
-			host.repeer()
-			continue
 		}
-		if host.sharesWithMain() {
-			// The main node's rotation moved onto the host's peer: the host
-			// moves away.
+		if repeer {
 			host.repeer()
 		}
 	}
+}
+
+// doorHostCheck is what the host does after a check: up tells whether its
+// link to a public peer works, missed how many checks before found it down,
+// peers how many peers it dials, shares whether one of them is run by an
+// operator the main node dials while the pool has another (sharesWithMain).
+// It returns the misses counted now, whether to move on in the pool past
+// the peers that failed, and whether to dial anew.
+//
+// The main node's rotation moved onto the host's peer: the host moves away,
+// whether its link works or not. A working link of the same operator as the
+// main node's would show that operator both keys from one IP address.
+func doorHostCheck(up bool, missed, peers int, shares bool) (int, bool, bool) {
+	if up {
+		return 0, false, shares
+	}
+	missed++
+	if missed >= doorHostMissedChecks || peers == 0 {
+		return 0, true, true
+	}
+	return missed, false, shares
 }
 
 // sharesWithMain reports whether the host dials an operator the main node

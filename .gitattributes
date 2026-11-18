@@ -10,6 +10,7 @@
 *.jpg binary
 *.ico binary
 *.ttf binary
+*.heic binary
 
 # Stored files of the upgrade fixtures (test/fixtures/upgrade).
 *.zenbin binary

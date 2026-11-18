@@ -876,7 +876,9 @@ void main() {
       await firstSync.start();
       addTearDown(firstSync.stop);
       final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
-      // The recovered account: the same account key on a new device.
+      // The recovered account: the same account key on a new device, copied
+      // from the first (which co-signs it).
+      await first.expectOwnDevice(a2);
       await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
       final LedgerNode second = _node(t2, disk: d2);
       await second.start();

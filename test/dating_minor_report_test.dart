@@ -365,4 +365,34 @@ void main() {
     expect(announced('date-msg-'), isTrue);
     expect(await darek.service.sendMessage(miaKey, 'Hej'), isTrue);
   });
+
+  test(
+    'a profile switched off by the pyramid or hidden after a report that '
+    'arrives announces nothing; one that may reach the person does',
+    () async {
+      for (final String how in <String>['banned', 'hidden', 'neither']) {
+        final _Net net = _Net();
+        final _Phone mia = _Phone(net, 'mia');
+        final _Phone darek = _Phone(net, 'darek');
+        net.link(mia, darek);
+        await mia.date('Mia', DatingGender.woman);
+        final String miaKey = mia.service.myKey!;
+        if (how == 'banned') {
+          darek.banned.add(miaKey);
+        } else if (how == 'hidden') {
+          darek.hidden.add(miaKey);
+        }
+        await darek.date('Darek', DatingGender.man);
+        await mia.service.maybePublish(force: true);
+        await darek.service.maybePublish(force: true);
+        expect(
+          darek.shown.any(
+            (RuntimeSystemNotification n) => n.id.startsWith('date-new-'),
+          ),
+          how == 'neither',
+          reason: how,
+        );
+      }
+    },
+  );
 }

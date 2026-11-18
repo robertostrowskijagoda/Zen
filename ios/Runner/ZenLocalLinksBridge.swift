@@ -21,7 +21,8 @@ import Security
 ///    service UUID (Apple lets apps show nothing else) and serves its
 ///    advert and its L2CAP PSM on GATT; it scans for every device while Zen
 ///    is open and reads others' adverts from their manufacturer data
-///    (Android, Linux: "ZL", the PSM, the advert) or over GATT (Apple).
+///    (Linux and Android on 1.18.0 and older: "ZL", the PSM, the advert) or
+///    over GATT (Apple, and newer Android, whose "ZG" carries no PSM).
 ///    Streams are L2CAP channels without encryption (the bridge encrypts),
 ///    the same as Android's insecure ones.
 ///  - `zen/multipeer`: Multipeer Connectivity between Apple devices

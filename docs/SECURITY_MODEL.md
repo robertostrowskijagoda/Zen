@@ -159,8 +159,13 @@ computer could break. So Zen does not rely on it for identity:
     only **24 hours after that friend first saw it**. Friends tell your
     devices about it; "Urządzenia" shows it with "To moje" (your device
     co-signs it, it counts at once) and "Odłącz" (a veto: it never
-    counts). Devices a friend sees within an hour of first meeting the
-    account count at once: nobody could have vetoed them for a new friend.
+    counts). For a new friend, the device it meets the account by (the
+    first one of the account it takes, whose hello brought it) counts at
+    once, with the devices that co-signed it: nobody could have vetoed
+    them for a new friend. Any other device follows the rules above even
+    when it comes in the same hour, so a device nobody co-signed waits its
+    24 hours there too. A new device takes at once the account's devices
+    certified before it that it finds within its first hour.
   - "Odłącz" is signed by the device that cuts, with the list of devices
     it keeps. Once an account co-signs, **a cut-off by the account key
     alone is refused**, and one counts only when its signer could count. A
@@ -179,8 +184,8 @@ computer could break. So Zen does not rely on it for identity:
   device of their own counts after 24 hours if you do not cut it off in
   that time; with the stolen device, before you cut it off, they can cut
   yours off, and whichever of your devices answers within the day goes
-  with it; a new friend meeting the account in that hour takes what it is
-  shown. They cannot add a device that counts at once, cut your devices off
+  with it; a new friend who meets the account through their own device
+  takes it as the device it met the account by. They cannot add a device that counts at once, cut your devices off
   with the account key alone, or bring a cut-off device back.
 - A hello from a stranger that only names a certificate is dropped without
   an answer, so nobody can probe whom you know.
@@ -469,9 +474,14 @@ friend list or device record names it only as a hint, see above).
   back only to a device the account certified and has not cut off (a
   signed request, made within the hour). A copy that is much smaller than
   the one kept (under half) does not replace it at once: the holder keeps
-  the larger previous copy for 30 days. A copy dated ahead of the holder's
-  clock, or signed by a device that was cut off, is refused and no longer
-  blocks every real copy, and the owner is told when friends refuse one. After a recovery, and after a key
+  the larger previous copy for 30 days, except when the new copy says
+  (signed) that the person switched the passwords off after the old one
+  was made: then the old one goes at once. A copy dated ahead of the
+  holder's clock, or offered by a device that was cut off, is refused and
+  no longer blocks every real copy, and the owner is told when friends
+  refuse one. A copy taken while its device counted is not dropped when
+  that device is cut off later: after losing a phone it may be the only
+  one; a newer copy replaces it. After a recovery, and after a key
   copy is restored (where one friend's invitation code, typed there, gives
   a new phone someone to ask), Zen asks the holders and friends, gathers
   the copies offered for 30 seconds, takes the newest, checks it and
@@ -490,7 +500,8 @@ friend list or device record names it only as a hint, see above).
   The account key comes back with the account password and the pieces of
   2 of them (with up to 4 holders), 3 (5 to 9) or 4 (10 or more); there is
   no way back without the password. Inside, the key is sealed under the
-  account password (Argon2id, 64 MiB, 2 passes); around that, each set of
+  account password (Argon2id, 64 MiB, 2 passes; 128 MiB with 3 passes is
+  opened too, any other cost is refused); around that, each set of
   pieces seals it under a fresh random secret split among the holders, so
   pieces of different sets never combine. The account password must have
   at least 12 characters, be hard to guess and differ from the app
@@ -541,8 +552,13 @@ friend list or device record names it only as a hint, see above).
   a chat leave without place, time and device data (EXIF and the like),
   whichever way they were picked (gallery, camera, drop, paste, recording);
   one module (`outgoing_media.dart`) cleans them as posts already were. A
-  file of another kind goes unchanged, and so does one that cannot be
-  cleaned (the attach sheet says so), and it may carry such data.
+  HEIC/AVIF photo no decoder on the device reads keeps its picture bytes
+  and loses its EXIF and XMP items, overwritten in place by a bounded walk
+  of its boxes (`heif_metadata.dart`). A file of another kind goes
+  unchanged, and so does one that cannot be cleaned (a HEIC whose boxes
+  that walk does not understand, anything over 64 MB); the attach sheet
+  says so, every time for a photo, a film or a recording, and it may carry
+  such data. Nothing over 22 MB reaches a friend in a chat anyway.
 - **What friends keep of you.** Friends hold your ledger: `feed` (posts),
   `acts` (reactions, comments and the like), `profile`, and `private`
   (sealed to your own devices: the copy of your friends and groups, saved
@@ -564,8 +580,9 @@ friend list or device record names it only as a hint, see above).
 - **The full account copy.** "Create a full account copy" writes the chosen parts of the
   account (always the account key) into one file, in parts of 1 GB when
   larger. It is sealed in frames of 1 MiB with AES-256-GCM under a key from
-  the backup password (Argon2id, 64 MiB, 2 passes; symmetric only, so
-  post-quantum safe); each frame's number and whether it is the last are
+  the backup password (Argon2id, 64 MiB, 2 passes; a file made with 128 MiB
+  and 3 passes is opened too, any other cost is refused before Argon2
+  runs; symmetric only, so post-quantum safe); each frame's number and whether it is the last are
   bound to it, so frames cannot be cut, swapped or added, and every file
   inside is checked by its SHA-256. A wrong password is told apart from a
   damaged file. Another account never replaces one that holds anything: a copy, a
@@ -822,8 +839,10 @@ a computer's tray too) writes its own notice kit, and a runner without one
 stays quiet (it used to ring and show the call card with "Połączenia" off,
 with "Powiadomienia z tego konta" off and for muted chats, and a hidden
 account gave itself away). "Odbierz" opens the account that is called, a
-muted friend's other devices stay quiet, and groups past the kit's size no
-longer go silent. One test runs the same signals through the app and
+muted friend's other devices stay quiet, and in groups past the kit's size
+(whose members it cannot list) nothing rings or is told of while locked:
+the background capability's word let any friend ring there, in a group they
+are not in. One test runs the same signals through the app and
 through every runner. Within an account: nothing with "Połączenia" off; a call
 only from a friend, or a group call from someone who speaks in that joined
 group; a group message only from someone who speaks in that group; a
@@ -1010,7 +1029,14 @@ inbox.
   one content, the one that dominates, instead of each its own once), and
   a back-dated change of the tree no longer undoes a payment (the seals,
   not the records' times, say who signs). An era of the treasurers lasts
-  up to six hours: a new treasurer signs from the next one.
+  up to six hours: a new treasurer signs from the next one. Only the
+  device at a treasurer's member address seals, so an honest treasurer
+  with several devices never signs two seals of an era that would mark it
+  as a cheater; a payee handed a final order whose number the treasurers
+  released counts it only once their agreed statement lists it. Open: the
+  close of a cell vote is still signed once per member and can stall when
+  members saw different votes (co-signing a larger close would let one
+  member list a vote dated back).
 - Self-update from GitHub takes only a file whose `SHA256SUMS` carries the
   release signing key's signature (one maintainer key is pinned in
   `release.dart`) and, on Android, an APK signed by the installed copy's

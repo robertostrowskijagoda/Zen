@@ -69,7 +69,9 @@ mailboxes, the signed ledger, pyramid records), (4) cryptography and
   same next one. A computer's built-in selection is spread the same way
   (countries first, each country's peers in its own order). The door host
   (`door_node.go`) takes a peer of a different operator than the main
-  node's, so no operator links the sticker on a door with the person.
+  node's, so no operator links the sticker on a door with the person; when
+  the main node's rotation reaches the door host's operator, the door host
+  moves to another at its next check, even while its link works.
 - **Port mapping** (`port_mapper.dart`): the SSDP search is believed only
   from the default gateway (the router that forwards a port to this
   computer is the gateway), its `LOCATION` must name that same address,
@@ -339,14 +341,23 @@ device keys, label `zen.local.v1`); a stranger has none.
   starts a new pairing; until one completes, the classical secret is used.
 
 - **Transports:** the same Wi-Fi, cable or hotspot network (UDP beacons on
-  port 39319 every 10 s while the app is used, 30 s otherwise, then TCP);
+  port 39319 every 10 s while the app is used, 30 s otherwise, then TCP on
+  one of ports 39320-39335);
   a Wi-Fi Direct group (Android, Windows), which is only a network the LAN
   discovery then runs over (the group's name and passphrase sit in the
   service record, so anyone nearby can join the group but cannot link);
-  Bluetooth (BLE GATT service `5a454e00-6c69-6e6b-0000-000000000001`,
-  manufacturer data of company `0xFFFF` starting `"ZL"`, L2CAP channels or,
-  on Windows, GATT streams; classic RFCOMM with paired devices on Android
-  and Windows); Apple Multipeer (service type `zen-link`). Wi-Fi discovery,
+  Bluetooth (BLE GATT service `5a454e00-6c69-6e6b-0000-000000000001`, L2CAP
+  channels or, on Windows, GATT streams; classic RFCOMM with paired devices
+  on Android and Windows); Apple Multipeer (service type `zen-link`). A
+  Bluetooth advert goes out as manufacturer data of company `0xFFFF`:
+  Android sends `"ZG"` and the advert in the scan response, and the L2CAP
+  channel number (PSM) only on GATT (`…0003`), which another Android phone
+  reads just before it connects, that is only from a device whose advert
+  carried a tag of its own; iPhones send only the service UUID and show
+  advert and PSM on GATT; Linux computers (no GATT server) send `"ZL"`,
+  the PSM and the advert. Phones on 1.18.0 and older sent `"ZL"` too:
+  they and newer phones still find each other (the older phone reads a
+  `"ZG"` phone's advert and PSM over GATT, as an iPhone's). Wi-Fi discovery,
   Wi-Fi Direct and Bluetooth are on unless turned off, Multipeer is off
   until the person turns it on; a native transport runs only while there
   is a device to link with. Phones use Wi-Fi interfaces only, never
@@ -367,10 +378,17 @@ device keys, label `zen.local.v1`); a stranger has none.
   with more than 35% of its bits set is made again under a new salt, and
   one a receiver sees with more than 40% set means nothing and is not
   tested on any transport (an advert with every bit set once matched every
-  phone). Bluetooth: the advert's service UUID and the L2CAP channel
-  number (PSM) in the manufacturer data are not hidden, so a Zen device,
-  and the same one while its listener runs, can be recognised by anyone in
-  range.
+  phone). Bluetooth: the service UUID and the `"ZG"` are not hidden, so
+  anyone in range can tell that a Zen device is there; nothing else in a
+  phone's advertisement stays the same from one advert to the next (the
+  slot is everyone's, the salt and the filter are new each time), so
+  together with the system's changing Bluetooth address it does not tie
+  one phone's adverts together. Until 1.18.0 Android put its PSM there,
+  which stays the same while its listener runs (Android hands PSMs out in
+  turn from `0x80`) and so did tie them together. A device that connects
+  over GATT can still read the PSM, an active step the phone takes part
+  in; a Linux computer still advertises its PSM, the first free one from
+  `0x80`, so nearly the same on every Linux computer.
 - **LAN beacon**: the advert, then the "people nearby" advert of 2.12 (20
   bytes, only while the person is visible), an info byte (that advert's
   length, 0 or 20, plus `0x80` while the sender looks around) and the TCP
@@ -390,8 +408,11 @@ device keys, label `zen.local.v1`); a stranger has none.
   one sent back to its sender names the wrong address. A device on
   version 2 sends its hello where the opening belongs; either side then
   closes, so the two link only over the internet until both have version
-  3. On a network stream the opening must come within two seconds, else
-  the slot is freed. Each side then encapsulates a secret to the other's
+  3. On a network stream the opening must come within two seconds, and
+  each later step (the hello, the ciphertext, the first record) within two
+  seconds more (four on a Bluetooth stream), all within eight; else the
+  slot is freed, so a side that sends a valid opening and then stalls holds
+  it for seconds, not for the whole handshake. Each side then encapsulates a secret to the other's
   ML-KEM key; the stream keys come from HKDF over the X25519 result and both
   ML-KEM secrets (the lower side's first), salt the pair's link key, info
   both hellos and both ciphertexts. So the stream is hybrid post-quantum,
@@ -402,15 +423,25 @@ device keys, label `zen.local.v1`); a stranger has none.
   sealed again by 1.5. The link counts the frames it carries for the device
   at its other end (`local_link_traffic.go`); a stream that names a frame
   longer than a node takes (1 MiB) is no longer counted.
-- A LAN beacon is taken only when it comes from the beacon port of an
-  address on one of this device's local networks and names the TCP port the
-  system gave the listener (never a well-known one), and a beacon is
-  answered only on the local network (the socket listens on every
-  interface, and a host with a public address would otherwise be answered
-  or dialled). An iPhone takes at most two waiting Bluetooth streams from
-  one device, as Android and the bridge do.
-- Limits: 2048 devices, 16 streams, 8 handshakes at once, 2 per source,
-  beacon rate limits per sender and in all.
+- A LAN beacon is taken only when it comes from the beacon port (UDP
+  39319) of an address on one of this device's local networks and names no
+  well-known port, and a beacon is answered only on the local network (the
+  socket listens on every interface, and a host with a public address
+  would otherwise be answered or dialled). Links are taken on the first
+  free TCP port of 39320-39335, and a beacon makes a device dial only its
+  own source address, only on one of those ports, at most 4 dials in 15 s
+  in all, and a recognised beacon counts once (its salt is remembered while
+  its advert is good): a beacon proves no key, but a copy of a friend's
+  played back from a made-up address comes after the real one and is
+  dropped. So a forged beacon cannot have a phone probe the LAN's hosts and
+  services. A device of an earlier version names a port the system gave
+  it; a later one does not dial it (that pair links when the earlier one
+  dials, or over the internet). An iPhone takes at most two waiting
+  Bluetooth streams from one device, as Android and the bridge do.
+- Limits: 2048 devices, 16 streams, 8 handshakes at once, 2 per source at
+  once and 3 per source in 15 s (a stranger holds a slot 4 s at most, so
+  one address holds 0.8 of a slot on average and ten are needed to hold
+  them all), a 2 s dial timeout, beacon rate limits per sender and in all.
 
 ### 1.7 Local interfaces and the update check [V]
 
@@ -614,7 +645,9 @@ decided yet is put off and comes again, not dropped and confirmed: while the
 friend list could not be read (a busy start) a message was dropped and still
 confirmed (the sender saw "delivered" for a message that was gone); the same
 for a message that overtook its sender's acceptance, and an edit that came
-before its message was confirmed while it waited in memory only.
+before its message was confirmed while it waited in memory only. A group
+invite or leave, a friend removal, a deletion, a reaction or a timer change
+that came while the friend list could not be read is put off the same way.
 
 **Disappearing timers** carry a stamp: a message carries when its sender's
 timer was set (`ttlAt`, beside `ttl`), and `disappear_timer` carries it as
@@ -812,7 +845,17 @@ on the earpiece holds the proximity sensor instead
 `ZenCallProximity.kt`): the screen goes dark and ignores touches at the
 ear and lights up away from it; released (once nothing is close) when the
 call ends, goes to the loudspeaker or a headset, or becomes a video call.
-One decision (`callScreenModeFor`) chooses between the two. The technical
+One decision (`callScreenModeFor`) chooses between the two. Since 1.18.1
+the sound moving by itself is part of it at once: while a call decides the
+screen, Android tells the app every new route (`ZenCallAudioRoute.kt`,
+method `onCallAudioRoute` on `zen/calls` with `bluetooth`, `wired`,
+`speaker` or `earpiece`), read a moment after the communication device
+changes (Android 12 and later), an audio device comes or goes, or (below
+Android 12) a headset is plugged or a Bluetooth SCO link changes; it
+listens and never polls. A headset or the loudspeaker is the sound out
+loud ("Głośnik" on, the screen kept on), the earpiece the phone at the ear
+(`callSessionOnAudioRoute`). Up to 1.18.0 a headset plugged in or out
+during a call was noticed only at the call's next change. The technical
 log says `Call screen kept on (reason)`, `Call screen keep-on released`,
 `Call screen dark at the ear` and `Call screen proximity released`, with
 whether the window or the sensor took it. Up to 1.17.1 only a ringing
@@ -1224,7 +1267,15 @@ without the password.
   seed under it once: Argon2id (64 MiB, 2 passes, `kRecoveryPasswordCost`)
   gives the password key, `SHA-256("zen.recovery.inner" | key)` the key of
   a ChaCha20-Poly1305 box of the seed (`RecoverySeal`, kept on the device
-  that hands the pieces out, `recovery/sealed`).
+  that hands the pieces out, `recovery/sealed`). A device opens a received
+  half, or a full account copy, only when it asks for one of two costs
+  (`kAcceptedRecoveryCosts`): 64 MiB with 2 passes (what this build
+  writes) or 128 MiB with 3 passes (`kHeavyRecoveryPasswordCost`, written
+  by nothing yet, accepted so that such a seal is not refused). Any other
+  cost is refused without running Argon2, so a hostile file cannot make a
+  phone spend absurd memory or time. A key file and a password wrapping
+  of the account key carry their cost and are bounded only by
+  `PasswordCost.fromJson` (8 KiB to 256 MiB, 1 to 10 passes).
 - **Generations.** For each generation of pieces the device draws a fresh
   32-byte circle secret, seals the seal's box again under
   `SHA-256("zen.recovery.outer" | secret)`, and splits the secret by
@@ -1387,10 +1438,15 @@ key pieces) opens it.
   at most 10 MB (+10 %) per account and 100 MB in all; a copy goes when
   neither holds any more (the piece went, the friendship ended). A copy
   whose size is under half of the one kept does not replace it at once: the
-  holder keeps the larger previous copy for 30 days. A manifest dated ahead
-  of the holder's clock, or signed by a device that was cut off, is refused
-  (it used to block every real copy), and the owner is told when friends
-  refuse.
+  holder keeps the larger previous copy for 30 days, unless the new
+  manifest's signed `sh` (when the person last took a part out on purpose,
+  the passwords switched off) is not older than it: then no copy made
+  before `sh` is kept. A manifest dated ahead of the holder's clock, or
+  offered by a device that does not count (cut off, or still waiting), is
+  refused (it used to block every real copy), and the owner is told when
+  friends refuse. A copy taken while its device counted stays when that
+  device is cut off later (the lost phone's copy after a recovery), until a
+  newer one replaces it, and a recovering phone takes it.
 - **A phone that is looking for its copy never replaces it with its own.** A
   search that gave up (a copy from a newer Zen, or thirty days without
   finding one) let the new phone make a copy of its nearly empty data, of
@@ -1614,15 +1670,20 @@ account's other devices take in what it lists, and its removals.
   `sender|_rid` for 14 days. Types that must go direct only
   (`_directOnlyPayloadTypes`: `friend_request`, `flat_*`) are never mailboxed.
   `_once: true` marks a payload to send once, not queued.
-- **Acknowledged once stored:** a chat message (`message`, `group_message`)
-  is acknowledged to its sender (`rly_ack`), remembered as seen and taken
-  out of the mailboxes only once the app said it has it on its disk
-  (`reportReliableKept`). A message the app failed to store (killed in
-  between, a full disk, a locked store) is not acknowledged: the sender or
-  a mailbox brings it again, and that copy is handed to the app again.
-  Further copies wait for the app's word for at most 1 minute
-  (`appKeepWait`); after a restart nothing was acknowledged. Every other
-  reliable payload is acknowledged as it arrives.
+- **Acknowledged once stored:** everything a person did
+  (`relayIsPersonalPayload`: a chat or group message, an edit, a deletion,
+  a reaction, a timer change, a group invite or leave, a friend removal
+  and the rest) is acknowledged to its sender (`rly_ack`), remembered as
+  seen and taken out of the mailboxes only once the app said it kept it or
+  refused it for good (`reportReliableKept`). One the app failed to store
+  (killed in between, a full disk, a locked store) or put off (the friend
+  list could not be read) is not acknowledged: the sender or a mailbox
+  brings it again, and that copy is handed to the app again. Further
+  copies wait for the app's word for at most 1 minute (`appKeepWait`);
+  after a restart nothing was acknowledged. What the app sends by itself
+  and gets again anyway, parts and blob manifests (taken in by the relay
+  layer) are acknowledged as they arrive; an own device's copy and a frame
+  from an unlinked device once the account routing has taken them.
 - The payload is written to disk before the first direct attempt. Direct
   retry schedule: 3 s, 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, 4 h, then
   every 4 h; any sign of life of the recipient, and a restart or 10 minutes
@@ -1816,8 +1877,9 @@ relays.
   a member, at most 5 per sender in 10 minutes; muted conversations; the
   group id as the app reads it. Who speaks in each joined group is in the
   kit as tags (`gt`: the first 32 hex of SHA-256(`group key + "\n" +
-  address`), unkeyed), so the kit names no member. What the kit does not
-  know counts as "no". A kit written before 1.16.5 has no tags: until the
+  address`), unkeyed), so the kit names no member; at most 20000 tags, and
+  a group whose tags do not fit (`gx`) is quiet while locked. What the kit
+  does not know counts as "no". A kit written before 1.16.5 has no tags: until the
   app is unlocked once and writes a new one, the background capability's
   friends and group members count, as before.
 - **Mail for a locked phone** (`rly_mail` to the locked service) is kept
@@ -2236,7 +2298,11 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   superset of operations, or the same ones with the lower id. It never
   leaves out an operation it signed that counts, nor, for 40 minutes
   after its time, one that may still count; from its first seal of an era
-  it signs no more operations of it. Of several seals of an era every
+  it signs no more operations of it. Of a treasurer's devices only the one
+  at the address its member record names seals (since 1.18.1): the private
+  ledger goes there, and two devices with one key and different ledgers
+  could otherwise sign two seals of an era neither of which dominates the
+  other. Of several seals of an era every
   phone takes the one the longest chain of later seals rests on, then the
   one with more operations, then the lower id; who signed two seals of an
   era neither of which dominates the other is shown with both. A change

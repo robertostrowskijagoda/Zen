@@ -6189,6 +6189,7 @@
   "„{name}” chce pobrać Twoje konto.": "“{name}” muốn tải tài khoản của bạn.",
   "„{name}” działa na innym urządzeniu": "“{name}” đang chạy trên thiết bị khác",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "“{name}” được gửi đi nguyên vẹn. Zen xóa vị trí, thời gian và dữ liệu thiết bị khỏi ảnh, video và bản ghi âm; với các tệp khác thì không làm được, nên chúng đi kèm những gì đã lưu trong đó (vd. tác giả, đôi khi cả vị trí).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "“{name}” được gửi đi nguyên vẹn: Zen không xóa được vị trí, thời gian và dữ liệu thiết bị khỏi tệp này, nên chúng đi kèm theo nếu đã được ghi lại.",
   "„{name}” jest odłączone.": "“{name}” đã bị ngắt kết nối.",
   "„{name}” jest potwierdzone.": "“{name}” đã được xác nhận.",
   "„{name}” już są na liście.": "“{name}” đã có trong danh sách.",

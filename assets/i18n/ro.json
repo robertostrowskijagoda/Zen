@@ -6445,6 +6445,7 @@
   "„{name}” chce pobrać Twoje konto.": "„{name}” vrea să-ți descarce contul.",
   "„{name}” działa na innym urządzeniu": "„{name}” e activ pe alt dispozitiv",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "„{name}” pleacă neschimbat. Zen elimină locația, ora și datele dispozitivului din fotografii, videoclipuri și înregistrări; din alte fișiere nu poate, așa că pleacă cu ce conțin (de ex. autorul, uneori locația).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "„{name}” pleacă neschimbat: Zen n-a putut elimina din el locația, ora și datele dispozitivului, așa că pleacă împreună cu el, dacă au fost înregistrate.",
   "„{name}” jest odłączone.": "„{name}” este deconectat.",
   "„{name}” jest potwierdzone.": "„{name}” este confirmat.",
   "„{name}” już są na liście.": "„{name}” sunt deja pe listă.",

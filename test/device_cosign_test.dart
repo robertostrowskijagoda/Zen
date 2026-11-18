@@ -259,6 +259,10 @@ void main() {
     }
     expect(await cel.addRevocation(old), isTrue);
     expect(cel.isCutOff(w.account, s.id), isTrue);
+    // The restored device, co-signed by nobody, waits its day here too:
+    // the friend met the account by its first device.
+    expect(cel.pendingUntil(w.account, p.id), 3000 * _h + _day);
+    w.now += _day;
     expect(cel.isRevoked(w.account, p.id), isFalse);
     // Taken again: nothing changes.
     expect(await cel.addRevocation(old), isTrue);

@@ -25,8 +25,11 @@ import (
 // ZenLocalLinksBridge.swift):
 //   - BLE: GATT service 5a454e00-6c69-6e6b-0000-000000000001 (advertised),
 //     characteristics …0002 (the advert) and …0003 (the L2CAP PSM, uint16
-//     little-endian); manufacturer data of company 0xFFFF: "ZL", the PSM
-//     (uint16 little-endian), the advert. GATT streams where there are no
+//     little-endian); manufacturer data of company 0xFFFF: "ZG" and the
+//     advert (Android: the PSM only on GATT, so that no number of the
+//     phone's own goes out with every advert), or "ZL", the PSM (uint16
+//     little-endian) and the advert (Linux, with no GATT server; phones on
+//     1.18.0 and older). GATT streams where there are no
 //     L2CAP channels (Windows, PSM 0; Android takes and opens them): …0005
 //     written with response by the client, …0006 notified by the server, an
 //     empty value ends the stream.

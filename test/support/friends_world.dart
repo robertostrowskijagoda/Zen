@@ -693,6 +693,8 @@ final class FriendsPhone implements RelayPeerSource {
       _appFrames.add(next);
       final String? from = _speakerOf(next.from);
       if (from == null) {
+        // Settled for the relay layer, as AccountRoutingTransport does.
+        await reportReliableKept(next.payload, kept: true);
         continue;
       }
       final Object? type = next.payload['type'];
@@ -711,6 +713,7 @@ final class FriendsPhone implements RelayPeerSource {
             p is Map<String, dynamic>) {
           await (mirrored ?? hub.recordMirroredSend)(to, p);
         }
+        await reportReliableKept(next.payload, kept: true);
         continue;
       }
       final bool? keeps = appKeeps == null ? true : appKeeps!(next);
@@ -1087,6 +1090,7 @@ final class FriendsWorld {
     required String account,
     SocialHubState? seed,
     Uint8List? accountSeed,
+    Future<void> Function(String address)? beforeStart,
   }) async {
     final SimPhone sim = net.phone(name);
     final Directory dir = Directory.systemTemp.createTempSync('zen-world-');
@@ -1102,6 +1106,9 @@ final class FriendsWorld {
     _byName[name] = p;
     _byAddress[sim.address] = p;
     _accountOf[sim.address] = account;
+    if (beforeStart != null) {
+      await beforeStart(sim.address);
+    }
     await p._start();
     return p;
   }
@@ -1126,7 +1133,25 @@ final class FriendsWorld {
       // linked in the app does (it had an account of its own, and the
       // friends never took it for the owner's).
       accountSeed: key == null ? null : Uint8List.fromList(key),
+      // The device it is linked from co-signs it, as the app's linking
+      // does: friends count it at once, not after its day.
+      beforeStart: owner.ledger == null
+          ? null
+          : (String address) => owner.ledger!.expectOwnDevice(address),
     );
+    // And the new device, as the app's linking has it: the link names the
+    // device it came from (whose greeting it trusts) and the account's
+    // other devices, which it greets; that greeting is what the device it
+    // came from co-signs.
+    final LedgerNode? linked = p.ledger;
+    final LedgerNode? from = owner.ledger;
+    if (linked != null && from != null) {
+      await linked.expectOwnDevice(owner.address);
+      await linked.rememberDeviceAddresses(<String>[
+        owner.address,
+        ...from.siblingAddresses,
+      ]);
+    }
     await settleMailboxes();
     return p;
   }

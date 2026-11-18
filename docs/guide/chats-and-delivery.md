@@ -29,8 +29,12 @@
   (EXIF and the like), however you picked them: from the gallery or the
   camera, dropped, pasted or recorded (a film used to go as it was, and a
   HEIC photo as a file with its whole EXIF, while posts already stripped
-  both). A file of another kind goes unchanged, and so does one that cannot
-  be cleaned; the attach sheet says so before you send. More kinds of
+  both). A HEIC or AVIF photo the device cannot decode (Windows, Linux,
+  Android before 9) goes as a file with its EXIF and XMP overwritten in
+  place, the picture itself untouched. A file of another kind goes
+  unchanged, and so does one that cannot be cleaned (a HEIC whose layout
+  Zen does not know, a file over 64 MB); the attach sheet says so before
+  you send, every time for a photo, a film or a recording. More kinds of
   received files warn before opening.
 - On a computer, **drop** files anywhere on a conversation or **paste** them
   with Ctrl+V (⌘V on a Mac): photos, GIFs, videos, files. Text in the
@@ -333,7 +337,9 @@ app, the small window over other apps). It goes back to the phone's usual
 timeout when the call ends. A voice call held at the ear on the earpiece
 turns the screen off and ignores touches while the phone is at the ear,
 and lights it again when you take it away (Android, where the phone has a
-proximity sensor).
+proximity sensor). Earphones or a Bluetooth headset plugged in or taken
+away during a call switch between the two at once, and "Głośnik" shows
+where the sound is.
 
 When you call someone you hear the ringing tone while their phone rings,
 and a busy tone if they decline, are busy or do not answer; a short signal

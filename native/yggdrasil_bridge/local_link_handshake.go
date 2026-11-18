@@ -79,10 +79,17 @@ const (
 	// holds a handshake slot.
 	localHandshakeTimeout  = 8 * time.Second
 	localFirstFrameTimeout = 2 * time.Second
-	localMaxSelectors      = localLinkMaxPeers + 64
-	localRecordMaxPlain    = 16 * 1024
-	localRecordOverhead    = 16
-	localKeyMaterialLength = 32 + 32 + 16
+	// Each later stage (the hello, the ciphertext, the first record) on a
+	// network stream: the other side answers each at once, so one that
+	// sent a valid opening and then stalls gives its slot back after this,
+	// not after what is left of the whole handshake. A native stream
+	// (Bluetooth, through the app) gets longer.
+	localStageTimeout       = 2 * time.Second
+	localNativeStageTimeout = 4 * time.Second
+	localMaxSelectors       = localLinkMaxPeers + 64
+	localRecordMaxPlain     = 16 * 1024
+	localRecordOverhead     = 16
+	localKeyMaterialLength  = 32 + 32 + 16
 )
 
 // localSelectorCounts are the numbers of selectors a hello may carry: the
@@ -233,15 +240,27 @@ func readLocalFrameOf(r io.Reader, ok func(size int) bool) ([]byte, error) {
 // localLinkHandshake runs the handshake on conn as nodeKey's node, with
 // the devices in peers. On success the stream belongs to the session.
 func localLinkHandshake(conn net.Conn, peers []localPeer, nodeKey ed25519.PublicKey) (*localLinkSession, error) {
-	return localLinkHandshakeWithin(conn, peers, nodeKey, localHandshakeTimeout)
+	return localLinkHandshakeWithin(conn, peers, nodeKey, localHandshakeTimeout, localNativeStageTimeout)
 }
 
 // localLinkHandshakeWithin is localLinkHandshake waiting at most firstFrame
-// for the other side's opening.
-func localLinkHandshakeWithin(conn net.Conn, peers []localPeer, nodeKey ed25519.PublicKey, firstFrame time.Duration) (*localLinkSession, error) {
+// for the other side's opening and at most stage for each later step, all
+// within localHandshakeTimeout.
+func localLinkHandshakeWithin(conn net.Conn, peers []localPeer, nodeKey ed25519.PublicKey, firstFrame, stage time.Duration) (*localLinkSession, error) {
 	started := time.Now()
 	if firstFrame <= 0 || firstFrame > localHandshakeTimeout {
 		firstFrame = localHandshakeTimeout
+	}
+	if stage <= 0 || stage > localHandshakeTimeout {
+		stage = localHandshakeTimeout
+	}
+	// The next step's deadline: its own, never past the whole handshake's.
+	nextStage := func() {
+		deadline := time.Now().Add(stage)
+		if last := started.Add(localHandshakeTimeout); deadline.After(last) {
+			deadline = last
+		}
+		_ = conn.SetDeadline(deadline)
 	}
 	_ = conn.SetDeadline(started.Add(firstFrame))
 	self := localAddressBytes(meshAddressForKey(nodeKey))
@@ -272,7 +291,7 @@ func localLinkHandshakeWithin(conn net.Conn, peers []localPeer, nodeKey ed25519.
 	if bytes.Equal(remoteNonce, nonce) {
 		return nil, errors.New("local link: the stream talks to itself")
 	}
-	_ = conn.SetDeadline(started.Add(localHandshakeTimeout))
+	nextStage()
 	private, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
@@ -324,6 +343,7 @@ func localLinkHandshakeWithin(conn net.Conn, peers []localPeer, nodeKey ed25519.
 	// The ML-KEM exchange: a secret for the other side, one from it.
 	mySecret, myCiphertext := remoteKem.Encapsulate()
 	defer clear(mySecret)
+	nextStage()
 	go func() { sent <- writeLocalFrame(conn, myCiphertext) }()
 	theirCiphertext, err := readLocalFrame(conn, mlkem.CiphertextSize768)
 	if err != nil {
@@ -380,6 +400,7 @@ func localLinkHandshakeWithin(conn net.Conn, peers []localPeer, nodeKey ed25519.
 	if err != nil {
 		return nil, err
 	}
+	nextStage()
 	go func() {
 		_, err := secure.Write(nodeKey)
 		sent <- err

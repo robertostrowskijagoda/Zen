@@ -143,6 +143,7 @@ void main() {
     await carol.start();
     await _settle();
     // Ania's second device, proven to Bob by its own hello.
+    await ania.expectOwnDevice(a2);
     await _linkSecond(d1, a1, ta2);
     await _settle(200);
     expect(bob.accountOfAddress(a2), ania.account);
@@ -206,6 +207,7 @@ void main() {
     // Bob's greetings do not reach the new device for now.
     _Linked.cut.add('$b>$a2');
     final List<String> greet = <String>[];
+    await ania.expectOwnDevice(a2);
     final LedgerNode second = await _linkSecond(d1, a1, ta2, greet: greet);
     await _settle(200);
     expect(ania.siblingAddresses, <String>[a2]);

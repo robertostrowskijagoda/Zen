@@ -426,8 +426,11 @@ needs your word; before, a search that gave up (a copy from a newer Zen, or
 thirty days without finding one) let the new phone save a nearly empty copy,
 and the passwords, notes and chats in the old one were gone. A friend who
 gets a copy under half the size of the one kept keeps the old one for 30
-days; a copy dated ahead of the clock, or signed by a device you cut off, is
-refused, and you are told when friends refuse. One large group no longer
+days (not when you switched "Hasła w kopii u znajomych" off: then the old
+copy, passwords and all, goes at once); a copy dated ahead of the clock, or
+offered by a device you cut off, is refused, and you are told when friends
+refuse. A copy your lost phone made stays with friends after you cut that
+phone off, until a newer one replaces it. One large group no longer
 stops the copy of friends and groups: a group's names are kept for current
 members only, an item still too large is trimmed or left out, the rest is
 saved, and *Why isn't it working?* says how many were cut. It holds your profile,

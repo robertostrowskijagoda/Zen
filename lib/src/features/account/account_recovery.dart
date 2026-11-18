@@ -124,11 +124,22 @@ const PasswordCost kRecoveryPasswordCost = PasswordCost(
   iterations: 2,
 );
 
-/// The only Argon2 cost a received `normal` half may ask for: the one
-/// pieces are written with. A half asking for anything else is refused, so
-/// nobody can make a recovering device run a heavy Argon2 for nothing.
+/// A heavier cost a seal under the account password may carry (128 MiB,
+/// 3 passes). This build writes nothing with it; it is accepted when
+/// opening so that a seal made with it elsewhere (a device that can afford
+/// more memory, a later build) is not refused for good.
+const PasswordCost kHeavyRecoveryPasswordCost = PasswordCost(
+  memoryKiB: 131072,
+  iterations: 3,
+);
+
+/// The only Argon2 costs a received `normal` half or a backup file may ask
+/// for: the one pieces are written with and [kHeavyRecoveryPasswordCost].
+/// Anything else is refused, so nobody can make a recovering device run a
+/// heavy Argon2 for nothing.
 const List<PasswordCost> kAcceptedRecoveryCosts = <PasswordCost>[
   kRecoveryPasswordCost,
+  kHeavyRecoveryPasswordCost,
 ];
 
 /// Minimum length of the account password kept on a device.

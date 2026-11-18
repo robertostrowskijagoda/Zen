@@ -264,9 +264,10 @@ void main() {
       expect(img.decodePng(stripOutgoingMetadata(_png())), isNotNull);
     });
 
-    test('a HEIC photo and a document are not touched (and say so)', () {
+    test('a HEIC photo whose boxes do not read and a document are not '
+        'touched (and say so)', () {
       final Uint8List heic = _heicPhoto();
-      expect(canStripMetadata(heic), isFalse);
+      expect(canStripMetadata(heic), isTrue, reason: 'the kind is cleaned');
       expect(identical(stripOutgoingMetadata(heic), heic), isTrue);
       final Uint8List pdf = Uint8List.fromList(
         latin1.encode('%PDF-1.7 /Author (Ala Kowalska)'),
@@ -316,15 +317,56 @@ void main() {
       },
     );
 
-    test('a HEIC photo the phone cannot decode goes as a file, marked '
-        'unchanged', () async {
+    test('a HEIC photo the phone cannot decode goes as a file without its '
+        'EXIF and XMP, from memory and from a file', () async {
+      final Uint8List heic = File(
+        'test/fixtures/media/gps_photo.heic',
+      ).readAsBytesSync();
+      final File file = write('IMG_0003.HEIC', heic);
+      for (final TransferItem item in <TransferItem>[
+        TransferItem(name: 'IMG_0003.HEIC', bytes: heic),
+        TransferItem(name: 'IMG_0003.HEIC', path: file.path),
+      ]) {
+        final OutgoingAttachment out = (await prepareOutgoing(
+          item,
+          decode: _noDecoder,
+        ))!;
+        expect(out.kind, OutgoingKind.file);
+        expect(out.unchanged, isFalse);
+        expect(out.mimeType, 'image/heic');
+        expect(out.path, isNull, reason: 'the cleaned copy goes');
+        expect(_has(out.bytes!, 'GPS'), isFalse);
+        expect(_has(out.bytes!, 'ZenFixture'), isFalse);
+        expect(out.bytes!.length, heic.length);
+      }
+    });
+
+    test('a HEIC photo whose boxes Zen does not understand goes as it is, '
+        'marked as a photo that keeps its data', () async {
       final OutgoingAttachment out = (await prepareOutgoing(
         TransferItem(name: 'IMG_0002.HEIC', bytes: _heicPhoto()),
         decode: _noDecoder,
       ))!;
       expect(out.kind, OutgoingKind.file);
       expect(out.unchanged, isTrue);
+      expect(out.unchangedMedia, isTrue);
       expect(out.mimeType, 'image/heic');
+      expect(_has(out.bytes!, _gps), isTrue);
+    });
+
+    test('a photo over the cleaning limit goes as it is, marked as a photo '
+        'that keeps its data', () async {
+      final File big = write('panorama.jpg', _phoneJpeg());
+      final RandomAccessFile handle = big.openSync(mode: FileMode.append);
+      handle.truncateSync(kMaxCleanedTransferBytes + 1);
+      handle.closeSync();
+      addTearDown(big.deleteSync);
+      final OutgoingAttachment out = (await prepareOutgoing(
+        TransferItem(name: 'panorama.jpg', path: big.path),
+      ))!;
+      expect(out.unchanged, isTrue);
+      expect(out.unchangedMedia, isTrue);
+      expect(out.path, big.path);
     });
 
     test('a phone JPEG goes re-encoded, recordings and pictures as files '
@@ -349,7 +391,42 @@ void main() {
       ))!;
       expect(document.kind, OutgoingKind.file);
       expect(document.unchanged, isTrue);
+      expect(document.unchangedMedia, isFalse);
       expect(document.path, pdf.path);
+    });
+
+    testWidgets('a photo that goes with its data is said every time', (
+      WidgetTester tester,
+    ) async {
+      debugResetToldFilesGoUnchanged();
+      addTearDown(debugResetToldFilesGoUnchanged);
+      late BuildContext context;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (BuildContext c) {
+                context = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      const OutgoingAttachment photo = OutgoingAttachment(
+        kind: OutgoingKind.file,
+        fileName: 'IMG_0002.HEIC',
+        mimeType: 'image/heic',
+        unchanged: true,
+        unchangedMedia: true,
+      );
+      for (int i = 0; i < 2; i++) {
+        tellFilesGoUnchanged(context, photo);
+        await tester.pump();
+        expect(find.byKey(const Key('media-goes-unchanged')), findsOneWidget);
+        ScaffoldMessenger.of(context).clearSnackBars();
+        await tester.pumpAndSettle();
+      }
     });
 
     testWidgets('a file that goes unchanged is said once', (

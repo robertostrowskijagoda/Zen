@@ -2182,6 +2182,13 @@ final class _Treasury {
 
   // ---- seals of the eras ----
 
+  /// Whether this device is the one at the address member [me]'s record
+  /// names (any device while it names none).
+  bool _atMemberAddress(PyramidState s, String me) {
+    final String addr = s.members[me]?.addr ?? '';
+    return addr.isEmpty || pyr._n(addr) == pyr._n(pyr.host.ownAddress());
+  }
+
   /// Seals the open era of the treasurers ([PyrT.seal]) with the others
   /// of its treasurers, when this person is one of them and keeps the
   /// whole ledger. The app signs by itself:
@@ -2196,13 +2203,20 @@ final class _Treasury {
   ///   it can check already lists everything it counts.
   /// From its first seal of the era on, it signs no more operations of it
   /// ([kPyrOtherEra]); their payers order again in the next era.
+  ///
+  /// Of the account's devices only the one at the address its member
+  /// record names does this: the private ledger goes to that address, and
+  /// two devices with one key and different ledgers could sign two seals
+  /// of an era neither of which dominates the other — the proof that marks
+  /// a treasurer as having signed two ([PyramidState.sealCheaters]).
   Future<void> _sealDuty() async {
     final PyramidState? s = pyr.state;
     final LedgerKeyPair? me = pyr._signer;
     if (s == null ||
         me == null ||
         !_keeps(s) ||
-        !s.treasurers.contains(me.id)) {
+        !s.treasurers.contains(me.id) ||
+        !_atMemberAddress(s, me.id)) {
       return;
     }
     final int n = s.openEra;

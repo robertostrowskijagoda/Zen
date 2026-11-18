@@ -128,7 +128,7 @@ func FuzzLocalLinkHandshake(f *testing.F) {
 		}()
 		done := make(chan error, 1)
 		go func() {
-			_, err := localLinkHandshakeWithin(device, peers, keyA, localFirstFrameTimeout)
+			_, err := localLinkHandshakeWithin(device, peers, keyA, localFirstFrameTimeout, localStageTimeout)
 			_ = device.Close()
 			done <- err
 		}()

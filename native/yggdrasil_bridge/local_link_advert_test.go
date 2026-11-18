@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -98,6 +100,56 @@ func TestABluetoothAdvertStaysSelective(t *testing.T) {
 	}
 	if got := matchLocalAdvert(many, advert, now); len(got) != len(many) {
 		t.Fatalf("LAN advert holds %d of %d devices", len(got), len(many))
+	}
+}
+
+// One device's Bluetooth adverts from different slots share no byte that
+// another device sends differently: what stays the same (the version) is
+// the same on every Zen device, so nobody nearby can tie the adverts of one
+// phone together across its address changes. The platforms add nothing of
+// the phone's own around it any more (BluetoothLinkAdvert.kt: until 1.18.0
+// the L2CAP PSM went with it).
+func TestABluetoothAdvertHasNoFieldOfItsOwnAcrossSlots(t *testing.T) {
+	start := time.Unix(1_800_000_000, 0)
+	phone := []localPeer{testLocalPeer(t, 1), testLocalPeer(t, 2), testLocalPeer(t, 3)}
+	other := []localPeer{testLocalPeer(t, 4)}
+	var mine, theirs [][]byte
+	for i := 0; i < 288; i++ {
+		now := start.Add(time.Duration(i) * localLinkSlot)
+		a, err := buildLocalAdvert(phone, now, 16, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := buildLocalAdvert(other, now, 16, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mine = append(mine, a)
+		theirs = append(theirs, b)
+	}
+	for i := range mine[0] {
+		same := true
+		for _, a := range mine {
+			same = same && a[i] == mine[0][i]
+		}
+		if !same {
+			continue
+		}
+		for _, b := range theirs {
+			if b[i] != mine[0][i] {
+				t.Fatalf("byte %d stays %#x in one phone's adverts and differs in another's", i, mine[0][i])
+			}
+		}
+		if i != 0 {
+			t.Fatalf("byte %d stays the same in every advert", i)
+		}
+	}
+	// Its friends still find it in every slot.
+	for i, a := range mine {
+		now := start.Add(time.Duration(i) * localLinkSlot)
+		if len(matchLocalAdvert(phone[:1], a, now)) != 1 {
+			t.Fatalf("slot %d: the friend does not find the advert", i)
+		}
 	}
 }
 
@@ -206,6 +258,123 @@ func TestAForgedLanBeaconDialsNothing(t *testing.T) {
 	case from := <-got:
 		t.Fatalf("the device connected (from %s)", from)
 	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// testLinkTargets listens on the same link port at each of ips (loopback
+// addresses standing for hosts on the Wi-Fi) and reports every connection
+// made to any of them.
+func testLinkTargets(t *testing.T, ips ...net.IP) (int, chan string) {
+	t.Helper()
+	first, err := listenLanLinks(ips[0].String())
+	if err != nil {
+		t.Skip(err)
+	}
+	port := first.Addr().(*net.TCPAddr).Port
+	listeners := []net.Listener{first}
+	for _, ip := range ips[1:] {
+		listener, err := net.Listen("tcp", net.JoinHostPort(ip.String(), fmt.Sprint(port)))
+		if err != nil {
+			t.Skip(err)
+		}
+		listeners = append(listeners, listener)
+	}
+	got := make(chan string, 64)
+	for _, listener := range listeners {
+		t.Cleanup(func() { _ = listener.Close() })
+		go func(listener net.Listener) {
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				got <- conn.LocalAddr().String()
+				_ = conn.Close()
+			}
+		}(listener)
+	}
+	return port, got
+}
+
+// testDials counts the connections that come within wait.
+func testDials(got chan string, wait time.Duration) []string {
+	var dialled []string
+	deadline := time.After(wait)
+	for {
+		select {
+		case to := <-got:
+			dialled = append(dialled, to)
+		case <-deadline:
+			return dialled
+		}
+	}
+}
+
+// A spoofed beacon pulled a dial to any host on the LAN and any port above
+// 1023 the forger chose, as often as it sent new source addresses: the
+// phone probed the LAN for it. Now a beacon makes the device dial only the
+// link ports, a beacon it recognises counts once (a copy from another
+// address is a replay), and few dials go out in a window.
+func TestASpoofedLanBeaconCannotMakeTheDeviceProbeTheLan(t *testing.T) {
+	_, _, managerA, _ := testManagers(t)
+	lan := testLan(t, managerA)
+	managerA.mu.Lock()
+	managerA.self = "000"
+	managerA.mu.Unlock()
+	now := time.Now()
+	friendBeacon := func(port int) []byte {
+		advert, err := buildLocalAdvert(managerA.peers(), now, 0, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return lanBeacon(lanBeaconFields{advert: advert, port: port})
+	}
+
+	// Any other port: a printer's, a router's admin page, a service the
+	// forger wants to know of.
+	other, err := net.Listen("tcp", "127.0.0.2:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer other.Close()
+	otherDialled := make(chan struct{}, 1)
+	go func() {
+		if conn, err := other.Accept(); err == nil {
+			otherDialled <- struct{}{}
+			_ = conn.Close()
+		}
+	}()
+	lan.handleBeacon(friendBeacon(other.Addr().(*net.TCPAddr).Port), &net.UDPAddr{IP: net.IPv4(127, 0, 0, 2), Port: lanBeaconPort})
+	select {
+	case <-otherDialled:
+		t.Fatal("a beacon made the device dial a port outside the link ports")
+	case <-time.After(time.Second):
+	}
+
+	// The friend's beacon from its address leads to one dial; the same
+	// beacon from another address is a replay and leads to none.
+	port, got := testLinkTargets(t, net.IPv4(127, 0, 0, 3), net.IPv4(127, 0, 0, 4))
+	beacon := friendBeacon(port)
+	lan.handleBeacon(beacon, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 3), Port: lanBeaconPort})
+	lan.handleBeacon(beacon, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 4), Port: lanBeaconPort})
+	if dialled := testDials(got, time.Second); len(dialled) != 1 || !strings.HasPrefix(dialled[0], "127.0.0.3:") {
+		t.Fatalf("dialled %v", dialled)
+	}
+
+	// Fresh beacons from many addresses: few dials in a window.
+	var ips []net.IP
+	for i := 0; i < 2*lanMaxDialsPerWindow; i++ {
+		ips = append(ips, net.IPv4(127, 0, 1, byte(10+i)))
+	}
+	port, got = testLinkTargets(t, ips...)
+	lan.mu.Lock()
+	lan.dialWindowStart, lan.dialWindowCount = time.Time{}, 0
+	lan.mu.Unlock()
+	for _, ip := range ips {
+		lan.dial(ip, port, now)
+	}
+	if dialled := testDials(got, time.Second); len(dialled) != lanMaxDialsPerWindow {
+		t.Fatalf("%d dials in a window", len(dialled))
 	}
 }
 

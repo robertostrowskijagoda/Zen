@@ -6189,6 +6189,7 @@
   "„{name}” chce pobrać Twoje konto.": "“{name}”想下载你的账号。",
   "„{name}” działa na innym urządzeniu": "“{name}”在另一台设备上运行",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "“{name}”将原样发送。Zen 会从照片、视频和录音中移除位置、时间和设备数据；其他文件无法处理，所以会连同其中保存的内容一起发送（例如作者，有时还有位置）。",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "“{name}”将原样发送：Zen 无法从中移除位置、时间和设备数据，所以如果已记录，它们会一并发送。",
   "„{name}” jest odłączone.": "“{name}”已断开。",
   "„{name}” jest potwierdzone.": "“{name}”已确认。",
   "„{name}” już są na liście.": "“{name}”已在列表中。",

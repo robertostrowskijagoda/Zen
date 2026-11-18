@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/domain/calls/call_session.dart';
 
 /// The ids flutter_webrtc gives a phone's audio outputs that sit on the
 /// person (AudioDeviceKind on Android), best first.
@@ -71,6 +72,33 @@ CallAudioChoice callAudioChoice({
     return (output: CallAudioOutput.earpiece, id: null);
   }
   return (output: CallAudioOutput.headset, id: headset);
+}
+
+/// The output Android named when a call's sound went elsewhere by itself
+/// (ZenCallAudioRoute.kt: `bluetooth`, `wired`, `speaker`, `earpiece`), or
+/// null for anything else.
+CallAudioOutput? callAudioOutputForRoute(Object? route) => switch (route) {
+  'bluetooth' || 'wired' => CallAudioOutput.headset,
+  'speaker' => CallAudioOutput.loudspeaker,
+  'earpiece' => CallAudioOutput.earpiece,
+  _ => null,
+};
+
+/// [session] once its sound is on [output], or null when nothing about it
+/// changes. A headset or the loudspeaker is the sound out loud ("Głośnik"
+/// on, the screen kept on); the earpiece is the phone at the ear
+/// ("Głośnik" off, the screen dark at the ear). A headset plugged in or out
+/// during a call moves the sound by itself, and up to 1.18.0 the call went
+/// on with the route it had before until its next change.
+CallSession? callSessionOnAudioRoute(
+  CallSession session,
+  CallAudioOutput output,
+) {
+  final bool outLoud = output != CallAudioOutput.earpiece;
+  if (session.isSpeakerOn == outLoud) {
+    return null;
+  }
+  return session.copyWith(isSpeakerOn: outLoud);
 }
 
 /// What [routeCallAudio] does with the phone's sound: flutter_webrtc on a

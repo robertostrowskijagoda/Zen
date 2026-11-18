@@ -864,6 +864,35 @@ func TestDoorHostTakesNoPeerOfTheMainNode(t *testing.T) {
 	}
 }
 
+// The main node's rotation can move onto the door host's operator while the
+// host's link works: the host moves away then too. It did so only while its
+// link was down, so a working door kept sharing the operator with the main
+// node, which saw both keys from one IP address.
+func TestDoorHostLeavesTheMainNodesOperatorWhileItsLinkWorks(t *testing.T) {
+	for _, missed := range []int{0, 1} {
+		if next, skip, repeer := doorHostCheck(true, missed, 1, true); next != 0 || skip || !repeer {
+			t.Fatalf("up, sharing, %d missed: missed=%d skip=%v repeer=%v", missed, next, skip, repeer)
+		}
+		if next, skip, repeer := doorHostCheck(false, 0, 1, true); next != 1 || skip || !repeer {
+			t.Fatalf("down, sharing: missed=%d skip=%v repeer=%v", next, skip, repeer)
+		}
+	}
+	// A working link of its own operator is kept as it is.
+	if next, skip, repeer := doorHostCheck(true, 1, 1, false); next != 0 || skip || repeer {
+		t.Fatalf("up: missed=%d skip=%v repeer=%v", next, skip, repeer)
+	}
+	// Down: once more it waits, then it moves on in the pool.
+	if next, skip, repeer := doorHostCheck(false, 0, 1, false); next != 1 || skip || repeer {
+		t.Fatalf("down once: missed=%d skip=%v repeer=%v", next, skip, repeer)
+	}
+	if next, skip, repeer := doorHostCheck(false, doorHostMissedChecks-1, 1, false); next != 0 || !skip || !repeer {
+		t.Fatalf("down too long: missed=%d skip=%v repeer=%v", next, skip, repeer)
+	}
+	if _, skip, repeer := doorHostCheck(false, 0, 0, false); !skip || !repeer {
+		t.Fatal("with no peer the host dials at once")
+	}
+}
+
 // With nothing else in the pool (a list of the user's own that the main
 // node dials whole), the door host still gets onto the mesh, on one of the
 // main node's peers.

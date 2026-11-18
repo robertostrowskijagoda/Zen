@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
+import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
@@ -140,6 +141,38 @@ void main() {
       () async => (await w.groupTexts(b, id)).contains('Do wszystkich'),
       within: const Duration(hours: 2),
       reason: 'the group message coming again',
+    );
+  });
+
+  test('a group leave and a friend removal too: nothing a person did is '
+      'confirmed while the friends cannot be read', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B', 'C']);
+    final FriendsPhone a = w['A'];
+    final FriendsPhone b = w['B'];
+    final FriendsPhone c = w['C'];
+    final String id = await w.createGroup(a, 'Klub', <FriendsPhone>[b, c]);
+    await w.deliver();
+    expect(b.state.groups[id]!.memberAddresses, contains(c.address));
+    b.friendListUnreadable = true;
+    await w.restartApp(b);
+    await c.hub.leaveGroup(groupId: id);
+    await a.hub.removeFriend(peerAddress: b.address);
+    await w.advance(const Duration(minutes: 5));
+
+    b.friendListUnreadable = false;
+    await w.restartApp(b);
+    await w.until(
+      () async =>
+          b.state.groups[id]?.memberAddresses.contains(c.address) == false,
+      within: const Duration(hours: 2),
+      reason: 'the leave coming again',
+    );
+    await w.until(
+      () async =>
+          b.state.friendByAddress(a.address)?.status !=
+          FriendRelationshipStatus.accepted,
+      within: const Duration(hours: 2),
+      reason: 'the removal coming again',
     );
   });
 

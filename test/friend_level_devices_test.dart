@@ -101,6 +101,8 @@ final class _World {
     int skewMs = 0,
   }) async {
     final MemoryLedgerDisk d = disks[address] = MemoryLedgerDisk();
+    // Linked from [first], which co-signs it.
+    await first.expectOwnDevice(address);
     final first0 = await LedgerIdentity.loadOrCreate(disks[_own(first)]!);
     await LedgerIdentity.adoptAccount(d, first0.accountKey!.seed);
     final LedgerNode n = await make(address, friends, disk: d, skewMs: skewMs);
@@ -355,6 +357,7 @@ void main() {
     final LedgerNode computer = await w.make(a2, <String>[
       b,
     ], disk: computerDisk);
+    await phone.expectOwnDevice(a2);
     await computer.rememberDeviceAddresses(<String>[a1]);
     await w.meet();
     expect(phone.levelOf(b), FriendLevel.weak);

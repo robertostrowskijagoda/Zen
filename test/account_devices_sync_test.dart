@@ -176,6 +176,7 @@ void main() {
     addTearDown(firstSync.stop);
 
     // Link the second device.
+    await first.expectOwnDevice(a2);
     final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
     await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
     final LedgerNode second = _node(t2, disk: d2);
@@ -571,6 +572,7 @@ void main() {
     await firstSync.start();
     addTearDown(firstSync.stop);
 
+    await first.expectOwnDevice(a2);
     final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
     await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
     final LedgerNode second = _node(t2, disk: d2);

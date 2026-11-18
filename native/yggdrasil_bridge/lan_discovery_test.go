@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"math"
 	"net"
 	"testing"
 	"time"
@@ -142,7 +143,7 @@ func TestLanIntervalIsBounded(t *testing.T) {
 // loopback (as if it were the Wi-Fi).
 func testLan(t *testing.T, m *localLinkManager) *lanDiscovery {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listenLanLinks("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +242,7 @@ func TestLanSenderMapsStayBounded(t *testing.T) {
 		now := start.Add(time.Duration(i) * 100 * time.Millisecond)
 		ip := net.IPv4(10, byte(i>>16), byte(i>>8), byte(i))
 		// Not on a local network of this device: remembered, never dialled.
-		lan.dial(ip, 1, now)
+		lan.dial(ip, lanLinkPortFirst, now)
 		replies[ip.String()] = now
 		pruneLanTimes(replies, now, lanReplyInterval)
 	}
@@ -279,5 +280,54 @@ func TestLanHandshakeSlotsArePerSource(t *testing.T) {
 	lan.releaseHandshake("192.168.1.7")
 	if _, ok := lan.perSource["192.168.1.7"]; ok {
 		t.Fatal("a source with no handshake is still remembered")
+	}
+}
+
+// A stranger's handshake now ends within the opening's and one stage's
+// time, but one that reconnected at once kept its slots for good: four
+// addresses held all eight. An address starts only a few handshakes in a
+// window, so it holds less than a slot on average.
+func TestLanHandshakeStartsAreRationedPerSource(t *testing.T) {
+	lan := &lanDiscovery{perSource: map[string]int{}}
+	now := time.Now()
+	for i := 0; i < lanHandshakeStartsPerSource; i++ {
+		if !lan.takeHandshakeAt("192.168.1.7", now) {
+			t.Fatalf("start %d refused", i)
+		}
+		lan.releaseHandshake("192.168.1.7")
+	}
+	if lan.takeHandshakeAt("192.168.1.7", now.Add(time.Second)) {
+		t.Fatal("an address that reconnects at once starts handshake after handshake")
+	}
+	if !lan.takeHandshakeAt("192.168.1.8", now.Add(time.Second)) {
+		t.Fatal("another address is refused")
+	}
+	if !lan.takeHandshakeAt("192.168.1.7", now.Add(lanHandshakeStartWindow)) {
+		t.Fatal("the address is refused after the window")
+	}
+	// The count of slots against the timing: a stranger holds a slot for
+	// the opening and one stage at most, and starts so many a window.
+	longest := localFirstFrameTimeout + localStageTimeout
+	perAddress := float64(lanHandshakeStartsPerSource) * longest.Seconds() / lanHandshakeStartWindow.Seconds()
+	if perAddress > 1 {
+		t.Fatalf("one address holds %.1f slots on average", perAddress)
+	}
+	if needed := math.Ceil(lanMaxHandshakes / perAddress); needed < 2*lanMaxHandshakes/lanMaxHandshakesPerSource {
+		t.Fatalf("%v addresses hold every slot", needed)
+	}
+	// A friend's device starts one every dial interval at most.
+	if lanHandshakeStartWindow > lanDialInterval || lanHandshakeStartsPerSource < 2 {
+		t.Fatal("a friend's dial and a crossing one may be refused")
+	}
+	// The sources are remembered within bounds.
+	for i := 0; i < 2*lanMaxRemembered; i++ {
+		at := now.Add(time.Duration(i) * 100 * time.Millisecond)
+		ip := net.IPv4(10, 0, byte(i>>8), byte(i)).String()
+		if lan.takeHandshakeAt(ip, at) {
+			lan.releaseHandshake(ip)
+		}
+	}
+	if len(lan.starts) > lanMaxRemembered+1 {
+		t.Fatalf("remembered %d sources", len(lan.starts))
 	}
 }

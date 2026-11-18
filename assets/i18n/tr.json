@@ -6317,6 +6317,7 @@
   "„{name}” chce pobrać Twoje konto.": "“{name}” hesabını indirmek istiyor.",
   "„{name}” działa na innym urządzeniu": "“{name}” başka bir cihazda çalışıyor",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "“{name}” değişmeden gider. Zen fotoğraflardan, videolardan ve kayıtlardan konumu, zamanı ve cihaz verilerini siler; diğer dosyalardan silemez, bu yüzden içlerinde kayıtlı olanla gider (ör. yazar, bazen konum).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "“{name}” değişmeden gider: Zen konumu, zamanı ve cihaz verilerini ondan silemedi, bu yüzden kayıtlıysa onunla birlikte giderler.",
   "„{name}” jest odłączone.": "“{name}” ile bağlantı kesildi.",
   "„{name}” jest potwierdzone.": "“{name}” onaylandı.",
   "„{name}” już są na liście.": "“{name}” zaten listede.",

@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
-import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
 
@@ -63,23 +62,26 @@ enum CircleBackupOfferResult {
 /// renamed at [load]), as the decoy accounts' files are.
 ///
 /// A copy dated more than [kCircleBackupClockSlack] ahead is refused, and
-/// one kept so dated (or signed by a device its account cut off, see
-/// [isRevoked]) no longer stands in the way of a real one. When a copy
-/// replaces one more than twice its size, the one before is kept too for
-/// [kCircleBackupPreviousKept] ([previousOf]), outside the room the copies
-/// take (it goes first when room is short).
+/// one kept so dated no longer stands in the way of a real one. A copy is
+/// never dropped because the device that made it was cut off later: only a
+/// device that counts gets a copy taken (the service checks), so it was
+/// taken while its device counted, and it may be the only one (the lost
+/// phone's, after a recovery). A newer copy replaces it as any other.
+/// When a copy replaces one more than twice its size, the one before is
+/// kept too for [kCircleBackupPreviousKept] ([previousOf]), outside the
+/// room the copies take (it goes first when room is short) — unless the
+/// new copy says the person took something out on purpose after the one
+/// before was made ([CircleBackupManifest.shrunkAt]): then none is kept.
 final class CircleBackupHolder {
   CircleBackupHolder({
     required this.disk,
     required this.isInCircle,
     bool Function(String account)? isFriend,
-    bool Function(String account, String device)? isRevoked,
     int Function()? clock,
     this.totalBytes = kCircleBackupHolderTotalBytes,
     this.friendsBytes = kCircleBackupFriendsBytes,
     this.perAccountBytes = kCircleBackupMaxBytes + kCircleBackupMaxBytes ~/ 10,
   }) : isFriend = isFriend ?? _nobody,
-       isRevoked = isRevoked ?? _notRevoked,
        _clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final LedgerDisk disk;
@@ -89,16 +91,12 @@ final class CircleBackupHolder {
 
   /// Whether [account] is an accepted friend here.
   final bool Function(String account) isFriend;
-
-  /// Whether [account] cut off its [device] (a copy it signed goes).
-  final bool Function(String account, String device) isRevoked;
   final int Function() _clock;
   final int totalBytes;
   final int friendsBytes;
   final int perAccountBytes;
 
   static bool _nobody(String _) => false;
-  static bool _notRevoked(String _, String _) => false;
 
   /// Whether a copy of [account] may be kept here.
   bool mayKeep(String account) => isInCircle(account) || isFriend(account);
@@ -239,18 +237,9 @@ final class CircleBackupHolder {
   }
 
   /// Whether a copy kept here no longer counts against a new one: dated
-  /// more than [kCircleBackupClockSlack] ahead of this clock, or signed by
-  /// a device its account cut off.
-  bool _void(CircleBackupManifest m) =>
-      m.createdAt > _clock() + kCircleBackupClockSlack.inMilliseconds ||
-      _revokedSigner(m);
-
-  bool _revokedSigner(CircleBackupManifest m) {
-    final DeviceCertificate? signer = DeviceCertificate.fromJson(
-      m.json['cert'],
-    );
-    return signer == null || isRevoked(signer.account, signer.device);
-  }
+  /// more than [kCircleBackupClockSlack] ahead of this clock.
+  bool _ahead(CircleBackupManifest m) =>
+      m.createdAt > _clock() + kCircleBackupClockSlack.inMilliseconds;
 
   int get _used => _kept.values.fold(
     0,
@@ -279,7 +268,7 @@ final class CircleBackupHolder {
       return CircleBackupOfferResult.stale;
     }
     final CircleBackupManifest? had = _kept[account];
-    if (had != null && manifest.createdAt <= had.createdAt && !_void(had)) {
+    if (had != null && manifest.createdAt <= had.createdAt && !_ahead(had)) {
       return had.id == manifest.id
           ? CircleBackupOfferResult.accepted
           : CircleBackupOfferResult.stale;
@@ -337,12 +326,24 @@ final class CircleBackupHolder {
     }
     final CircleBackupManifest? old = _kept[account];
     final List<String> unused = <String>[...?old?.chunks.keys];
+    // Something taken out on purpose (the passwords switched off): no copy
+    // made before that is kept as the one before, nor handed out.
+    final int? shrunk = m.shrunkAt;
+    bool before(CircleBackupManifest x) =>
+        shrunk != null && x.createdAt <= shrunk;
+    final CircleBackupManifest? earlier = _previous[account]?.manifest;
+    if (earlier != null && before(earlier)) {
+      _previous.remove(account);
+      unused.addAll(earlier.chunks.keys);
+    }
     if (old != null &&
         old.id != m.id &&
-        !_void(old) &&
+        !_ahead(old) &&
+        !before(old) &&
         m.totalBytes * 2 < old.totalBytes) {
       // Much smaller than the one it replaces (a new phone's nearly empty
-      // copy, perhaps by mistake): the whole one stays a while too.
+      // copy, perhaps by mistake): the whole one stays a while too, even
+      // when the device that made it was cut off since (the lost phone).
       unused.addAll(<String>[...?_previous[account]?.manifest.chunks.keys]);
       _previous[account] = (manifest: old, since: _clock());
     }
@@ -421,14 +422,14 @@ final class CircleBackupHolder {
   }
 
   /// Drops the copies of accounts whose recovery key is no longer here
-  /// and that are no longer friends here, and those signed by a device
-  /// its account cut off; a copy kept from before goes after
-  /// [kCircleBackupPreviousKept].
+  /// and that are no longer friends here; a copy kept from before goes
+  /// after [kCircleBackupPreviousKept]. One made by a device its account
+  /// cut off since stays until a newer one replaces it.
   Future<int> prune() async {
     await load();
     final List<String> gone = <String>[
       for (final MapEntry<String, CircleBackupManifest> e in _kept.entries)
-        if (!mayKeep(e.key) || _revokedSigner(e.value)) e.key,
+        if (!mayKeep(e.key)) e.key,
     ];
     for (final String account in gone) {
       await drop(account);
@@ -437,8 +438,7 @@ final class CircleBackupHolder {
       for (final MapEntry<String, ({CircleBackupManifest manifest, int since})>
           e
           in _previous.entries)
-        if (previousOf(e.key) == null || _revokedSigner(e.value.manifest))
-          e.key,
+        if (previousOf(e.key) == null) e.key,
     ];
     for (final String account in over) {
       final CircleBackupManifest before = _previous.remove(account)!.manifest;

@@ -6829,6 +6829,7 @@
   "„{name}” chce pobrać Twoje konto.": "«{name}» يريد تنزيل حسابك.",
   "„{name}” działa na innym urządzeniu": "«{name}» يعمل على جهاز آخر",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "«{name}» يُرسل كما هو. يزيل Zen الموقع والوقت وبيانات الجهاز من الصور ومقاطع الفيديو والتسجيلات؛ ولا يستطيع ذلك في الملفات الأخرى، فتُرسل مع ما هو محفوظ فيها (مثل المؤلف، وأحيانًا الموقع).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "«{name}» يُرسل كما هو: لم يستطع Zen إزالة الموقع والوقت وبيانات الجهاز منه، لذا تُرسل معه إن كانت مسجّلة.",
   "„{name}” jest odłączone.": "تم فصل «{name}».",
   "„{name}” jest potwierdzone.": "«{name}» مؤكَّد.",
   "„{name}” już są na liście.": "«{name}» موجودون في القائمة بالفعل.",

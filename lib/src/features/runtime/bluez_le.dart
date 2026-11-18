@@ -11,9 +11,12 @@ import 'package:zen/src/core/logging/zen_log.dart';
 // 3-byte flags), so the advert goes out as manufacturer data alone:
 // company 0xFFFF, "ZL", the PSM and a 20-byte advert (a 13-byte Bloom
 // filter). Without the Zen service UUID an iPhone still sees it (it scans
-// for everything while Zen is open). Apple devices show their advert only
-// through GATT, which this side does not read: an iPhone or Mac connects
-// to Linux instead (native_stream_local_link.dart lets either side do it).
+// for everything while Zen is open). Its PSM is the first free one from
+// 0x80, nearly the same on every Linux computer, so it does not tell one
+// computer from another. Apple devices show their advert only through
+// GATT, and Android phones their PSM ("ZG" adverts), which this side does
+// not read: those devices connect to Linux instead
+// (native_stream_local_link.dart lets either side do it).
 
 const String _bluez = 'org.bluez';
 const String _adapterInterface = 'org.bluez.Adapter1';

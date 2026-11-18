@@ -6573,6 +6573,7 @@
   "„{name}” chce pobrać Twoje konto.": "«{name}» хоче завантажити твій акаунт.",
   "„{name}” działa na innym urządzeniu": "«{name}» працює на іншому пристрої",
   "„{name}” idzie bez zmian. Zen usuwa miejsce, czas i dane urządzenia ze zdjęć, filmów i nagrań; z innych plików nie umie, więc idą z tym, co w nich zapisano (np. autor, czasem miejsce).": "«{name}» іде без змін. Zen видаляє місце, час і дані пристрою з фото, відео й записів; з інших файлів не вміє, тому вони йдуть із тим, що в них записано (напр. автор, іноді місце).",
+  "„{name}” idzie bez zmian: Zen nie umiał usunąć z niego miejsca, czasu i danych urządzenia, więc idą razem z nim, jeśli je zapisano.": "«{name}» іде без змін: Zen не зміг видалити з нього місце, час і дані пристрою, тому вони йдуть разом із ним, якщо були записані.",
   "„{name}” jest odłączone.": "«{name}» від’єднано.",
   "„{name}” jest potwierdzone.": "«{name}» підтверджено.",
   "„{name}” już są na liście.": "«{name}» уже є в списку.",

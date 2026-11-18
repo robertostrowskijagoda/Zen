@@ -15,7 +15,9 @@ import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/queued_signal.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
+import 'package:zen/src/features/calls/call_audio_route.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
+import 'package:zen/src/features/calls/call_screen_awake.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/chat_attachment_transport_codec.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
@@ -3807,6 +3809,28 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(call().isSpeakerOn, isFalse);
     });
+
+    test('a headset plugged in or out during the call moves "Głośnik" and '
+        'the screen at once', () async {
+      await ring('audio');
+      callMedia.connectedValue = true;
+      await controller.acceptIncomingCall(peerAddress: _peer);
+      await Future<void>.delayed(Duration.zero);
+      expect(callScreenModeFor(call()).mode, CallScreenMode.proximity);
+      // Earphones plugged in: the sound is out of the ear.
+      await controller.reportCallAudioRoute(CallAudioOutput.headset);
+      expect(call().isSpeakerOn, isTrue);
+      expect(callMedia.notedRoutes, <CallAudioOutput>[CallAudioOutput.headset]);
+      expect(callScreenModeFor(call()).mode, CallScreenMode.keepOn);
+      // Unplugged: back at the ear, the sensor again.
+      await controller.reportCallAudioRoute(CallAudioOutput.earpiece);
+      expect(call().isSpeakerOn, isFalse);
+      expect(callScreenModeFor(call()).mode, CallScreenMode.proximity);
+      // "Głośnik" still works the way it did after that.
+      await controller.toggleActiveCallSpeaker();
+      expect(call().isSpeakerOn, isTrue);
+      expect(callMedia.speakerOnValue, isTrue);
+    });
   });
 
   test('a re-ringed invite re-sends a lost answer', () async {
@@ -6217,6 +6241,12 @@ final class _FakeCallMediaSessionController extends CallMediaSessionController {
 
   @override
   bool get audioOnHeadset => audioOnHeadsetValue;
+
+  /// What [noteAudioRoute] was told, in order.
+  final List<CallAudioOutput> notedRoutes = <CallAudioOutput>[];
+
+  @override
+  void noteAudioRoute(CallAudioOutput output) => notedRoutes.add(output);
 
   @override
   bool get isConnected => connectedValue && activeCallIdValue != null;

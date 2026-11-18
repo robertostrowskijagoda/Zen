@@ -182,7 +182,8 @@
   {
     "file": "lib/src/features/calls/call_audio_route.dart",
     "tests": [
-      "test/call_audio_route_test.dart"
+      "test/call_audio_route_test.dart",
+      "test/call_screen_awake_test.dart"
     ]
   },
   {
@@ -651,6 +652,12 @@
     "file": "lib/src/features/media/outgoing_media.dart",
     "tests": [
       "test/outgoing_media_metadata_test.dart"
+    ]
+  },
+  {
+    "file": "lib/src/features/media/heif_metadata.dart",
+    "tests": [
+      "test/heif_metadata_test.dart"
     ]
   },
   {

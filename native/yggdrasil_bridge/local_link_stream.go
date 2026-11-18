@@ -353,15 +353,16 @@ func (m *localLinkManager) hasLink(address string) bool {
 // Over a network both ends start the handshake the moment the connection
 // is made, so the other side's opening is due at once: a connection that
 // stays silent is let go after localFirstFrameTimeout, not after the whole
-// handshake's time (strangers held every LAN handshake slot that way). A
-// native stream waits longer: the other phone's app takes it only when its
-// Dart side gets to it.
+// handshake's time (strangers held every LAN handshake slot that way), and
+// one that sends a valid opening and then stalls after localStageTimeout.
+// A native stream waits longer: the other phone's app takes it only when
+// its Dart side gets to it.
 func (m *localLinkManager) handshakeAndAttach(conn net.Conn, transport, remote string) (*localLink, error) {
-	firstFrame := localHandshakeTimeout
+	firstFrame, stage := localHandshakeTimeout, localNativeStageTimeout
 	if remote != "" {
-		firstFrame = localFirstFrameTimeout
+		firstFrame, stage = localFirstFrameTimeout, localStageTimeout
 	}
-	session, err := localLinkHandshakeWithin(conn, m.peers(), m.core.PublicKey(), firstFrame)
+	session, err := localLinkHandshakeWithin(conn, m.peers(), m.core.PublicKey(), firstFrame, stage)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
