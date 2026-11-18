@@ -343,10 +343,18 @@ device keys, label `zen.local.v1`); a stranger has none.
   a Wi-Fi Direct group (Android, Windows), which is only a network the LAN
   discovery then runs over (the group's name and passphrase sit in the
   service record, so anyone nearby can join the group but cannot link);
-  Bluetooth (BLE GATT service `5a454e00-6c69-6e6b-0000-000000000001`,
-  manufacturer data of company `0xFFFF` starting `"ZL"`, L2CAP channels or,
-  on Windows, GATT streams; classic RFCOMM with paired devices on Android
-  and Windows); Apple Multipeer (service type `zen-link`). Wi-Fi discovery,
+  Bluetooth (BLE GATT service `5a454e00-6c69-6e6b-0000-000000000001`, L2CAP
+  channels or, on Windows, GATT streams; classic RFCOMM with paired devices
+  on Android and Windows); Apple Multipeer (service type `zen-link`). A
+  Bluetooth advert goes out as manufacturer data of company `0xFFFF`:
+  Android sends `"ZG"` and the advert in the scan response, and the L2CAP
+  channel number (PSM) only on GATT (`…0003`), which another Android phone
+  reads just before it connects, that is only from a device whose advert
+  carried a tag of its own; iPhones send only the service UUID and show
+  advert and PSM on GATT; Linux computers (no GATT server) send `"ZL"`,
+  the PSM and the advert. Phones on 1.18.0 and older sent `"ZL"` too:
+  they and newer phones still find each other (the older phone reads a
+  `"ZG"` phone's advert and PSM over GATT, as an iPhone's). Wi-Fi discovery,
   Wi-Fi Direct and Bluetooth are on unless turned off, Multipeer is off
   until the person turns it on; a native transport runs only while there
   is a device to link with. Phones use Wi-Fi interfaces only, never
@@ -367,10 +375,17 @@ device keys, label `zen.local.v1`); a stranger has none.
   with more than 35% of its bits set is made again under a new salt, and
   one a receiver sees with more than 40% set means nothing and is not
   tested on any transport (an advert with every bit set once matched every
-  phone). Bluetooth: the advert's service UUID and the L2CAP channel
-  number (PSM) in the manufacturer data are not hidden, so a Zen device,
-  and the same one while its listener runs, can be recognised by anyone in
-  range.
+  phone). Bluetooth: the service UUID and the `"ZG"` are not hidden, so
+  anyone in range can tell that a Zen device is there; nothing else in a
+  phone's advertisement stays the same from one advert to the next (the
+  slot is everyone's, the salt and the filter are new each time), so
+  together with the system's changing Bluetooth address it does not tie
+  one phone's adverts together. Until 1.18.0 Android put its PSM there,
+  which stays the same while its listener runs (Android hands PSMs out in
+  turn from `0x80`) and so did tie them together. A device that connects
+  over GATT can still read the PSM, an active step the phone takes part
+  in; a Linux computer still advertises its PSM, the first free one from
+  `0x80`, so nearly the same on every Linux computer.
 - **LAN beacon**: the advert, then the "people nearby" advert of 2.12 (20
   bytes, only while the person is visible), an info byte (that advert's
   length, 0 or 20, plus `0x80` while the sender looks around) and the TCP

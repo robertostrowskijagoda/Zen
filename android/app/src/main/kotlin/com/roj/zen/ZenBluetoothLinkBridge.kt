@@ -69,11 +69,13 @@ import java.util.concurrent.atomic.AtomicReference
  * The format every platform shares (bluetooth_link.go):
  *  - BLE advertising (Android 10+): the Zen link service UUID in the
  *    packet, and in the scan response manufacturer data of company 0xFFFF:
- *    "ZL", the L2CAP PSM (uint16 little-endian) and the bridge's advert
- *    (23 bytes, a 16-byte Bloom filter: 31 bytes in all, the legacy
- *    limit). A GATT service gives the same advert and PSM to devices that
- *    read them (iPhones advertise only the service UUID; this side reads
- *    theirs over GATT before connecting).
+ *    "ZG" and the bridge's advert (23 bytes, a 16-byte Bloom filter), and
+ *    no PSM ([BluetoothLinkAdvert]: a PSM stays the same for days and tied
+ *    the adverts together). A GATT service gives the advert and the L2CAP
+ *    PSM to devices that read them: this side reads a friend's PSM there
+ *    just before connecting, and reads iPhones' adverts there too (they
+ *    advertise only the service UUID). Linux computers and phones on
+ *    1.18.0 send "ZL", the PSM and the advert, which this side still reads.
  *  - Streams: BLE L2CAP connection-oriented channels (Android 10+,
  *    without pairing), and classic RFCOMM (insecure) with devices paired
  *    in the system settings (computers running Zen on Windows, phones on
@@ -102,14 +104,13 @@ object ZenBluetoothLinkBridge {
     private val STREAM_OUT: UUID = UUID.fromString("5a454e00-6c69-6e6b-0000-000000000006")
     private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     private const val COMPANY_ID = 0xFFFF
-    private val MAGIC = byteArrayOf(0x5A, 0x4C)
 
     /** The Bloom filter bytes Dart asks the bridge for. */
     private const val ADVERT_BYTES = 16
 
     /** The advert in the scan response: a 7-byte header and the filter. */
     private const val MAX_RESPONSE_ADVERT = 7 + ADVERT_BYTES
-    private const val MIN_ADVERT = 7 + 8
+    private const val MIN_ADVERT = BluetoothLinkAdvert.MIN_ADVERT
     private const val MAX_ADVERT = 7 + 1024
     private const val TOKEN_BYTES = 16
     private const val MAX_INCOMING = 8
@@ -230,6 +231,9 @@ object ZenBluetoothLinkBridge {
     private val seenAt = HashMap<String, Long>()
     private val gattReadAt = HashMap<String, Long>()
     private var gattBusy = false
+
+    /** Devices whose advert came without a PSM: [connect] reads it over GATT. */
+    private val psmOnGatt = HashSet<String>()
 
     /** Incoming streams waiting for Dart's endpoint, and pumped streams. */
     private val incoming = ConcurrentHashMap<String, Pair<String, Closeable>>()
@@ -608,11 +612,36 @@ object ZenBluetoothLinkBridge {
             done(false)
             return
         }
+        if (!classic && channel <= 0 && address in psmOnGatt) {
+            // Its advert carried no PSM: read it now, from this friend only.
+            readPsmOverGatt(context, device) { read, stream ->
+                when {
+                    read > 0 -> dialSocket(adapter, device, address, read, false, port, token, done)
+                    stream -> connectGattStream(context, device, port, token, done)
+                    else -> done(false)
+                }
+            }
+            return
+        }
         if (!classic && channel <= 0) {
             // No L2CAP channel (a Windows computer): a GATT stream.
             connectGattStream(context, device, port, token, done)
             return
         }
+        dialSocket(adapter, device, address, channel, classic, port, token, done)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun dialSocket(
+        adapter: BluetoothAdapter,
+        device: BluetoothDevice,
+        address: String,
+        channel: Int,
+        classic: Boolean,
+        port: Int,
+        token: ByteArray,
+        done: (Boolean) -> Unit,
+    ) {
         io.execute {
             var socket: BluetoothSocket? = null
             try {
@@ -689,10 +718,8 @@ object ZenBluetoothLinkBridge {
             .setIncludeDeviceName(false)
             .setIncludeTxPowerLevel(false)
         if (bytes.size <= MAX_RESPONSE_ADVERT) {
-            response.addManufacturerData(
-                COMPANY_ID,
-                MAGIC + byteArrayOf((channel and 0xFF).toByte(), ((channel shr 8) and 0xFF).toByte()) + bytes,
-            )
+            // No PSM in the air: it is on GATT for whoever connects.
+            response.addManufacturerData(COMPANY_ID, BluetoothLinkAdvert.manufacturerData(bytes))
         }
         val callback = object : AdvertiseCallback() {
             override fun onStartFailure(errorCode: Int) {
@@ -1128,9 +1155,15 @@ object ZenBluetoothLinkBridge {
         val scanner = adapter.bluetoothLeScanner ?: return false
         stopScan(context)
         val filters = listOf(
+            // Phones ("ZG" adverts come with the service UUID).
             ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build(),
+            // Linux computers: "ZL" manufacturer data alone.
             ScanFilter.Builder()
-                .setManufacturerData(COMPANY_ID, MAGIC, byteArrayOf(0xFF.toByte(), 0xFF.toByte()))
+                .setManufacturerData(
+                    COMPANY_ID,
+                    BluetoothLinkAdvert.MAGIC_WITH_PSM,
+                    byteArrayOf(0xFF.toByte(), 0xFF.toByte()),
+                )
                 .build(),
         )
         val settings = ScanSettings.Builder()
@@ -1180,14 +1213,22 @@ object ZenBluetoothLinkBridge {
             seen.clear()
             seenAt.clear()
             gattReadAt.clear()
+            psmOnGatt.clear()
         }
         seen[address] = device
         val record = result.scanRecord ?: return
-        val data = record.getManufacturerSpecificData(COMPANY_ID)
-        if (data != null && data.size >= 4 + MIN_ADVERT && data[0] == MAGIC[0] && data[1] == MAGIC[1]) {
+        val parsed = BluetoothLinkAdvert.parse(record.getManufacturerSpecificData(COMPANY_ID))
+        if (parsed != null && parsed.advert.size <= MAX_ADVERT) {
             seenAt[address] = now
-            val channel = (data[2].toInt() and 0xFF) or ((data[3].toInt() and 0xFF) shl 8)
-            reportSeen(address, data.copyOfRange(4, data.size), channel)
+            if (parsed.psmOnGatt) {
+                // Connectable: connect() reads the PSM over GATT, only for a
+                // device the links want (a friend's tag in the advert).
+                psmOnGatt.add(address)
+                reportSeen(address, parsed.advert, 0, connectable = true)
+            } else {
+                psmOnGatt.remove(address)
+                reportSeen(address, parsed.advert, parsed.psm)
+            }
             return
         }
         if (record.serviceUuids?.contains(ParcelUuid(SERVICE)) == true) {
@@ -1313,6 +1354,91 @@ object ZenBluetoothLinkBridge {
         main.postDelayed({ finish(0) }, GATT_READ_MS)
     }
 
+    /**
+     * Reads the PSM of a device whose advert came without one ("ZG"), and
+     * whether it takes GATT streams; [done] gets them on the main thread
+     * (PSM 0: none read).
+     */
+    @SuppressLint("MissingPermission")
+    private fun readPsmOverGatt(context: Context, device: BluetoothDevice, done: (Int, Boolean) -> Unit) {
+        var finished = false
+        var connection: BluetoothGatt? = null
+        fun finish(channel: Int, stream: Boolean) {
+            if (finished) return
+            finished = true
+            try {
+                connection?.disconnect()
+                connection?.close()
+            } catch (_: Exception) {
+            }
+            done(channel, stream)
+        }
+        fun streams(gatt: BluetoothGatt): Boolean {
+            val service = gatt.getService(SERVICE) ?: return false
+            return service.getCharacteristic(STREAM_IN) != null && service.getCharacteristic(STREAM_OUT) != null
+        }
+        fun onRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray?, status: Int) {
+            main.post {
+                if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == PSM && value != null && value.size >= 2) {
+                    finish((value[0].toInt() and 0xFF) or ((value[1].toInt() and 0xFF) shl 8), streams(gatt))
+                } else {
+                    finish(0, streams(gatt))
+                }
+            }
+        }
+        val callback = object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                main.post {
+                    if (newState == BluetoothProfile.STATE_CONNECTED) {
+                        if (!gatt.discoverServices()) finish(0, false)
+                    } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                        finish(0, false)
+                    }
+                }
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                main.post {
+                    val characteristic = gatt.getService(SERVICE)?.getCharacteristic(PSM)
+                    if (characteristic == null || !gatt.readCharacteristic(characteristic)) {
+                        finish(0, streams(gatt))
+                    }
+                }
+            }
+
+            override fun onCharacteristicRead(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray,
+                status: Int,
+            ) {
+                onRead(gatt, characteristic, value, status)
+            }
+
+            @Deprecated("Before Android 13")
+            override fun onCharacteristicRead(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int,
+            ) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    @Suppress("DEPRECATION")
+                    onRead(gatt, characteristic, characteristic.value?.copyOf(), status)
+                }
+            }
+        }
+        connection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        } else {
+            device.connectGatt(context, false, callback)
+        }
+        if (connection == null) {
+            finish(0, false)
+            return
+        }
+        main.postDelayed({ finish(0, false) }, GATT_READ_MS)
+    }
+
     // --- Bluetooth on and off, and stopping --------------------------------
 
     private fun watchBluetoothState(context: Context) {
@@ -1375,6 +1501,7 @@ object ZenBluetoothLinkBridge {
         seen.clear()
         seenAt.clear()
         gattReadAt.clear()
+        psmOnGatt.clear()
     }
 
     private fun shutDown(context: Context) {

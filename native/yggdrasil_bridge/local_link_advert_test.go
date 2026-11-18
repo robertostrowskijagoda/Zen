@@ -101,6 +101,56 @@ func TestABluetoothAdvertStaysSelective(t *testing.T) {
 	}
 }
 
+// One device's Bluetooth adverts from different slots share no byte that
+// another device sends differently: what stays the same (the version) is
+// the same on every Zen device, so nobody nearby can tie the adverts of one
+// phone together across its address changes. The platforms add nothing of
+// the phone's own around it any more (BluetoothLinkAdvert.kt: until 1.18.0
+// the L2CAP PSM went with it).
+func TestABluetoothAdvertHasNoFieldOfItsOwnAcrossSlots(t *testing.T) {
+	start := time.Unix(1_800_000_000, 0)
+	phone := []localPeer{testLocalPeer(t, 1), testLocalPeer(t, 2), testLocalPeer(t, 3)}
+	other := []localPeer{testLocalPeer(t, 4)}
+	var mine, theirs [][]byte
+	for i := 0; i < 288; i++ {
+		now := start.Add(time.Duration(i) * localLinkSlot)
+		a, err := buildLocalAdvert(phone, now, 16, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := buildLocalAdvert(other, now, 16, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mine = append(mine, a)
+		theirs = append(theirs, b)
+	}
+	for i := range mine[0] {
+		same := true
+		for _, a := range mine {
+			same = same && a[i] == mine[0][i]
+		}
+		if !same {
+			continue
+		}
+		for _, b := range theirs {
+			if b[i] != mine[0][i] {
+				t.Fatalf("byte %d stays %#x in one phone's adverts and differs in another's", i, mine[0][i])
+			}
+		}
+		if i != 0 {
+			t.Fatalf("byte %d stays the same in every advert", i)
+		}
+	}
+	// Its friends still find it in every slot.
+	for i, a := range mine {
+		now := start.Add(time.Duration(i) * localLinkSlot)
+		if len(matchLocalAdvert(phone[:1], a, now)) != 1 {
+			t.Fatalf("slot %d: the friend does not find the advert", i)
+		}
+	}
+}
+
 // An advert with room for fewer devices than there are takes the account's
 // own devices first, then the ones linked lately, then the others by turns.
 func TestAnAdvertTakesOwnDevicesThenRecentThenByTurns(t *testing.T) {

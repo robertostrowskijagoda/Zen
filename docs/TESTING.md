@@ -944,8 +944,12 @@ pinned, a browser without a confirmed one is filled like any other app),
 who signs an APK as Android verified it, with its lineage (`ApkSignersTest`),
 the window of an inexact alarm that ends on the ten-minute grid
 (`InexactAlarmWindowTest`) and a call camera's frame-rate ranges read in
-frames a second whatever unit the camera reports in (`CallCameraRangesTest`), and
-the screen kept on for a running call after its ringing ends (`CallScreenKeepOnTest`). The CI job
+frames a second whatever unit the camera reports in (`CallCameraRangesTest`),
+the screen kept on for a running call after its ringing ends (`CallScreenKeepOnTest`),
+and the manufacturer data of a Bluetooth link advert (`BluetoothLinkAdvertTest`:
+captures from a day of slots share no byte that another phone sends
+differently, where 1.18.0's PSM did; "ZL" from Linux and older phones still
+read; cut, foreign and random data read as nothing, never a crash). The CI job
 *Kotlin unit tests* runs them in every run (`ZEN_SKIP_GO_BRIDGE=1
 ./gradlew :app:testDebugUnitTest` in `android/`).
 
