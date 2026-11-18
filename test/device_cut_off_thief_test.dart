@@ -57,6 +57,7 @@ final String _a1 = _a('200::a1');
 final String _a2 = _a('200::a2');
 final String _a3 = _a('200::a3');
 final String _b = _a('200::b');
+final String _c = _a('200::c');
 
 Future<LedgerNode> _node(
   String address, {
@@ -84,10 +85,16 @@ Future<LedgerNode> _node(
 
 /// The owner's first device, a friend, and (two hours after they met) a
 /// second device the owner links from the first: the one to be stolen.
-Future<(LedgerNode, LedgerNode, LedgerNode)> _owner() async {
+Future<(LedgerNode, LedgerNode, LedgerNode)> _owner({
+  List<String>? firstFriends,
+}) async {
   final MemoryLedgerDisk d1 = MemoryLedgerDisk();
   await LedgerIdentity.loadOrCreate(d1, now: () => _now);
-  final LedgerNode first = await _node(_a1, disk: d1, friends: <String>[_b]);
+  final LedgerNode first = await _node(
+    _a1,
+    disk: d1,
+    friends: firstFriends ?? <String>[_b],
+  );
   final LedgerNode bob = await _node(
     _b,
     disk: MemoryLedgerDisk(),
@@ -245,5 +252,59 @@ void main() {
       ),
     );
     expect(bob.store.directory.isRevoked(account, owner), isFalse);
+  });
+
+  test('a new friend meeting the account counts the device it met and what '
+      'that one co-signed at once; a thief\'s device seen in the same hour '
+      'waits its day there too, and its cut-off of the owner counts for '
+      'nothing', () async {
+    final List<String> firstFriends = <String>[_b];
+    final (LedgerNode first, LedgerNode _, LedgerNode second) = await _owner(
+      firstFriends: firstFriends,
+    );
+    final String account = first.account;
+    final String owner = first.identity.deviceKey.id;
+    final String s = second.identity.deviceKey.id;
+    final LedgerKeyPair accountKey = second.identity.accountKey!;
+    final LedgerKeyPair thief = await LedgerKeyPair.generate();
+    final DeviceCertificate thiefCert = await DeviceCertificate.issue(
+      account: accountKey,
+      device: thief,
+      name: 'Nowe urządzenie',
+      issued: _now,
+    );
+
+    // Carol befriends the owner, who greets her from the first device.
+    firstFriends.add(_c);
+    final LedgerNode carol = await _node(
+      _c,
+      disk: MemoryLedgerDisk(),
+      friends: <String>[_a1],
+    );
+    await _settle(160);
+    expect(carol.store.directory.certificateOf(account, owner), isNotNull);
+    expect(carol.store.directory.isRevoked(account, owner), isFalse);
+    await carol.store.directory.addCertificate(
+      second.identity.certificate,
+    );
+    expect(carol.store.directory.isRevoked(account, s), isFalse);
+
+    // Within that hour the thief's device reaches her, with its cut-off
+    // of the owner's device.
+    await carol.store.directory.addCertificate(thiefCert);
+    expect(carol.store.directory.pendingUntil(account, thief.id), isNotNull);
+    expect(carol.store.directory.isRevoked(account, thief.id), isTrue);
+    await carol.store.applyRevocation(
+      await DeviceRevocation.issue(
+        account: accountKey,
+        device: owner,
+        cutoffs: const <String, int>{},
+        issued: _now,
+        by: thief,
+        byCertificate: thiefCert,
+      ),
+    );
+    expect(carol.store.directory.isRevoked(account, owner), isFalse);
+    expect(carol.store.directory.isRevoked(account, s), isFalse);
   });
 }

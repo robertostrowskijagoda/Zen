@@ -18,6 +18,7 @@ import 'package:zen/src/features/account/account_media.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_state_sync_app.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
+import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
@@ -169,10 +170,10 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
       deviceName: thisDeviceName,
       wrapped: archive.wrapped,
     );
-    if (!archive.scope.contains(AccountScope.pyramid)) {
-      // Its place and wallet come back from the pyramid's people.
-      await PyramidService.markRecovered(node.disk);
-    }
+    await markAccountTakenFromCopy(
+      node.disk,
+      withPyramid: archive.scope.contains(AccountScope.pyramid),
+    );
     final AppSettingsController settings = ref.read(
       appSettingsControllerProvider.notifier,
     );
@@ -412,6 +413,23 @@ Future<void> takeAccountArchiveSettings(
   } else if (!whole && !beforeRestart) {
     await controller.restoreFromCopy(AppSettings.fromJson(settings));
   }
+}
+
+/// The account came onto [disk] from a backup file or a copy of the
+/// account, as after any other recovery: the pyramid's place and wallet
+/// come back from its people (unless the copy carried them,
+/// [withPyramid]), and the copy with friends is looked for before this
+/// device makes its own. Without that mark the copy from the file, perhaps
+/// old or partial, would go to the friends at once and replace their
+/// newer one.
+Future<void> markAccountTakenFromCopy(
+  LedgerDisk disk, {
+  required bool withPyramid,
+}) async {
+  if (!withPyramid) {
+    await PyramidService.markRecovered(disk);
+  }
+  await CircleBackupService.markRestore(disk);
 }
 
 /// What the account on [node] holds that the person made or received

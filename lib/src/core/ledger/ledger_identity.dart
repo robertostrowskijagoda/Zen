@@ -652,8 +652,8 @@ bool _isCutoffKey(Object? key) {
       key.length - at - 1 <= 200;
 }
 
-/// When this phone first saw a device, and whether that was with the first
-/// contact with its account ([kFirstContactWindow]).
+/// When this phone first saw a device, and whether it is the device this
+/// phone met the account by.
 @immutable
 final class DeviceSeen {
   const DeviceSeen(this.at, {this.firstContact = false});
@@ -661,7 +661,8 @@ final class DeviceSeen {
   /// When (ms).
   final int at;
 
-  /// Seen with the first contact: it counted at once.
+  /// The first device of its account this phone took (the one it met the
+  /// account by): it and the devices that co-signed it count at once.
   final bool firstContact;
 }
 
@@ -800,11 +801,37 @@ final class AccountDirectory {
       return;
     }
     final int at = now();
-    final int first = _firstContact.putIfAbsent(account, () => at);
-    seen[device] = DeviceSeen(
-      at,
-      firstContact: at - first <= kFirstContactWindow.inMilliseconds,
-    );
+    // The first device of an account this phone takes (the one whose hello
+    // brought it) is the one it met the account by. Any other device, even
+    // one that comes along in the same hour (a thief's among them), is
+    // judged by the rules: a co-signature from one that counts, or the wait.
+    final bool first = !_firstContact.containsKey(account);
+    _firstContact.putIfAbsent(account, () => at);
+    seen[device] = DeviceSeen(at, firstContact: first);
+  }
+
+  /// The devices of [account] that count from when first seen: this
+  /// device and the one met with the first contact ([DeviceSeen]), each
+  /// with the devices that co-signed it, up the chain: nobody could have
+  /// vetoed them for a new friend.
+  Set<String> _rooted(String account) {
+    final Map<String, DeviceCertificate>? certs = _certs[account];
+    final Map<String, DeviceSeen>? seen = _seen[account];
+    final Set<String> out = <String>{};
+    if (certs == null) {
+      return out;
+    }
+    for (final String d in certs.keys) {
+      if (d != _selfDevice && !(seen?[d]?.firstContact ?? false)) {
+        continue;
+      }
+      String? next = d;
+      while (next != null && out.add(next)) {
+        final DeviceCertificate? c = certs[next];
+        next = c != null && c.coSignedByOther ? c.co!.by : null;
+      }
+    }
+    return out;
   }
 
   /// When this phone first saw each device of [account], and its first
@@ -1205,7 +1232,7 @@ final class AccountDirectory {
     ).any((DeviceRevocation r) => r.hasDevicePart);
   }
 
-  int _readyAt(String account, String device) {
+  int _readyAt(String account, String device, [Set<String>? rooted]) {
     if (device == _selfDevice) {
       return _always;
     }
@@ -1213,7 +1240,7 @@ final class AccountDirectory {
     if (seen == null) {
       return _always;
     }
-    return seen.firstContact
+    return (rooted ?? _rooted(account)).contains(device)
         ? seen.at
         : seen.at + kNewDeviceWait.inMilliseconds;
   }
@@ -1229,9 +1256,10 @@ final class AccountDirectory {
     }
     final Map<String, TrustDevice> devices = <String, TrustDevice>{};
     int until = 1 << 52;
+    final Set<String> rooted = _rooted(account);
     for (final DeviceCertificate c
         in _certs[account]?.values ?? const <DeviceCertificate>[]) {
-      final int ready = _readyAt(account, c.device);
+      final int ready = _readyAt(account, c.device, rooted);
       if (ready > t && ready < until) {
         until = ready;
       }

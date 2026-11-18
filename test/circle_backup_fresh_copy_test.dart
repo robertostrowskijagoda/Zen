@@ -196,6 +196,65 @@ void main() {
     expect(t.previousOf(me.account), isNull);
   });
 
+  test('the passwords switched off: the friend keeps no copy from before '
+      'that holds them, though the new one is much smaller', () async {
+    final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
+      MemoryLedgerDisk(),
+    );
+    final _Linked tOwner = _Linked('200::a');
+    final _Linked tHolder = _Linked('200::b');
+    await tOwner.start();
+    await tHolder.start();
+    final CircleBackupService holder = CircleBackupService(
+      transport: tHolder,
+      disk: MemoryLedgerDisk(),
+      data: _MemoryData(const CircleBackupContent()),
+      identity: () => null,
+      holders: () => const <String>[],
+      isInCircle: (String a) => a == me.account,
+      restoreCandidates: () => const <String>[],
+      clock: () => now,
+    );
+    await holder.start();
+    final _MemoryData mine = _MemoryData(_full());
+    final CircleBackupService owner = CircleBackupService(
+      transport: tOwner,
+      disk: MemoryLedgerDisk(),
+      data: mine,
+      identity: () => CircleBackupIdentity(
+        account: me.account,
+        selfKey: me.selfKey!,
+        deviceKey: me.deviceKey,
+        certificate: me.certificate,
+      ),
+      holders: () => <String>[tHolder.address],
+      isInCircle: (_) => false,
+      restoreCandidates: () => const <String>[],
+      clock: () => now,
+    );
+    await owner.start();
+    await _settle(<CircleBackupService>[owner, holder]);
+    final CircleBackupManifest whole = holder.holder.manifestOf(me.account)!;
+
+    // "Hasła w kopii u znajomych" off, with a big vault.
+    now += const Duration(minutes: 1).inMilliseconds;
+    mine.content = _empty();
+    owner.contentChanged(shrunk: true);
+    await _settle(<CircleBackupService>[owner, holder]);
+    final CircleBackupManifest kept = holder.holder.manifestOf(me.account)!;
+    expect(kept.id, isNot(whole.id));
+    expect(kept.totalBytes * 2, lessThan(whole.totalBytes));
+    expect(holder.holder.previousOf(me.account), isNull);
+    for (final String id in whole.chunks.keys) {
+      if (!kept.chunks.containsKey(id)) {
+        expect(await holder.holder.chunk(me.account, id), isNull);
+      }
+    }
+    for (final CircleBackupService s in <CircleBackupService>[owner, holder]) {
+      await s.stop();
+    }
+  });
+
   test('a holder that keeps a copy dated ahead refuses the owner\'s copies, '
       'and the owner is told', () async {
     final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
@@ -304,7 +363,7 @@ void main() {
 final class _MemoryData implements CircleBackupData {
   _MemoryData(this.content);
 
-  final CircleBackupContent content;
+  CircleBackupContent content;
   CircleBackupContent? restoredContent;
 
   @override

@@ -230,7 +230,6 @@ final class CircleBackupService {
          disk: disk,
          isInCircle: isInCircle,
          isFriend: isFriend,
-         isRevoked: isRevoked,
          clock: clock,
        );
 
@@ -244,8 +243,9 @@ final class CircleBackupService {
   /// friends, then others); the circle's helpers come before them.
   final Iterable<String> Function() friendHolders;
 
-  /// Whether a device of an account was cut off by the account (its
-  /// requests for the copy are refused then).
+  /// Whether a device of an account does not count (cut off by the
+  /// account, or not yet trusted): its copies are not taken and its
+  /// requests for the copy are refused. A copy taken before stays.
   final bool Function(String account, String device) isRevoked;
 
   /// How long manifests are gathered after a recovery before the newest
@@ -303,6 +303,10 @@ final class CircleBackupService {
   CircleBackupBuild? _build;
   int _builtAt = 0;
   int _changedAt = 0;
+
+  /// When the person last took a part out of the copy on purpose (0:
+  /// never; see [contentChanged]).
+  int _shrunkAt = 0;
 
   /// Holder address → the copy (`at`) it confirmed.
   final Map<String, int> _confirmed = <String, int>{};
@@ -399,7 +403,18 @@ final class CircleBackupService {
   /// says, and offered to the holders. Each takes it in place of the copy it
   /// kept and deletes the chunks the new one does not use (as soon as it is
   /// reachable: one that is not gets the offer again every [tickInterval]).
-  void contentChanged() {
+  ///
+  /// [shrunk]: the person took a part out on purpose (the passwords). The
+  /// copies made from now on say so, and a holder then keeps none made
+  /// before as the one before ([CircleBackupManifest.shrunkAt]): the
+  /// friends would otherwise hand the part out for another month. Not
+  /// while the copy is looked for after a recovery: settings that come
+  /// back with it are no word of the person's.
+  void contentChanged({bool shrunk = false}) {
+    if (shrunk && !restoring) {
+      _shrunkAt = _clock();
+      _enqueue(_saveStatus);
+    }
     changed();
     _builtAt = 0;
     if (_timer != null) {
@@ -556,6 +571,7 @@ final class CircleBackupService {
       certificate: id.certificate,
       at: now,
       maxBytes: maxBytes,
+      shrunkAt: _shrunkAt > 0 ? _shrunkAt : null,
     );
     // Unchanged pieces give the same chunks: a holder is sent only what
     // changed (and the index, which carries the time).
@@ -953,11 +969,11 @@ final class CircleBackupService {
     final DeviceCertificate? signer = DeviceCertificate.fromJson(
       m.json['cert'],
     );
-    if (signer == null ||
-        isRevoked(signer.account, signer.device) ||
-        signer.device == id.certificate.device) {
+    if (signer == null || signer.device == id.certificate.device) {
       // This device's own copy (made after the person allowed it) holds
-      // nothing of what is looked for.
+      // nothing of what is looked for. One made by a device cut off since
+      // (the lost phone) is taken: the friend took it while that device
+      // counted, and it may be the only one.
       return;
     }
     if (m.version > kCircleBackupVersion) {
@@ -1181,6 +1197,9 @@ final class CircleBackupService {
         includeChats: s['chats'] != false,
         droppedMessages: s['dropped'] is int ? s['dropped'] as int : 0,
       );
+      if (s['shrunk'] is int && (s['shrunk'] as int) > _shrunkAt) {
+        _shrunkAt = s['shrunk'] as int;
+      }
       final Object? stale = s['stale'];
       if (stale is Map) {
         for (final MapEntry<Object?, Object?> e in stale.entries.take(64)) {
@@ -1213,6 +1232,7 @@ final class CircleBackupService {
           'chats': status.value.includeChats,
           'dropped': status.value.droppedMessages,
           if (_staleSince.isNotEmpty) 'stale': _staleSince,
+          if (_shrunkAt > 0) 'shrunk': _shrunkAt,
         }),
       ),
     ),
