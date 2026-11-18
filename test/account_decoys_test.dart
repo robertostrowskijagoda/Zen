@@ -132,18 +132,7 @@ void main() {
   }
 
   test('every name a used account has is one decoys have too', () async {
-    final Set<String> decoyNames = <String>{};
-    int decoyFolders = 0;
-    for (int seed = 1; seed <= 12; seed++) {
-      final _Device d = await device(seed);
-      // Enough sessions for the rarer names (a quarter of accounts or
-      // fewer) to come up among the decoys.
-      await d.runs(30);
-      for (final String folder in await d.folders()) {
-        decoyFolders++;
-        decoyNames.addAll(_shapes(await d.folder(folder)));
-      }
-    }
+    // The hidden account first: which of its names the decoys must have.
     final _Device d = await device(99);
     await d.runs(3);
     final ZenAccountScope hidden = await useHiddenAccount(d);
@@ -161,10 +150,38 @@ void main() {
         'runtime/yggdrasil.config.json.bak',
       ]),
     );
+    // Those the decoys pick by chance (each draw one name by how likely an
+    // account has it): decoys run until, for every one of them, the odds
+    // that no draw picked it are below one in a million, all of them
+    // together. A draw in a decoy without the name picks it with at least
+    // [ZenAccountDecoys.debugDrawOdds]; a decoy that has it shows it.
+    final Map<String, double> drawn = <String, double>{
+      for (final String place in ZenAccountDecoys.debugPlaces)
+        if (own.contains(place.toLowerCase()) &&
+            ZenAccountDecoys.debugDrawOdds(place) > 0)
+          place.toLowerCase(): ZenAccountDecoys.debugDrawOdds(place),
+    };
+    expect(drawn.keys, contains('data/recovery/circle.zenbin'));
+    final double miss = 1e-6 / drawn.length;
+    final int draws = drawn.values
+        .map((double p) => (log(miss) / log(1 - p)).ceil())
+        .reduce(max);
+    final Set<String> decoyNames = <String>{};
+    int decoyFolders = 0;
+    ZenAccountDecoys.debugNewNames = 0;
+    for (int seed = 1; ZenAccountDecoys.debugNewNames < draws; seed++) {
+      expect(seed, lessThan(400), reason: '$draws draws not reached');
+      final _Device decoys = await device(seed);
+      await decoys.runs(20);
+      for (final String folder in await decoys.folders()) {
+        decoyFolders++;
+        decoyNames.addAll(_shapes(await decoys.folder(folder)));
+      }
+    }
     expect(
       own.difference(decoyNames),
       isEmpty,
-      reason: 'over $decoyFolders decoys',
+      reason: 'over $decoyFolders decoys, $draws draws',
     );
     // Told by a name no other device's decoys have: never the account (a
     // decoy may be, by a name only a few accounts get).

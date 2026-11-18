@@ -666,13 +666,39 @@ final class ZenAccountDecoys {
       return null;
     }
     double at = _random.nextDouble() * total;
+    _Name picked = open.last;
     for (final _Name name in open) {
       at -= name.used;
       if (at <= 0) {
-        return () => _write(place, name);
+        picked = name;
+        break;
       }
     }
-    return () => _write(place, open.last);
+    return () {
+      debugNewNames++;
+      return _write(place, picked);
+    };
+  }
+
+  /// How many names [_newName] wrote in all (tests: how many draws the
+  /// decoys made).
+  @visibleForTesting
+  static int debugNewNames = 0;
+
+  /// At least the odds that one draw of [_newName], in a decoy without
+  /// [place] (one of [debugPlaces]) yet, writes it: its weight against
+  /// that of every name a draw can pick. Zero for a name no draw picks in
+  /// every decoy (the media vault's, the background's).
+  @visibleForTesting
+  static double debugDrawOdds(String place) {
+    final _Name name = _names.firstWhere((_Name n) => n.place == place);
+    if (name.way == _Way.vault || name.background) {
+      return 0;
+    }
+    final double total = _names
+        .where((_Name n) => n.way != _Way.vault)
+        .fold(0, (double a, _Name n) => a + n.used);
+    return name.used / total;
   }
 
   /// One of the keys that come and go, gone (sent, assembled, imported).
