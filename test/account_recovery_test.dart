@@ -290,6 +290,83 @@ void main() {
     expect(kept!.keys, unorderedEquals(<String>['box', 'share']));
   });
 
+  test('the accepted costs are the two known ones and nothing broader', () {
+    expect(kAcceptedRecoveryCosts, <PasswordCost>[
+      kRecoveryPasswordCost,
+      const PasswordCost(memoryKiB: 131072, iterations: 3),
+    ]);
+    expect(kHeavyRecoveryPasswordCost.parallelism, 1);
+  });
+
+  test('a half sealed at 128 MiB / 3 passes is accepted, the cost written '
+      'before still is, a cost above them is not', () async {
+    final List<RecoveryPiece> pieces = await createRecoveryPieces(
+      account: (await LedgerKeyPair.generate()).id,
+      seed: randomBytes(32),
+      password: _password,
+      helpers: 4,
+      now: 1,
+      cost: _light,
+    );
+    Map<String, dynamic> withCost(PasswordCost cost) => <String, dynamic>{
+      ...pieces.first.normal,
+      'cost': cost.toJson(),
+    };
+    Object? fields(PasswordCost cost) =>
+        recoveryHalfFields(withCost(cost), normal: true);
+
+    expect(
+      fields(const PasswordCost(memoryKiB: 131072, iterations: 3)),
+      isNotNull,
+    );
+    expect(fields(kRecoveryPasswordCost), isNotNull);
+    // Neighbours of the accepted costs and everything above them.
+    expect(
+      fields(const PasswordCost(memoryKiB: 131072, iterations: 2)),
+      isNull,
+    );
+    expect(
+      fields(const PasswordCost(memoryKiB: 131072, iterations: 4)),
+      isNull,
+    );
+    expect(
+      fields(const PasswordCost(memoryKiB: 262144, iterations: 3)),
+      isNull,
+    );
+    expect(
+      fields(
+        const PasswordCost(memoryKiB: 131072, iterations: 3, parallelism: 2),
+      ),
+      isNull,
+    );
+    expect(
+      fields(const PasswordCost(memoryKiB: 262144, iterations: 10)),
+      isNull,
+    );
+    expect(
+      fields(const PasswordCost(memoryKiB: 262145, iterations: 3)),
+      isNull,
+    );
+  });
+
+  test('a recovery from pieces sealed at 128 MiB / 3 passes opens', () async {
+    final LedgerKeyPair key = await LedgerKeyPair.generate();
+    final List<RecoveryPiece> pieces = await createRecoveryPieces(
+      account: key.id,
+      seed: key.seed,
+      password: _password,
+      helpers: 3,
+      now: 1,
+      cost: kHeavyRecoveryPasswordCost,
+    );
+    final List<Map<String, dynamic>> halves = <Map<String, dynamic>>[
+      for (final RecoveryPiece p in pieces.take(2))
+        <String, dynamic>{...p.normal, 'account': key.id},
+    ];
+    // The built-in accepted costs, not a test list.
+    expect(_seedOf(await recoverWithPassword(halves, _password)), key.seed);
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
   test('account fingerprints are 16 digits and differ per account', () async {
     final String a = (await LedgerKeyPair.generate()).id;
     final String b = (await LedgerKeyPair.generate()).id;

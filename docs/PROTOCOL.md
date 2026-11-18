@@ -1224,7 +1224,15 @@ without the password.
   seed under it once: Argon2id (64 MiB, 2 passes, `kRecoveryPasswordCost`)
   gives the password key, `SHA-256("zen.recovery.inner" | key)` the key of
   a ChaCha20-Poly1305 box of the seed (`RecoverySeal`, kept on the device
-  that hands the pieces out, `recovery/sealed`).
+  that hands the pieces out, `recovery/sealed`). A device opens a received
+  half, or a full account copy, only when it asks for one of two costs
+  (`kAcceptedRecoveryCosts`): 64 MiB with 2 passes (what this build
+  writes) or 128 MiB with 3 passes (`kHeavyRecoveryPasswordCost`, written
+  by nothing yet, accepted so that such a seal is not refused). Any other
+  cost is refused without running Argon2, so a hostile file cannot make a
+  phone spend absurd memory or time. A key file and a password wrapping
+  of the account key carry their cost and are bounded only by
+  `PasswordCost.fromJson` (8 KiB to 256 MiB, 1 to 10 passes).
 - **Generations.** For each generation of pieces the device draws a fresh
   32-byte circle secret, seals the seal's box again under
   `SHA-256("zen.recovery.outer" | secret)`, and splits the secret by
