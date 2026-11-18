@@ -188,6 +188,9 @@ class ZenAutofillTrustTest {
             .parse(java.io.File("src/main/res/xml/zen_autofill_service.xml"))
         val android = "http://schemas.android.com/apk/res/android"
         assertEquals("autofill-service", xml.documentElement.tagName)
+        // Without it Android 11+ never asks the keyboard for room, and the
+        // suggestion inside the keyboard (inlinePresentation) never shows.
+        assertEquals("true", xml.documentElement.getAttributeNS(android, "supportsInlineSuggestions"))
         val entries = xml.getElementsByTagName("compatibility-package")
         val declared = (0 until entries.length).map { entries.item(it) as org.w3c.dom.Element }
         assertEquals(compatibilityBrowsers.keys, declared.map { it.getAttributeNS(android, "name") }.toSet())

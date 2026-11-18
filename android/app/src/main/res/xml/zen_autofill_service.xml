@@ -16,8 +16,17 @@
      version that hands forms to the service itself, so the limit is beyond
      any version code they use (as Bitwarden sets it). A browser that gains
      its own support gets its last version without it here. An entry Android
-     cannot read ends the list, so each has both attributes. -->
-<autofill-service xmlns:android="http://schemas.android.com/apk/res/android">
+     cannot read ends the list, so each has both attributes.
+
+     supportsInlineSuggestions: without it Android 11+ never asks the
+     keyboard for a place in its suggestions, the request carries no
+     inline suggestions request, and Zen's suggestion is only ever the
+     drop-down. Android 9 and 10 do not know the attribute and skip it
+     (AutofillServiceInfo reads only the attributes of its own version). -->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:supportsInlineSuggestions="true"
+    tools:targetApi="30">
     <compatibility-package
         android:name="com.sec.android.app.sbrowser"
         android:maxLongVersionCode="10000000000" />
