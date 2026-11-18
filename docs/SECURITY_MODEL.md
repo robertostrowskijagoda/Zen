@@ -726,19 +726,22 @@ filled. This version never offers to save what is typed elsewhere.
   up: the form stays fillable for minutes instead of one. An entry added
   this way is typed by the person for that page, so a page cannot make Zen
   save a login under an address of its choosing.
-- **The setup looks at browsers.** "Konfiguracja haseł" tells which of 21
+- **The setup looks at browsers.** "Konfiguracja haseł" tells which of 26
   known browsers are installed, so the manifest names them under
   `<queries>` (package visibility, no permission; Zen sees whether these
   packages are installed and nothing else about the others): `com.android.chrome`,
   `com.chrome.beta`, `com.chrome.dev`, `com.chrome.canary`,
   `org.chromium.chrome`, `com.brave.browser`, `com.vivaldi.browser`,
-  `com.microsoft.emmx`, `com.sec.android.app.sbrowser`, `com.opera.browser`,
-  `com.kiwibrowser.browser`, `org.mozilla.firefox`,
+  `com.microsoft.emmx`, `com.microsoft.emmx.beta`, `com.microsoft.emmx.dev`,
+  `com.microsoft.emmx.canary`, `com.sec.android.app.sbrowser`,
+  `com.sec.android.app.sbrowser.beta`, `com.opera.browser`,
+  `com.opera.browser.beta`, `com.kiwibrowser.browser`, `org.mozilla.firefox`,
   `org.mozilla.firefox_beta`, `org.mozilla.fenix`, `org.mozilla.focus`,
   `org.mozilla.klar`, `org.torproject.torbrowser`, `us.spotco.fennec_dos`,
   `org.mozilla.fennec_fdroid`, `org.ironfoxoss.ironfox` and
-  `com.duckduckgo.mobile.android`. For the Chromium family it reads the
-  browser's own provider
+  `com.duckduckgo.mobile.android`. For the Chromium family and the
+  browsers served in compatibility mode (below) it reads the browser's own
+  provider
   (`content://<package>.AutofillThirdPartyModeContentProvider/autofill_third_party_mode`)
   for its "Autofill using another service" switch, off the main thread
   (the browser may start for it), and takes anything unexpected for
@@ -770,6 +773,38 @@ filled. This version never offers to save what is typed elsewhere.
   their own name. Hosts are compared in their ASCII form, so addresses in
   other scripts match. A page that is not https matches only entries that
   say `http://`, and a port must be the same.
+- **Compatibility mode (Edge, Samsung Internet, Opera).** These browsers
+  hand no form to an autofill service themselves. Since 1.18.1 Zen's
+  service declares them as `<compatibility-package>` (with Beta, Dev and
+  Canary channels; `res/xml/zen_autofill_service.xml`, no version limit in
+  practice), and Android serves them in its compatibility mode where its
+  own list (the global setting `autofill_compat_mode_allowed_packages`,
+  which Zen cannot read) allows them. What it exposes: Android turns on
+  accessibility events inside that browser (Zen holds no accessibility
+  service) and builds the form Zen gets from the browser's accessibility
+  tree, the page's elements with their HTML ids, hints, texts and input
+  types, and the browser's own views; the address bar's text becomes the
+  bar's web domain and scheme (`Helper.sanitizeUrlBar` in the system
+  server) before typed text is stripped. Why it was not used before: the
+  page builds most of that tree, so the address is no longer the
+  browser's report of which page holds the form but the text of a view,
+  and a page can give an element the bar's id. What Zen does about it
+  (`compatibilityWebOrigin` in `ZenAutofillTrust.kt`): in a request
+  flagged `FLAG_COMPATIBILITY_MODE_REQUEST` no web domain on the form's
+  nodes counts; the page is the address bar's only when exactly one view
+  carries one of that browser's bar ids, it is a view of the browser's own
+  layout (`<package>:id/<id>`; a node the page made has no package), it
+  does not have the focus (then it shows what is typed), and it passes the
+  same rules as any page: the maker's signature (each package's keys are
+  pinned: Samsung Internet's two keys from Google's list, both named as
+  Samsung's in samsung.com's asset links; Edge's channels with Edge's key),
+  a plausible host, http or https. Anything else: no page, the browser is
+  matched by its package, and every login is behind the warning. What
+  stays weaker than in Chrome: the address is the tab's, not that of a
+  frame inside it; most bars show no scheme, so such a page counts as http
+  and an `https://` entry is offered only past the warning; Zen trusts the
+  browser to put the real address in its bar, as it trusts any known
+  browser's report.
 - **What a malicious app can and cannot do.** Any app with a login form
   gets the "Odblokuj Zen" suggestion and learns from it only that an
   autofill service answers. It cannot name a web page to be matched as
