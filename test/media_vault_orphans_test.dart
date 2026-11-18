@@ -11,6 +11,8 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/media/media_vault_sweep.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/social/social_hub_controller.dart';
 
 import 'support/friends_world.dart';
 
@@ -62,6 +64,16 @@ Set<String> _onDisk(FriendsPhone p) {
 DateTime _later() => DateTime.now().add(const Duration(days: 3));
 
 bool _none(String _) => false;
+
+/// [address] (an IPv6 address) written out in full and in capitals: the
+/// same address, spelled another way.
+String _otherSpelling(String address) {
+  final Uint8List bytes = InternetAddress(address).rawAddress;
+  return <String>[
+    for (int i = 0; i < 16; i += 2)
+      ((bytes[i] << 8) | bytes[i + 1]).toRadixString(16).padLeft(4, '0'),
+  ].join(':').toUpperCase();
+}
 
 void main() {
   test('removing a friend deletes the files of the chat with them', () async {
@@ -153,5 +165,37 @@ void main() {
     );
     await disk.write(index, Uint8List.fromList(<int>[9, 9, 9]));
     await expectLater(store.loadStrict('peer'), throwsA(anything));
+  });
+
+  test('a file of a chat written under another spelling of the friend\'s '
+      'address is found by the sweep and kept', () async {
+    final FriendsWorld w = await FriendsWorld.create(<String>['A', 'B']);
+    final String spelled = _otherSpelling(w['A'].address);
+    expect(spelled, isNot(w['A'].address));
+    expect(PeerShareCodec.addressesEqual(spelled, w['A'].address), isTrue);
+    final MediaVault vault = w['B'].container.read(mediaVaultProvider);
+    await w['B'].hub.sendLocalAttachment(
+      peerAddress: spelled,
+      attachmentPath: await vault.put(
+        Uint8List.fromList(utf8.encode('plik f6')),
+      ),
+      fileName: 'lista.txt',
+      mimeType: 'text/plain',
+    );
+    await w.settle();
+    final MessageTimelineStore store = w['B'].container.read(
+      messageTimelineStoreProvider,
+    );
+    final String path = (await store.load(
+      spelled,
+    )).singleWhere((ChatMessage m) => m.attachmentPath != null).attachmentPath!;
+
+    await w['B'].hub.sweepOrphanedMedia(inFlight: _none, now: _later);
+    expect(File(path).existsSync(), isTrue);
+    // One chat with the friend, whichever spelling it is asked by.
+    expect(
+      (await w['B'].thread(w['A'])).map((ChatMessage m) => m.attachmentPath),
+      contains(path),
+    );
   });
 }

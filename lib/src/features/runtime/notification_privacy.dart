@@ -511,9 +511,11 @@ final class LockedNoticeKit {
   );
 
   /// Groups whose speakers did not fit among [memberTags]
-  /// ([maxMemberTags]), as [groupTag]s: for these the locked receiver takes
-  /// the background capability's word (a friend, or a member of some joined
-  /// group), so their members are not silenced by the size of the kit.
+  /// ([maxMemberTags]), as [groupTag]s. The locked receiver cannot tell
+  /// who speaks in these, so their calls and messages stay quiet while
+  /// locked (still kept for the app): the background capability's word
+  /// (a friend, or a member of some joined group) let any friend ring in
+  /// them, which the app's rule never does.
   final Set<String> unlistedGroups;
 
   /// The tag of the group chat [groupKey] in [unlistedGroups].
@@ -936,13 +938,15 @@ final class _KitAlertFacts implements AlertFacts {
   bool isFriend(String address) =>
       _isFriend(PeerShareCodec.normalizeAddress(address));
 
+  /// A group past the kit's size ([LockedNoticeKit.unlistedGroups]) is not
+  /// taken on the capability's word: that word is "a friend, or a member
+  /// of some joined group", so any friend could make the locked phone ring
+  /// in a group they are not in, which the app never lets them do. Who
+  /// speaks there is not known, and that counts as "no".
   @override
   bool speaksIn(String groupId, String address) =>
       _kit.speaksIn(groupId, address) ||
-      ((!_kit.speakersKnown ||
-              _kit.unlistedGroups.contains(
-                LockedNoticeKit.groupTag(groupConversationKey(groupId)),
-              )) &&
+      (!_kit.speakersKnown &&
           (_inJoinedGroup?.call(PeerShareCodec.normalizeAddress(address)) ??
               false));
 

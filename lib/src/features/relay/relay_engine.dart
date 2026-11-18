@@ -894,22 +894,28 @@ const String _chatMessageType = 'message';
 /// chat message, and reported once every member confirmed it or it expired.
 const String _groupMessageType = 'group_message';
 
-/// Payloads the app keeps on its disk itself (the chats): with
-/// [RelayEngine.appConfirmsKeeping] on, one of them is acknowledged to its
-/// sender, remembered as seen and taken out of the mailboxes only once the
-/// app said it has it ([reportReliableKept]). Acknowledged on arrival, a
-/// message the app then failed to write (the app killed in between, a full
-/// disk) was gone for good while its sender showed it delivered: the sender
-/// stopped trying and every later copy was dropped as seen. An edit is one
-/// of them too: one that comes before its message only waits in memory,
-/// and a restart before the message comes would lose it.
-const Set<String> _keptByAppTypes = <String>{
-  _chatMessageType,
-  _groupMessageType,
-  'msg_edit',
-};
+/// Whether [payload] waits for the app's word ([reportReliableKept]) with
+/// [RelayEngine.appConfirmsKeeping] on: it is acknowledged to its sender,
+/// remembered as seen and taken out of the mailboxes only once the app said
+/// it kept it. Acknowledged on arrival, a message the app then failed to
+/// write (the app killed in between, a full disk) was gone for good while
+/// its sender showed it delivered: the sender stopped trying and every
+/// later copy was dropped as seen. The same holds for everything a person
+/// did ([relayIsPersonalPayload]): while the stored friends cannot be read
+/// the app puts off a group leave, a friend removal, a deletion, a reaction
+/// or a timer change as much as a message, and acknowledged on arrival it
+/// was lost. An edit that comes before its message only waits in memory,
+/// and a restart before the message comes would lose it too. Parts and
+/// blob manifests never reach the app as they came (this layer takes them
+/// in itself), so nothing would ever answer for them.
+bool _awaitsAppWord(Map<String, dynamic> payload) {
+  final Object? type = payload['type'];
+  return type != kRelayPartType &&
+      type != kBlobManifestType &&
+      relayIsPersonalPayload(payload);
+}
 
-/// A payload of [_keptByAppTypes] handed to the app, waiting for its word.
+/// A payload of [_awaitsAppWord] handed to the app, waiting for its word.
 final class _AppTake {
   _AppTake({
     required this.engine,
@@ -1139,7 +1145,7 @@ final class RelayEngine {
   /// grow the stored state nor push friends' receipts out of it.
   final Map<String, int> _strangerSeen = <String, int>{};
 
-  /// Whether the app says when it kept a chat message ([reportReliableKept]);
+  /// Whether the app says when it kept what a person sent ([reportReliableKept]);
   /// set by the part of the app that takes the frames. Off, every reliable
   /// payload is acknowledged as it arrives.
   bool appConfirmsKeeping = false;
@@ -2322,7 +2328,7 @@ final class RelayEngine {
 
   /// Whether [payload] is acknowledged only once the app kept it.
   bool _keptByApp(Map<String, dynamic> payload) =>
-      appConfirmsKeeping && _keptByAppTypes.contains(payload['type']);
+      appConfirmsKeeping && _awaitsAppWord(payload);
 
   /// Whether a copy of `sender|rid` [key] is with the app right now: a
   /// further copy is then dropped without a word (the app's answer settles

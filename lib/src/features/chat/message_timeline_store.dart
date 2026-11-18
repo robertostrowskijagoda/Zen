@@ -11,6 +11,7 @@ import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 final NotifierProvider<MessageTimelineRevisionController, int>
 messageTimelineRevisionProvider =
@@ -914,7 +915,7 @@ final class FileMessageTimelineStore
   /// the friend's address is not on disk in the clear.
   String _keyFor(String peerAddress) {
     final String encoded = base64Url
-        .encode(utf8.encode(peerAddress))
+        .encode(utf8.encode(timelineAddress(peerAddress)))
         .replaceAll('=', '');
     return '$storagePrefix/$encoded';
   }
@@ -1183,6 +1184,21 @@ final class _ThreadIndex {
   }
 }
 
+/// The one spelling a conversation is kept under: a friend's address in
+/// its canonical form ([PeerShareCodec.normalizeAddress]), anything else
+/// (a group's `group:` key) as it is. Kept under the spelling it was given,
+/// a chat written to `0200:0000:...:0100` or in capitals was a second
+/// conversation that nothing reads: not the chat screen, and not the media
+/// sweep, which then took its files for unused and removed them.
+String timelineAddress(String peerAddress) {
+  if (!peerAddress.contains(':')) {
+    return peerAddress;
+  }
+  final String normal = PeerShareCodec.normalizeAddress(peerAddress);
+  // What is no IPv6 address the codec only capitalises: left as it is.
+  return normal == peerAddress.trim().toUpperCase() ? peerAddress : normal;
+}
+
 final class MemoryMessageTimelineStore
     implements MessageTimelineStore, StrictTimelineReader {
   MemoryMessageTimelineStore([
@@ -1199,14 +1215,17 @@ final class MemoryMessageTimelineStore
   @override
   Future<void> append(String peerAddress, ChatMessage message) async {
     final List<ChatMessage> current =
-        _threads[peerAddress] ?? const <ChatMessage>[];
-    _threads[peerAddress] = insertChronologically(current, message);
+        _threads[timelineAddress(peerAddress)] ?? const <ChatMessage>[];
+    _threads[timelineAddress(peerAddress)] = insertChronologically(
+      current,
+      message,
+    );
   }
 
   @override
   Future<List<ChatMessage>> load(String peerAddress) async {
     return List<ChatMessage>.unmodifiable(
-      _threads[peerAddress] ?? const <ChatMessage>[],
+      _threads[timelineAddress(peerAddress)] ?? const <ChatMessage>[],
     );
   }
 
@@ -1216,10 +1235,13 @@ final class MemoryMessageTimelineStore
   @override
   Future<void> save(String peerAddress, List<ChatMessage> messages) async {
     if (messages.isEmpty) {
-      _threads.remove(peerAddress);
+      _threads.remove(timelineAddress(peerAddress));
       return;
     }
-    _threads[peerAddress] = List<ChatMessage>.from(messages, growable: false);
+    _threads[timelineAddress(peerAddress)] = List<ChatMessage>.from(
+      messages,
+      growable: false,
+    );
   }
 
   @override
@@ -1229,16 +1251,19 @@ final class MemoryMessageTimelineStore
   ) async {
     final List<ChatMessage>? next = change(
       List<ChatMessage>.unmodifiable(
-        _threads[peerAddress] ?? const <ChatMessage>[],
+        _threads[timelineAddress(peerAddress)] ?? const <ChatMessage>[],
       ),
     );
     if (next == null) {
       return false;
     }
     if (next.isEmpty) {
-      _threads.remove(peerAddress);
+      _threads.remove(timelineAddress(peerAddress));
     } else {
-      _threads[peerAddress] = List<ChatMessage>.from(next, growable: false);
+      _threads[timelineAddress(peerAddress)] = List<ChatMessage>.from(
+        next,
+        growable: false,
+      );
     }
     return true;
   }

@@ -88,8 +88,9 @@ itself; the list of hidden people never travels in your profile.
   reporters and could switch someone's profile off on other phones), and
   reports from keys the phone cannot put a person to only show a warning. A
   report can be withdrawn. Pyramid dating bans hide a profile as well. A
-  profile that is switched off, banned or hidden also announces no messages
-  and no matches: one rule decides everywhere a match can reach the person.
+  profile that is switched off, banned or hidden also announces no messages,
+  no matches and not its own arrival: one rule decides everywhere a profile
+  can reach the person.
 - **Blocking** a person (in any feature) also removes their dating profile
   and keys; see [Chats](chats-and-delivery.md).
 

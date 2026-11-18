@@ -126,7 +126,10 @@ final class AccountRoutingTransport implements SignalTransport {
       return;
     }
     if (dir.unlinkedAccountOf(frame.from) != null) {
-      // Whoever holds an unlinked device is not that person any more.
+      // Whoever holds an unlinked device is not that person any more. The
+      // relay layer still hears it settled: unanswered, it would hand the
+      // next copy over again for as long as the sender retries.
+      await reportReliableKept(frame.payload, kept: true);
       return;
     }
     final String? acc = dir.accountOf(frame.from);
@@ -144,6 +147,9 @@ final class AccountRoutingTransport implements SignalTransport {
           }
         }
       }
+      // Taken here, never handed on: settled for the relay layer, as when
+      // it was acknowledged on arrival.
+      await reportReliableKept(frame.payload, kept: true);
       return;
     }
     if (acc == null || acc == dir.ownAccount) {
