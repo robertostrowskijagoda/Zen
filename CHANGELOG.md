@@ -10,6 +10,8 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.18.2 — 20.11.2026
+
 ### What's new
 - [en] Zen's password suggestion now appears in Samsung Internet, Edge and Opera, and inside the keyboard.
 - [en] The known limits of recent versions are written down in the guide.
