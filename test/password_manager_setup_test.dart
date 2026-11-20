@@ -180,6 +180,15 @@ void main() {
         'org.chromium.chrome',
         'com.brave.browser',
         'com.vivaldi.browser',
+        // Served in compatibility mode: read in case one has the switch.
+        'com.microsoft.emmx',
+        'com.microsoft.emmx.beta',
+        'com.microsoft.emmx.dev',
+        'com.microsoft.emmx.canary',
+        'com.sec.android.app.sbrowser',
+        'com.sec.android.app.sbrowser.beta',
+        'com.opera.browser',
+        'com.opera.browser.beta',
       });
 
       final Map<String, BrowserSetup> by = <String, BrowserSetup>{
@@ -221,18 +230,28 @@ void main() {
       expect(vivaldi.line, startsWith('Nie udało się odczytać'));
 
       final BrowserSetup edge = by['com.microsoft.emmx']!;
-      // Edge: needs Android's compatibility mode, which Zen does not take:
-      // said honestly, no switch to look for.
+      // Edge: served in Android's compatibility mode. Its switch could not
+      // be read (it has none): no state, no button, the real steps and
+      // what is weaker than in Chrome.
       expect(edge.needs, BrowserAutofillNeeds.compatibilityMode);
       expect(edge.state, isNull);
-      expect(edge.steps, isNull);
+      expect(edge.canOpenSettings, isFalse);
       expect(edge.needsAction, isFalse);
-      expect(edge.line, startsWith('Zen może się tu nie pojawić'));
-      expect(edge.line, contains('skopiuj login'));
+      expect(edge.line, startsWith('Zen podpowiada tu przez tryb zgodności'));
+      expect(edge.line, contains('z paska adresu'));
+      expect(edge.line, contains('dopiero po ostrzeżeniu'));
+      expect(edge.steps, startsWith('W tej przeglądarce Zen nie zna'));
+      expect(edge.steps, contains('Zen nie może tego sprawdzić'));
+      expect(edge.shownSteps, edge.steps);
       for (final String package in <String>[
         'com.microsoft.emmx',
+        'com.microsoft.emmx.beta',
+        'com.microsoft.emmx.dev',
+        'com.microsoft.emmx.canary',
         'com.sec.android.app.sbrowser',
+        'com.sec.android.app.sbrowser.beta',
         'com.opera.browser',
+        'com.opera.browser.beta',
       ]) {
         expect(
           kKnownBrowsers
@@ -349,11 +368,87 @@ void main() {
       expect(chromium.line, startsWith('Zen nie zna potwierdzonego podpisu'));
       expect(chromium.state, BrowserSwitchState.off);
       expect(chromium.steps, isNotNull);
-      // One that probably never asks Zen keeps the line on that.
-      expect(
-        by['com.sec.android.app.sbrowser']!.line,
-        startsWith('Zen może się tu nie pojawić'),
+      // One served in compatibility mode now asks Zen: without a confirmed
+      // certificate it is filled as an app, and that is the line.
+      final BrowserSetup samsung = by['com.sec.android.app.sbrowser']!;
+      expect(samsung.line, startsWith('Zen nie zna potwierdzonego podpisu'));
+      expect(samsung.steps, startsWith('W tej przeglądarce Zen nie zna'));
+    });
+
+    test('a browser served in compatibility mode with a switch of its own: '
+        'its state, its steps while off, its page; none for another\'s '
+        'copy', () async {
+      final FakeSetupPlatform platform = FakeSetupPlatform(
+        installed: <BrowserProbe>[
+          const BrowserProbe(
+            packageName: 'com.microsoft.emmx',
+            label: 'Edge',
+            state: BrowserSwitchState.off,
+            canOpenSettings: true,
+          ),
+          const BrowserProbe(
+            packageName: 'com.opera.browser',
+            label: 'Opera',
+            state: BrowserSwitchState.on,
+            canOpenSettings: true,
+          ),
+          const BrowserProbe(
+            packageName: 'com.sec.android.app.sbrowser',
+            label: 'Samsung Internet',
+            // Its settings page resolves, but there is no switch on it.
+            canOpenSettings: true,
+          ),
+          const BrowserProbe(
+            packageName: 'com.microsoft.emmx.beta',
+            label: 'Edge Beta',
+            state: BrowserSwitchState.off,
+            canOpenSettings: true,
+            signature: BrowserSignature.other,
+          ),
+        ],
       );
+      final PasswordSetupState state = await readPasswordSetup(platform);
+      final Map<String, BrowserSetup> by = <String, BrowserSetup>{
+        for (final BrowserSetup b in state.browsers) b.browser.packageName: b,
+      };
+      final BrowserSetup edge = by['com.microsoft.emmx']!;
+      expect(edge.state, BrowserSwitchState.off);
+      expect(edge.needsAction, isTrue);
+      expect(edge.canOpenSettings, isTrue);
+      expect(edge.steps, contains('„Autofill using another service”'));
+      expect(edge.line, startsWith('Zen podpowiada tu przez tryb zgodności'));
+
+      final BrowserSetup opera = by['com.opera.browser']!;
+      expect(opera.state, BrowserSwitchState.on);
+      expect(opera.needsAction, isFalse);
+      expect(opera.canOpenSettings, isTrue);
+      expect(opera.shownSteps, isNull);
+
+      final BrowserSetup samsung = by['com.sec.android.app.sbrowser']!;
+      expect(samsung.state, isNull);
+      expect(samsung.canOpenSettings, isFalse);
+      expect(samsung.shownSteps, startsWith('W tej przeglądarce Zen nie zna'));
+
+      final BrowserSetup beta = by['com.microsoft.emmx.beta']!;
+      expect(beta.line, startsWith('Ta kopia przeglądarki nie jest'));
+      expect(beta.state, isNull);
+      expect(beta.canOpenSettings, isFalse);
+      expect(beta.shownSteps, isNull);
+      expect(beta.needsAction, isFalse);
+    });
+
+    test('the browsers served in compatibility mode are those the service '
+        'declares to Android', () {
+      final String config = File(
+        'android/app/src/main/res/xml/zen_autofill_service.xml',
+      ).readAsStringSync();
+      final Set<String> declared = RegExp(
+        r'<compatibility-package\s+android:name="([A-Za-z0-9_.]+)"',
+      ).allMatches(config).map((RegExpMatch m) => m.group(1)!).toSet();
+      expect(declared, <String>{
+        for (final KnownBrowser b in kKnownBrowsers)
+          if (b.needs == BrowserAutofillNeeds.compatibilityMode) b.packageName,
+      });
     });
 
     test('the Android side\'s answer is read defensively', () {
@@ -609,10 +704,24 @@ void main() {
         ),
         findsNothing,
       );
-      // Edge: an honest line.
+      // Edge: compatibility mode, said with what is weaker, the steps and
+      // no button to a switch it does not have.
       expect(
         _text(tester, _line('com.microsoft.emmx')),
-        startsWith('Zen może się tu nie pojawić'),
+        startsWith('Zen podpowiada tu przez tryb zgodności'),
+      );
+      expect(
+        _text(
+          tester,
+          find.byKey(
+            const Key('password-setup-browser-steps-com.microsoft.emmx'),
+          ),
+        ),
+        startsWith('W tej przeglądarce Zen nie zna'),
+      );
+      expect(
+        find.byKey(const Key('password-setup-browser-open-com.microsoft.emmx')),
+        findsNothing,
       );
       // Kiwi: nothing verified, where to look.
       expect(

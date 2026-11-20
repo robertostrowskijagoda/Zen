@@ -19,9 +19,13 @@ enum BrowserAutofillNeeds {
   /// WebView). Not verified here.
   nothing,
 
-  /// Probably never asks Zen: Bitwarden's configuration lists it among the
-  /// browsers that need Android's accessibility-based "compatibility mode",
-  /// which Zen does not declare (res/xml/zen_autofill_service.xml).
+  /// Hands no form to the autofill service itself: Android serves it in
+  /// its accessibility-based "compatibility mode", which Zen declares for
+  /// it (res/xml/zen_autofill_service.xml), and the page's address is what
+  /// its address bar shows (`compatibilityWebOrigin` in
+  /// ZenAutofillTrust.kt). Only where Android's own list allows the browser,
+  /// which Zen cannot read. A switch of its own like Chrome's is not known;
+  /// it is read in case the browser has one.
   compatibilityMode,
 
   /// Nothing verified is known.
@@ -75,13 +79,38 @@ const List<KnownBrowser> kKnownBrowsers = <KnownBrowser>[
     BrowserAutofillNeeds.compatibilityMode,
   ),
   KnownBrowser(
+    'com.microsoft.emmx.beta',
+    'Edge Beta',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
+    'com.microsoft.emmx.dev',
+    'Edge Dev',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
+    'com.microsoft.emmx.canary',
+    'Edge Canary',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
     'com.sec.android.app.sbrowser',
     'Samsung Internet',
     BrowserAutofillNeeds.compatibilityMode,
   ),
   KnownBrowser(
+    'com.sec.android.app.sbrowser.beta',
+    'Samsung Internet Beta',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
     'com.opera.browser',
     'Opera',
+    BrowserAutofillNeeds.compatibilityMode,
+  ),
+  KnownBrowser(
+    'com.opera.browser.beta',
+    'Opera Beta',
     BrowserAutofillNeeds.compatibilityMode,
   ),
   KnownBrowser(
@@ -221,7 +250,8 @@ final class BrowserSetup {
   final BrowserSignature signature;
 
   /// Its own switch; null for a browser without one (or not known to have
-  /// one).
+  /// one: for one served in compatibility mode, also when its switch could
+  /// not be read).
   final BrowserSwitchState? state;
   final bool canOpenSettings;
 
@@ -230,15 +260,16 @@ final class BrowserSetup {
   /// Whether the person still has something to do in it.
   bool get needsAction =>
       signature != BrowserSignature.other &&
-      needs == BrowserAutofillNeeds.ownSwitch &&
-      state != BrowserSwitchState.on;
+      switch (needs) {
+        BrowserAutofillNeeds.ownSwitch => state != BrowserSwitchState.on,
+        // Only a switch it turned out to have, and that is off.
+        BrowserAutofillNeeds.compatibilityMode =>
+          state == BrowserSwitchState.off,
+        _ => false,
+      };
 
   /// One line on where it stands.
   String get line => switch (signature) {
-    // One that probably never asks Zen: that is the line that matters.
-    BrowserSignature.unconfirmed
-        when needs == BrowserAutofillNeeds.compatibilityMode =>
-      _makersLine,
     BrowserSignature.other => t(
       'Ta kopia przeglądarki nie jest podpisana przez jej twórcę: Zen '
       'wypełnia ją jak każdą inną aplikację i nie wierzy jej, jaka strona '
@@ -257,10 +288,13 @@ final class BrowserSetup {
       'Nic nie trzeba ustawiać: ta przeglądarka zwykle sama korzysta z '
       'autouzupełniania Androida.',
     ),
+    // What is weaker than in Chrome: the address is the bar's text, and
+    // the bar shows no scheme, so the page counts as http.
     BrowserAutofillNeeds.compatibilityMode => t(
-      'Zen może się tu nie pojawić: ta przeglądarka nie pyta usługi '
-      'autouzupełniania wprost. Użyj Chrome’a albo Firefoksa, albo skopiuj '
-      'login z wpisu w Hasłach.',
+      'Zen podpowiada tu przez tryb zgodności Androida i bierze adres strony '
+      'z paska adresu przeglądarki. Pasek zwykle nie pokazuje https, więc '
+      'login zapisany dla adresu https Zen pokaże dopiero po ostrzeżeniu, '
+      'pod przyciskiem Szukaj w hasłach.',
     ),
     BrowserAutofillNeeds.unverified => t(
       'Zen nie zna sprawdzonych kroków dla tej przeglądarki. Jeśli nie '
@@ -281,16 +315,41 @@ final class BrowserSetup {
     },
   };
 
-  /// Where its switch is; null when there is nothing to look for.
-  String? get steps =>
-      signature != BrowserSignature.other &&
-          needs == BrowserAutofillNeeds.ownSwitch
-      ? t(
-          'W przeglądarce: Ustawienia → Usługi autouzupełniania („Autofill '
-          'services”) → autouzupełnianie przez inną usługę („Autofill using '
-          'another service”). Przeglądarka uruchomi się ponownie.',
-        )
+  /// Where its switch is, or for a browser served in compatibility mode
+  /// without a switch Zen could read, that there is none to look for and
+  /// what Zen cannot check; null when there is nothing to say.
+  String? get steps {
+    if (signature == BrowserSignature.other) {
+      return null;
+    }
+    return switch (needs) {
+      BrowserAutofillNeeds.ownSwitch => _switchSteps,
+      BrowserAutofillNeeds.compatibilityMode => switch (state) {
+        BrowserSwitchState.off => _switchSteps,
+        BrowserSwitchState.on => null,
+        _ => t(
+          'W tej przeglądarce Zen nie zna przełącznika do włączenia: wystarczy '
+          'Zen wybrany w ustawieniach Androida. Jeśli podpowiedź Zen się tu nie '
+          'pojawia, Android na tym telefonie nie dopuszcza tej przeglądarki do '
+          'trybu zgodności, a Zen nie może tego sprawdzić.',
+        ),
+      },
+      _ => null,
+    };
+  }
+
+  /// The steps as the setup shows them: while something is left to do, and
+  /// always for a browser served in compatibility mode.
+  String? get shownSteps =>
+      needsAction || needs == BrowserAutofillNeeds.compatibilityMode
+      ? steps
       : null;
+
+  String get _switchSteps => t(
+    'W przeglądarce: Ustawienia → Usługi autouzupełniania („Autofill '
+    'services”) → autouzupełnianie przez inną usługę („Autofill using '
+    'another service”). Przeglądarka uruchomi się ponownie.',
+  );
 }
 
 /// Where the password manager's setup stands on this device.
@@ -421,11 +480,15 @@ Future<PasswordSetupState> readPasswordSetup(
       autofill: PasswordAutofillState.unsupported,
     );
   }
+  // A browser served in compatibility mode has its switch read too, in
+  // case it has Chrome's (the read costs nothing where it has none).
   final List<BrowserProbe> probes = await platform.browsers(
     <String>[for (final KnownBrowser b in kKnownBrowsers) b.packageName],
     switches: <String>{
       for (final KnownBrowser b in kKnownBrowsers)
-        if (b.needs == BrowserAutofillNeeds.ownSwitch) b.packageName,
+        if (b.needs == BrowserAutofillNeeds.ownSwitch ||
+            b.needs == BrowserAutofillNeeds.compatibilityMode)
+          b.packageName,
     },
   );
   final Map<String, BrowserProbe> installed = <String, BrowserProbe>{
@@ -436,23 +499,34 @@ Future<PasswordSetupState> readPasswordSetup(
     autofill: autofill,
     browsers: <BrowserSetup>[
       for (final KnownBrowser b in kKnownBrowsers)
-        if (installed[b.packageName] case final BrowserProbe p)
-          BrowserSetup(
-            browser: b,
-            name: browserLabel(p.label) ?? b.name,
-            // A copy signed by someone else has no switch that matters.
-            state:
-                b.needs == BrowserAutofillNeeds.ownSwitch &&
-                    p.signature != BrowserSignature.other
-                ? p.state
-                : null,
-            canOpenSettings:
-                b.needs == BrowserAutofillNeeds.ownSwitch &&
-                p.signature != BrowserSignature.other &&
-                p.canOpenSettings,
-            signature: p.signature,
-          ),
+        if (installed[b.packageName] case final BrowserProbe p) _setup(b, p),
     ],
+  );
+}
+
+BrowserSetup _setup(KnownBrowser b, BrowserProbe p) {
+  // A copy signed by someone else has no switch that matters. One served
+  // in compatibility mode has a switch only if it could be read.
+  final BrowserSwitchState? state = p.signature == BrowserSignature.other
+      ? null
+      : switch (b.needs) {
+          BrowserAutofillNeeds.ownSwitch => p.state,
+          BrowserAutofillNeeds.compatibilityMode =>
+            p.state == BrowserSwitchState.unknown ? null : p.state,
+          _ => null,
+        };
+  return BrowserSetup(
+    browser: b,
+    name: browserLabel(p.label) ?? b.name,
+    state: state,
+    // Its page with the switch: only for a switch it has.
+    canOpenSettings:
+        p.canOpenSettings &&
+        p.signature != BrowserSignature.other &&
+        (b.needs == BrowserAutofillNeeds.ownSwitch ||
+            (b.needs == BrowserAutofillNeeds.compatibilityMode &&
+                state != null)),
+    signature: p.signature,
   );
 }
 

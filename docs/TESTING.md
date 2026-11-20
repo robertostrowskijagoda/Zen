@@ -1015,7 +1015,10 @@ tests leave behind; a new class in its report is worth a look.
 - The password manager's setup and the autofill row of the release after
   1.16.5 were tried on no phone: Chrome's switch read through its provider
   and its settings page opened, what Brave, Vivaldi, Firefox and its forks
-  really need, whether Edge, Samsung Internet and Opera show Zen at all,
+  really need, whether Edge, Samsung Internet and Opera show Zen in
+  compatibility mode (since 1.18.1: whether Android's list allows them,
+  whether their address bar has the id Zen looks for and carries the
+  page's address, and what scheme it shows),
   the row in the light and the dark theme, and the suggestion inside a
   real keyboard. The setup is tested with the device faked, the browsers'
   answers as the documentation describes them.

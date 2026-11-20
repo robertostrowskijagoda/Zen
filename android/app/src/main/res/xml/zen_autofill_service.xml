@@ -1,6 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Zen's autofill service (ZenAutofillService.kt). No settings page and no
-     compatibility packages: browsers are served only through their own
-     support for Android's autofill, never through the accessibility-based
-     compatibility mode. -->
-<autofill-service xmlns:android="http://schemas.android.com/apk/res/android" />
+<!-- Zen's autofill service (ZenAutofillService.kt). No settings page.
+
+     The browsers below hand no form to an autofill service themselves, so
+     Android serves them in its compatibility mode: it builds the form from
+     the browser's accessibility tree and takes the page's address from the
+     address bar's text. Android does so only for a package that is also on
+     its own list of allowed ones (the global setting
+     autofill_compat_mode_allowed_packages, which also names the bar's id).
+     The same packages, with the bar's ids, are compatibilityBrowsers in
+     ZenAutofillTrust.kt; each has a confirmed maker's key there, so a copy
+     signed by someone else is filled like any other app.
+
+     maxLongVersionCode: compatibility mode is used up to that version of
+     the browser and the browser's own support after it. None of these has a
+     version that hands forms to the service itself, so the limit is beyond
+     any version code they use (as Bitwarden sets it). A browser that gains
+     its own support gets its last version without it here. An entry Android
+     cannot read ends the list, so each has both attributes.
+
+     supportsInlineSuggestions: without it Android 11+ never asks the
+     keyboard for a place in its suggestions, the request carries no
+     inline suggestions request, and Zen's suggestion is only ever the
+     drop-down. Android 9 and 10 do not know the attribute and skip it
+     (AutofillServiceInfo reads only the attributes of its own version). -->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:supportsInlineSuggestions="true"
+    tools:targetApi="30">
+    <compatibility-package
+        android:name="com.sec.android.app.sbrowser"
+        android:maxLongVersionCode="10000000000" />
+    <compatibility-package
+        android:name="com.sec.android.app.sbrowser.beta"
+        android:maxLongVersionCode="10000000000" />
+    <compatibility-package
+        android:name="com.microsoft.emmx"
+        android:maxLongVersionCode="10000000000" />
+    <compatibility-package
+        android:name="com.microsoft.emmx.beta"
+        android:maxLongVersionCode="10000000000" />
+    <compatibility-package
+        android:name="com.microsoft.emmx.dev"
+        android:maxLongVersionCode="10000000000" />
+    <compatibility-package
+        android:name="com.microsoft.emmx.canary"
+        android:maxLongVersionCode="10000000000" />
+    <compatibility-package
+        android:name="com.opera.browser"
+        android:maxLongVersionCode="10000000000" />
+    <compatibility-package
+        android:name="com.opera.browser.beta"
+        android:maxLongVersionCode="10000000000" />
+</autofill-service>

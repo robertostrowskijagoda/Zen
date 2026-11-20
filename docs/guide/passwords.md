@@ -117,7 +117,7 @@ back to Zen from the settings it opened:
   service, with **Open Android settings**, the page where you pick it (and
   where you switch it off). Without it no app and no browser asks Zen for a
   login.
-- **The browsers.** Every browser from a fixed list of 21 that is
+- **The browsers.** Every browser from a fixed list of 26 that is
   installed, each with what it needs. Zen finds out which are installed from
   their package names alone (listed in the manifest; no permission, nothing
   leaves the phone). What a browser needs:
@@ -126,7 +126,7 @@ back to Zen from the settings it opened:
 |---|---|
 | Chrome (also Beta, Dev and Canary), Chromium, Brave, Vivaldi | A switch of its own. Chrome 135 and later hands web forms to the phone's autofill service only with it on: in the browser, *Settings* → *Autofill services* → **Autofill using another service** (the browser restarts). Zen reads the switch, shows it as on, off or unknown, and **Open the browser's settings** opens the browser's own settings page where the browser allows it; you find the switch from there. An older browser may not have it. For Brave and Vivaldi the same switch is expected; that is not confirmed. |
 | Firefox (also Beta and Nightly), Fennec, Mull, IronFox, Tor Browser, DuckDuckGo | Nothing: they are believed to use Android's autofill service by themselves. Not confirmed. |
-| Edge, Samsung Internet, Opera | Probably Zen does not show up in them. They do not ask the autofill service directly but need Android's accessibility-based compatibility mode, which Zen does not use. Use Chrome or Firefox for these logins, or copy the login from its entry. |
+| Edge (also Beta, Dev and Canary), Samsung Internet (also Beta), Opera (also Beta) | Nothing in the browser that Zen knows of: they do not ask the autofill service themselves, so Android serves them in its compatibility mode, which Zen asks for. Zen then takes the page's address from the browser's address bar, and the bar usually does not show `https`, so such a page counts as http: a login saved for an `https://` address is shown only after **Search passwords** and the warning (see below). Android does this only for browsers on its own list, which Zen cannot read: if no Zen suggestion appears, this phone does not allow it. Zen also reads Chrome's switch in them in case one has it, and then shows it as for Chrome. |
 | Kiwi, Firefox Focus, Firefox Klar | Zen knows no confirmed steps and says so; look for an *Autofill* setting in the browser. |
 
 A browser that is not on the list is not shown; if Zen finds none it knows,
@@ -170,7 +170,9 @@ switch it off in the same place).
   package is signed by that browser's maker** (the fingerprints are pinned
   in Zen; a browser without a confirmed one is filled like any other app,
   by its package alone, so an app installed under a known browser's name can
-  no longer name any page and be offered its login). A page matches an
+  no longer name any page and be offered its login). In Edge, Samsung
+  Internet and Opera the address is what their own address bar shows (see
+  *What compatibility mode means* below). A page matches an
   entry with the same host or another host of the same registered domain
   by the Public Suffix List, which ships with the app (`login.example.com`
   for `example.com`; a login saved for one shop under `gdynia.pl`, a tunnel
@@ -217,6 +219,26 @@ If you pass the warning and pick a login saved for something else, that
 app gets it. While the list is on the screen, touches that come through
 another app's window drawn over Zen are ignored.
 
+**What compatibility mode means.** Edge, Samsung Internet and Opera hand
+no form to an autofill service themselves. For them Android has a
+compatibility mode. Zen did not ask for it before 1.18.1, because it is
+weaker than what Chrome and Firefox give; it does now, so that these
+browsers offer Zen at all. In it Android switches on accessibility events inside that browser (Zen
+gets no accessibility service and sees nothing outside the form it is
+asked about) and builds the form from the browser's accessibility tree:
+the page's elements with their names, hints and texts, as a screen reader
+would read them, and the browser's own address bar, whose text Android
+turns into the page's address before it strips typed text from the form.
+What is weaker than in Chrome: there the browser says which page holds the
+form; here the address is the bar's text, the address of the tab and not
+of a frame inside it, usually without `https`. Zen believes it only from
+the maker's copy of the browser, only from a view of the browser's own
+layout that is not being typed in, and only when there is exactly one
+view with the bar's id (a page could give an element the same id);
+otherwise the page is unknown and every login is shown only after the
+warning. A page without a scheme counts as http, as anywhere else. The
+browser may run a little slower while it builds its accessibility tree.
+
 ## What stays private
 
 - The passwords are kept encrypted on your devices. Changes travel between
@@ -247,11 +269,11 @@ another app's window drawn over Zen are ignored.
   one.
 - Filling in other apps exists only on Android 9 and later. On Android 8
   and older, on a computer and on iPhone Zen fills nothing in other apps:
-  copy the login and the password from the entry instead. Browsers that
-  hand no forms to the autofill service (Edge, Samsung Internet and Opera
-  probably among them) cannot be filled either.
-- The password setup and the suggestion in the keyboard were written from
-  the documentation of Android and of the browsers and were not tried on
-  real phones before their release.
+  copy the login and the password from the entry instead. A browser that
+  hands no forms to the autofill service and is not on Android's list for
+  compatibility mode cannot be filled either.
+- The password setup, the suggestion in the keyboard and compatibility
+  mode were written from the documentation and the source of Android and of
+  the browsers and were not tried on real phones before their release.
 
 [Back to the guide](README.md)
