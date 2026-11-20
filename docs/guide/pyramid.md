@@ -348,6 +348,12 @@ pyramid).
   could not be stopped.
 - An era counts as settled only once it is sealed (up to six hours); a
   new treasurer signs from the era after that seal.
+- A seal needs most of the era's treasurers, and in an era with two or
+  fewer treasurers that is all of them. One treasurer who does not sign
+  (offline for good, or on purpose) then holds the seal back: the era does
+  not close, and a change of the tree (a new treasurer, a member leaving)
+  does not reach the money until it signs. An operation counts by the same
+  rule, so with two treasurers it also needs both.
 - Below the top, a court is one person, the head of a cell: whoever knows
   who sits at that place knows who decided, cards or not.
 - The anonymous vote request is classical (a ring signature): a future
