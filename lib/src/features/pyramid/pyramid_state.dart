@@ -306,6 +306,13 @@ final class PyrRoster {
       PyramidState.rosterScope(pyramid, cell, head, ring);
 }
 
+/// How long after a cell vote's end and [kPyrMaxSkewMs] a member's app
+/// waits for the views of the whole ring ([PyrT.voteSeen]) before it signs
+/// the close with the views it has ([PyramidState.closeVotes]): a member
+/// away does not hold the close up for good, and a view that comes later
+/// only adds votes most of the ring saw.
+const int kPyrVoteViewsMs = 3600 * 1000;
+
 final class PyrElection {
   PyrElection({
     required this.id,
@@ -323,6 +330,9 @@ final class PyrElection {
   /// Who votes: the cell as it was when the vote was asked for (someone
   /// who joins the cell during the vote does not vote in it).
   final List<String> ring;
+
+  /// The end, fixed by the signed request (`end`): a vote counts only
+  /// when dated before it.
   final int deadline;
 
   /// When the vote was asked for: no vote may be dated before.
@@ -347,8 +357,11 @@ final class PyrElection {
   /// The close that counted ([PyrT.voteClose]), once there is one.
   String? close;
 
-  /// Whether every card voted before the time ran out: nothing can come
-  /// after, so no close is needed.
+  /// Member of [ring] → the votes its views ([PyrT.voteSeen]) list: what
+  /// reached its phone in time.
+  final Map<String, Set<String>> seen = <String, Set<String>>{};
+
+  /// Whether every card voted before the time ran out.
   bool get allVoted =>
       tokens != null && tokens!.isNotEmpty && votes.length >= tokens!.length;
 }
@@ -997,6 +1010,12 @@ final class PyramidState {
   /// dominates the other ([PyrSeal.comparable]) → the seals: proof, public
   /// like the seals.
   final Map<String, Set<String>> sealCheaters = <String, Set<String>>{};
+
+  /// Members who signed two closes of one cell vote neither of which
+  /// lists all the votes of the other ([PyrT.voteClose]) → the closes:
+  /// proof, public like the closes. An honest app's closes of a vote only
+  /// grow ([closeVotes]).
+  final Map<String, Set<String>> voteCheaters = <String, Set<String>>{};
 
   /// The closes of cell votes by vote, seen before the fold
   /// ([PyrT.voteClose]): a vote one of them does not list never counts.
@@ -1818,7 +1837,9 @@ final class PyramidState {
   ///   seal names folds right after the seal before that one, as it did on
   ///   its signers' phones. A seal that does not hold even so is no seal:
   ///   the fold runs without it;
-  /// - a cell vote's close ([PyrT.voteClose]) lists the votes that count.
+  /// - a cell vote's close ([PyrT.voteClose]) lists the votes that count;
+  ///   one it lists folds at its own time on every phone, also on one
+  ///   that saw it late (a second pass).
   /// A record whose rule throws is skipped, never the whole pyramid; with
   /// rules 2 it leaves no trace either: the fold runs again with it
   /// refused before anything of it was applied.
@@ -1834,7 +1855,7 @@ final class PyramidState {
             r.at <= now + kPyrMaxSkewMs)
           r,
     ];
-    final Map<String, int> seen = _foldTimes(list, late);
+    Map<String, int> seen = _foldTimes(list, late);
     final Map<String, PyramidRecord> byId = <String, PyramidRecord>{
       for (final PyramidRecord r in list) r.id: r,
     };
@@ -1843,6 +1864,54 @@ final class PyramidState {
         if (r.type == PyrT.seal) r,
     ];
     final Map<String, List<PyramidRecord>> closes = _closesOf(list);
+    PyramidState s = _foldSeen(
+      pyramidId,
+      list,
+      now,
+      seen,
+      byId,
+      sealRecords,
+      closes,
+    );
+    // A vote the close of its vote lists came in time for most of the
+    // ring: it folds at its own time here too, however late it came. A
+    // few rounds at most (a vote's result can change later votes' rings).
+    for (int round = 0; round < 3 && seen.isNotEmpty; round++) {
+      final Set<String> listed = s._closedLate(seen);
+      if (listed.isEmpty) {
+        break;
+      }
+      seen = <String, int>{...seen}
+        ..removeWhere((String id, int _) => listed.contains(id));
+      s = _foldSeen(pyramidId, list, now, seen, byId, sealRecords, closes);
+    }
+    s._noteSealCheaters(sealRecords);
+    s._noteVoteCheaters();
+    return s;
+  }
+
+  /// The votes of [seen] (folded late here) that the close of their vote
+  /// lists.
+  Set<String> _closedLate(Map<String, int> seen) => <String>{
+    for (final PyrElection e in elections.values)
+      if (e.close != null)
+        for (final PyramidRecord c in _closes[e.id] ?? const <PyramidRecord>[])
+          if (c.id == e.close)
+            for (final String v in _idList(c.body['votes']) ?? const <String>[])
+              if (seen.containsKey(v)) v,
+  };
+
+  /// [fold] with the records of [seen] folded at those times: the seals
+  /// worked out in a few rounds.
+  static PyramidState _foldSeen(
+    String pyramidId,
+    List<PyramidRecord> list,
+    int now,
+    Map<String, int> seen,
+    Map<String, PyramidRecord> byId,
+    List<PyramidRecord> sealRecords,
+    Map<String, List<PyramidRecord>> closes,
+  ) {
     final Set<String> noSeal = <String>{};
     List<PyrSeal> plan = _planSeals(sealRecords, noSeal);
     Map<String, int> times = _sealTimes(plan, byId, seen);
@@ -1883,7 +1952,6 @@ final class PyramidState {
       after = const <String>{};
       s = _foldOnce(pyramidId, list, now, times, closes, after, plan);
     }
-    s._noteSealCheaters(sealRecords);
     return s;
   }
 
@@ -2097,6 +2165,39 @@ final class PyramidState {
           for (final String k in a.signers) {
             if (a.set.contains(k) && b.signers.contains(k)) {
               (sealCheaters[k] ??= <String>{}).addAll(<String>[a.id, b.id]);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /// Notes who signed two closes of one cell vote at its end that no
+  /// honest member signs both of: neither lists every vote of the other.
+  /// Only the signatures of the vote's ring count.
+  void _noteVoteCheaters() {
+    for (final MapEntry<String, List<PyramidRecord>> x in _closes.entries) {
+      final PyrElection? e = elections[x.key];
+      if (e == null) {
+        continue;
+      }
+      final List<(PyramidRecord, Set<String>)> same =
+          <(PyramidRecord, Set<String>)>[
+            for (final PyramidRecord c in x.value)
+              if (c.at == e.deadline)
+                if (_idList(c.body['votes']) case final List<String> v)
+                  (c, v.toSet()),
+          ];
+      for (int i = 0; i < same.length; i++) {
+        for (int j = i + 1; j < same.length; j++) {
+          final (PyramidRecord a, Set<String> va) = same[i];
+          final (PyramidRecord b, Set<String> vb) = same[j];
+          if (va.containsAll(vb) || vb.containsAll(va)) {
+            continue;
+          }
+          for (final String k in a.signers) {
+            if (e.ring.contains(k) && b.signers.contains(k)) {
+              (voteCheaters[k] ??= <String>{}).addAll(<String>[a.id, b.id]);
             }
           }
         }
@@ -3568,6 +3669,8 @@ final class PyramidState {
         return _seal(r);
       case PyrT.voteClose:
         return _voteClose(r);
+      case PyrT.voteSeen:
+        return _voteSeen(r);
     }
     return 'nieznany rodzaj';
   }
@@ -3620,8 +3723,9 @@ final class PyramidState {
   }
 
   /// The close of cell vote [r.elect]: signed by most of its ring once it
-  /// ended by time, dated at its end. The first one (then the id) counts;
-  /// a vote it does not list was refused already ([_vote]).
+  /// ended, dated at its end. Of several, the one with the most votes
+  /// (then the lower id) counts ([_closeOf]); a vote it does not list was
+  /// refused already ([_vote]).
   String? _voteClose(PyramidRecord r) {
     final PyrElection? e = elections[r.str('elect')];
     if (e == null) {
@@ -3630,30 +3734,158 @@ final class PyramidState {
     if (!e.closed || r.at != e.deadline) {
       return 'zamknięcie z innym czasem niż koniec głosowania';
     }
-    if (e.close != null) {
-      return 'głosowanie już zamknięte';
-    }
     if (_closeOf(e)?.id != r.id) {
-      return 'zamknięcie podpisuje większość komórki';
+      return _closeHolds(e, r)
+          ? 'głosowanie ma zamknięcie z większą liczbą głosów'
+          : 'zamknięcie podpisuje większość komórki';
     }
     e.close = r.id;
     return null;
   }
 
-  /// The close of [e] that counts, worked out before the fold: the first
-  /// (by time, then id) with every member of its ring listed and most of
-  /// them signed, at its end.
-  PyramidRecord? _closeOf(PyrElection e) {
+  /// Whether [c] closes [e]: at its end, every member of its ring listed
+  /// and most of them signed, the votes in their one spelling.
+  bool _closeHolds(PyrElection e, PyramidRecord c) {
     final List<String> ring = List<String>.of(e.ring)..sort();
+    final List<String> listed = List<String>.of(c.candidates)..sort();
+    return c.at == e.deadline &&
+        listEquals(listed, ring) &&
+        _countOf(c.signers, ring) >= ring.length ~/ 2 + 1 &&
+        _idList(c.body['votes']) != null;
+  }
+
+  /// The close of [e] that counts, worked out before the fold: of those
+  /// that hold ([_closeHolds]) the one with the most votes, then the lower
+  /// id. Honest members sign only closes that grow ([closeVotes]), so the
+  /// larger one holds every vote of a smaller one; two that do not were
+  /// both signed by a member that cheated ([voteCheaters]).
+  PyramidRecord? _closeOf(PyrElection e) {
+    PyramidRecord? best;
+    int most = -1;
     for (final PyramidRecord c in _closes[e.id] ?? const <PyramidRecord>[]) {
-      final List<String> listed = List<String>.of(c.candidates)..sort();
-      if (c.at == e.deadline &&
-          listEquals(listed, ring) &&
-          _countOf(c.signers, ring) >= ring.length ~/ 2 + 1) {
-        return c;
+      if (!_closeHolds(e, c)) {
+        continue;
+      }
+      final int n = _idList(c.body['votes'])!.length;
+      if (n > most || (n == most && c.id.compareTo(best!.id) < 0)) {
+        best = c;
+        most = n;
       }
     }
+    return best;
+  }
+
+  /// What member [r.by] of cell vote [r.elect]'s ring saw in time
+  /// ([PyrT.voteSeen]): signed by that member alone, dated at the vote's
+  /// end. Two views of one member count as one that lists both: a member
+  /// counts once for a vote however many views it signs.
+  String? _voteSeen(PyramidRecord r) {
+    final PyrElection? e = elections[r.str('elect')];
+    if (e == null) {
+      return 'nie ma takiego głosowania';
+    }
+    if (r.at != e.deadline) {
+      return 'widok z innym czasem niż koniec głosowania';
+    }
+    final List<String> by = r.signers;
+    final List<String> listed = r.candidates;
+    if (by.length != 1 ||
+        listed.length != 1 ||
+        listed.first != by.first ||
+        !e.ring.contains(by.first)) {
+      return 'widok podpisuje jeden członek komórki';
+    }
+    final List<String>? votes = _idList(r.body['votes']);
+    if (votes == null) {
+      return 'zły widok głosowania';
+    }
+    (e.seen[by.first] ??= <String>{}).addAll(votes);
     return null;
+  }
+
+  /// The most votes a view or a close may list: a cell's ring is a few
+  /// people, each card votes once.
+  static const int _maxVoteIds = 100;
+
+  /// Record ids in their one spelling (strictly ascending), or null.
+  static List<String>? _idList(Object? value) {
+    if (value is! List || value.length > _maxVoteIds) {
+      return null;
+    }
+    String? last;
+    for (final Object? item in value) {
+      if (item is! String ||
+          item.isEmpty ||
+          item.length > 128 ||
+          (last != null && item.compareTo(last) <= 0)) {
+        return null;
+      }
+      last = item;
+    }
+    return value.cast<String>();
+  }
+
+  /// Whether [r] is a vote of [e] that may count: signed by one card of
+  /// its ballot with the ML-DSA key the ballot names, for a member of the
+  /// ring, dated from the request to before the end.
+  static bool isVoteOf(PyrElection e, PyramidRecord r) {
+    final Map<String, String>? cards = e.tokens;
+    final List<String> by = r.signers;
+    final List<String> listed = r.candidates;
+    return cards != null &&
+        r.type == PyrT.vote &&
+        r.str('elect') == e.id &&
+        r.at >= e.start &&
+        r.at < e.deadline &&
+        by.length == 1 &&
+        listed.length == 1 &&
+        listed.first == by.first &&
+        cards[by.first] != null &&
+        r.pqIdOf(by.first) == cards[by.first] &&
+        e.ring.contains(r.str('choice'));
+  }
+
+  /// The votes a member signs as the close of [e], from the views it holds
+  /// ([PyrElection.seen]): every vote of [e] ([isVoteOf]) that most of the
+  /// ring list and whose record [vote] gives here — a vote one member
+  /// alone claims, dated back and sent after the end, stays out. Null
+  /// while fewer than most of the ring sent a view. [decided]: no view
+  /// still missing can change it (every vote listed is in by most, or out
+  /// even if every missing view listed it, and its record is here); until
+  /// then the app waits a while ([kPyrVoteViewsMs]). More views only add
+  /// votes, so the closes an honest member signs only grow.
+  static ({List<String> votes, bool decided})? closeVotes(
+    PyrElection e,
+    PyramidRecord? Function(String id) vote,
+  ) {
+    final int need = e.ring.length ~/ 2 + 1;
+    final int held = e.ring.where(e.seen.containsKey).length;
+    if (held < need) {
+      return null;
+    }
+    final int missing = e.ring.length - held;
+    final Map<String, int> count = <String, int>{};
+    for (final String k in e.ring) {
+      for (final String v in e.seen[k] ?? const <String>{}) {
+        count[v] = (count[v] ?? 0) + 1;
+      }
+    }
+    final List<String> votes = <String>[];
+    bool decided = true;
+    for (final MapEntry<String, int> c in count.entries) {
+      if (c.value >= need) {
+        final PyramidRecord? r = vote(c.key);
+        if (r == null) {
+          decided = false;
+        } else if (isVoteOf(e, r)) {
+          votes.add(c.key);
+        }
+      } else if (c.value + missing >= need) {
+        decided = false;
+      }
+    }
+    votes.sort();
+    return (votes: votes, decided: decided);
   }
 
   // ---- the emission limit ----
@@ -4691,6 +4923,12 @@ final class PyramidState {
     if (r.pqIdOf(card) != pq) {
       return 'karta z innym kluczem ML-DSA';
     }
+    // The end is fixed in the signed request: the rules' duration from
+    // its time, nothing else.
+    final int end = r.at + params.electionHours * 3600 * 1000;
+    if (r.body['end'] != end) {
+      return 'zły koniec głosowania';
+    }
     final Map<String, int> counter = requestCounts[cell] ??= <String, int>{};
     counter[card] = (counter[card] ?? 0) + 1;
     final bool open = elections.values.any(
@@ -4702,7 +4940,7 @@ final class PyramidState {
         cell: cell,
         head: head,
         ring: roster.ring,
-        deadline: r.at + params.electionHours * 3600 * 1000,
+        deadline: end,
         start: r.at,
       );
       history.add(
@@ -4781,8 +5019,8 @@ final class PyramidState {
     if (e.votes.containsKey(card)) {
       return 'już głosował(a)';
     }
-    // Once the vote ended, most of its ring closed it with the votes that
-    // had come: one it does not list came later, dated back.
+    // Once the vote ended, most of its ring closed it with the votes most
+    // of them saw in time: one it does not list came later, dated back.
     final PyramidRecord? close = _closeOf(e);
     final Object? counted = close?.body['votes'];
     if (close != null && !(counted is List && counted.contains(r.id))) {

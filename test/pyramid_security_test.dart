@@ -7,6 +7,8 @@ import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
+import 'support/pyramid_world.dart' show PyramidWorld;
+
 /// The fold refuses what the security review found it accepted:
 /// broken rings, a second spelling of one vote, referendum sums that do
 /// not add up, emission limits dodged, delegations stretched, records dated
@@ -90,6 +92,7 @@ Future<PyramidRecord> requestRec(
     'cell': '0',
     'head': w.a.id,
     'n': n,
+    'end': at + 72 * h,
   },
 ).signedBy(card);
 
@@ -504,6 +507,244 @@ void main() {
         expect(there.rejected[late.id], 'głosowanie zamknięte');
         expect(there.elections[req.id]!.winner, w.a.id);
         expect(there.pathOf(w.a.id), '0');
+      });
+
+      group('closing a vote on what most of the ring saw in time', () {
+        late int end;
+        late PyramidRecord b;
+
+        setUp(() async {
+          end = req.at + 72 * h;
+          b = await ballot(<LedgerKeyPair>[w.a, w.a1, w.a2]);
+        });
+
+        /// What [m] saw in time: signed by [m] alone, dated at the end.
+        Future<PyramidRecord> view(
+          LedgerKeyPair m,
+          List<PyramidRecord> votes,
+        ) => PyramidRecord(
+          body: <String, dynamic>{
+            't': PyrT.voteSeen,
+            'py': w.py,
+            'at': end,
+            'by': <String>[m.id],
+            'elect': req.id,
+            'votes': <String>[for (final PyramidRecord v in votes) v.id]
+              ..sort(),
+          },
+        ).signedBy(m);
+
+        Future<PyramidRecord> close(
+          List<PyramidRecord> votes,
+          List<LedgerKeyPair> signers,
+        ) async {
+          PyramidRecord r = PyramidRecord(
+            body: <String, dynamic>{
+              't': PyrT.voteClose,
+              'py': w.py,
+              'at': end,
+              'by': ring,
+              'elect': req.id,
+              'votes': <String>[for (final PyramidRecord v in votes) v.id]
+                ..sort(),
+            },
+          );
+          for (final LedgerKeyPair k in signers) {
+            r = await r.signedBy(k);
+          }
+          return r;
+        }
+
+        test('the end is fixed in the signed request', () async {
+          final PyramidRecord other = await PyramidRecord(
+            body: <String, dynamic>{
+              ...req.body,
+              'n': 'n2',
+              'end': req.at + 24 * h,
+            },
+          ).signedBy(requestCards[1]);
+          final PyramidState st = w.fold(<PyramidRecord>[
+            other,
+          ], now: t0 + day + 1000);
+          expect(st.rejected[other.id], 'zły koniec głosowania');
+          expect(st.elections, isEmpty);
+          final PyramidState ok = w.fold(<PyramidRecord>[
+            req,
+          ], now: t0 + day + 1000);
+          expect(ok.elections[req.id]!.deadline, end);
+        });
+
+        test('members who saw different votes still close it: each signs '
+            'the votes most of the ring saw, and a phone that got one late '
+            'counts it at its time', () async {
+          // Two votes for A1: A saw both in time, A1 only the first, A2
+          // only the second. Each member's own close (the rule before)
+          // differed from the others', and the vote never closed.
+          final PyramidRecord v1 = await vote(cards[0], w.a1.id, t0 + day + h);
+          final PyramidRecord v2 = await vote(cards[1], w.a1.id, end - 1000);
+          final PyramidRecord seenA = await view(w.a, <PyramidRecord>[v1, v2]);
+          final PyramidRecord seenA1 = await view(w.a1, <PyramidRecord>[v1]);
+          final PyramidRecord seenA2 = await view(w.a2, <PyramidRecord>[v2]);
+          const int now = t0 + 30 * day;
+          final PyramidState ended = w.fold(<PyramidRecord>[
+            req,
+            b,
+            v1,
+            v2,
+            seenA,
+            seenA1,
+            seenA2,
+          ], now: now);
+          final PyrElection e = ended.elections[req.id]!;
+          expect(e.seen.keys.toSet(), ring.toSet());
+          final Map<String, PyramidRecord> byId = <String, PyramidRecord>{
+            v1.id: v1,
+            v2.id: v2,
+          };
+          final ({List<String> votes, bool decided})? got =
+              PyramidState.closeVotes(e, (String id) => byId[id]);
+          expect(got!.decided, isTrue);
+          expect(got.votes, <String>[v1.id, v2.id]..sort());
+          // A1 and A2 sign it, though neither saw both votes.
+          final PyramidRecord c = await close(
+            <PyramidRecord>[v1, v2],
+            <LedgerKeyPair>[w.a1, w.a2],
+          );
+          final List<PyramidRecord> all = <PyramidRecord>[
+            req,
+            b,
+            v1,
+            v2,
+            seenA,
+            seenA1,
+            seenA2,
+            c,
+          ];
+          final PyramidState closed = w.fold(all, now: now);
+          expect(closed.elections[req.id]!.close, c.id);
+          expect(closed.elections[req.id]!.winner, w.a1.id);
+          expect(closed.pathOf(w.a1.id), '0');
+          // A1's phone got the second vote a day late: it folds it at its
+          // own time all the same, as the close lists it.
+          final PyramidState there = PyramidState.fold(
+            w.py,
+            <PyramidRecord>[...w.records, ...all],
+            now: now,
+            late: <String, int>{v2.id: end + day},
+          );
+          expect(there.rejected[v2.id], isNull);
+          expect(there.elections[req.id]!.close, c.id);
+          expect(there.pathOf(w.a1.id), '0');
+          expect(
+            PyramidWorld.fingerprint(there),
+            PyramidWorld.fingerprint(closed),
+          );
+        });
+
+        test('a vote dated back and sent after the end stays out, even when '
+            'one member claims it saw it in time', () async {
+          final PyramidRecord v1 = await vote(cards[0], w.a.id, t0 + day + h);
+          // Made after the end, dated inside the vote; only A1 lists it.
+          final PyramidRecord back = await vote(
+            cards[1],
+            w.a1.id,
+            t0 + day + 2 * h,
+          );
+          final PyramidRecord seenA = await view(w.a, <PyramidRecord>[v1]);
+          final PyramidRecord seenA1 = await view(w.a1, <PyramidRecord>[
+            v1,
+            back,
+          ]);
+          final PyramidRecord seenA2 = await view(w.a2, <PyramidRecord>[v1]);
+          const int now = t0 + 30 * day;
+          PyrElection electionOf(List<PyramidRecord> more) => w.fold(
+            <PyramidRecord>[req, b, v1, back, ...more],
+            now: now,
+          ).elections[req.id]!;
+          PyramidRecord? byId(String id) =>
+              <String, PyramidRecord>{v1.id: v1, back.id: back}[id];
+          // With A1's view and one other, the third could still let it in:
+          // not decided yet.
+          final ({List<String> votes, bool decided})? two =
+              PyramidState.closeVotes(
+                electionOf(<PyramidRecord>[seenA, seenA1]),
+                byId,
+              );
+          expect(two!.decided, isFalse);
+          expect(two.votes, <String>[v1.id]);
+          final ({List<String> votes, bool decided})? three =
+              PyramidState.closeVotes(
+                electionOf(<PyramidRecord>[seenA, seenA1, seenA2]),
+                byId,
+              );
+          expect(three!.decided, isTrue);
+          expect(three.votes, <String>[v1.id]);
+          // A1's own close with it is no close; the ring's is.
+          final PyramidRecord withBack = await close(
+            <PyramidRecord>[v1, back],
+            <LedgerKeyPair>[w.a1],
+          );
+          final PyramidRecord c = await close(
+            <PyramidRecord>[v1],
+            <LedgerKeyPair>[w.a, w.a2],
+          );
+          final PyramidState st = w.fold(<PyramidRecord>[
+            req,
+            b,
+            v1,
+            back,
+            seenA,
+            seenA1,
+            seenA2,
+            withBack,
+            c,
+          ], now: now);
+          expect(st.elections[req.id]!.close, c.id);
+          expect(st.rejected[back.id], 'głos spoza zamknięcia głosowania');
+          expect(st.elections[req.id]!.winner, w.a.id);
+          expect(st.voteCheaters, isEmpty);
+        });
+
+        test('a member who signs two closes neither of which holds the '
+            'other is shown with both; a larger close is no cheat', () async {
+          final PyramidRecord v1 = await vote(cards[0], w.a.id, t0 + day + h);
+          final PyramidRecord v2 = await vote(
+            cards[1],
+            w.a.id,
+            t0 + day + 2 * h,
+          );
+          final PyramidRecord one = await close(
+            <PyramidRecord>[v1],
+            <LedgerKeyPair>[w.a, w.a1],
+          );
+          final PyramidRecord other = await close(
+            <PyramidRecord>[v2],
+            <LedgerKeyPair>[w.a, w.a2],
+          );
+          final PyramidRecord both = await close(
+            <PyramidRecord>[v1, v2],
+            <LedgerKeyPair>[w.a1, w.a2],
+          );
+          const int now = t0 + 30 * day;
+          final PyramidState st = w.fold(<PyramidRecord>[
+            req,
+            b,
+            v1,
+            v2,
+            one,
+            other,
+            both,
+          ], now: now);
+          expect(st.voteCheaters.keys, <String>[w.a.id]);
+          expect(st.voteCheaters[w.a.id], <String>{one.id, other.id});
+          // The close with the most votes counts.
+          expect(st.elections[req.id]!.close, both.id);
+          expect(st.elections[req.id]!.votes, hasLength(2));
+          expect(
+            st.rejected[one.id],
+            'głosowanie ma zamknięcie z większą liczbą głosów',
+          );
+        });
       });
 
       test(

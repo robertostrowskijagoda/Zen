@@ -1592,6 +1592,21 @@ class PyramidWallet extends StatelessWidget {
                   .join('\n'),
             ),
           ],
+          if (s.voteCheaters.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            ZenInfo(
+              key: const Key('pyr-vote-cheaters'),
+              icon: Icons.warning_amber_rounded,
+              tone: zen.danger,
+              title: t(
+                'Dowody: członek komórki podpisał dwa różne zamknięcia '
+                'jednego głosowania',
+              ),
+              text: (s.voteCheaters.keys.toList()..sort())
+                  .map((String k) => '• ${pyrWho(s, k)}')
+                  .join('\n'),
+            ),
+          ],
           if (uncounted.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             ZenInfo(

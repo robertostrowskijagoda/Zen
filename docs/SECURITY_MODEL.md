@@ -222,9 +222,15 @@ offer that lists H.264 first no longer gets a hardware H.264 call.
   as cards. The anonymous **request** for a vote is signed by a card from the
   cell's request list (a roster made when someone first asks, for the
   present head and voters; it waits up to 12 hours for an absent member);
-  the **vote** by a card from the vote's ballot, once. Both are hybrid
-  signatures: nobody outside the cell can forge them, and inside it nobody
-  learns whose card it was. Only the card registration between cellmates
+  the **vote** by a card from the vote's ballot, once, dated before the end
+  the signed request fixed. Both are hybrid signatures: nobody outside the
+  cell can forge them, and inside it nobody learns whose card it was. After
+  the end each member's app signs the votes that reached it by the end
+  plus ten minutes of clock tolerance, and the close, signed by most of
+  the ring, counts only votes most of those views list: one member alone
+  cannot add a vote it dates back. The limit: the views show which votes
+  reached whom in time, so a vote that reached only a few members hints
+  at whose it was among them. Only the card registration between cellmates
   uses a classical ring signature (below).
 - **The court** of the pyramid decides without names the same way: the
   judges a matter has by the rules (its ring) each register a one-time
@@ -1070,10 +1076,14 @@ inbox.
   device at a treasurer's member address seals, so an honest treasurer
   with several devices never signs two seals of an era that would mark it
   as a cheater; a payee handed a final order whose number the treasurers
-  released counts it only once their agreed statement lists it. Open: the
-  close of a cell vote is still signed once per member and can stall when
-  members saw different votes (co-signing a larger close would let one
-  member list a vote dated back).
+  released counts it only once their agreed statement lists it. The close
+  of a cell vote no longer stalls when members saw different votes: every
+  vote has a fixed end in its signed request, each member's app signs the
+  votes that reached it by the end plus the ten minutes of clock tolerance
+  the seals use (its view), and the close lists every vote that the views
+  of most of the ring list, so a vote dated back and sent after the end,
+  which one member alone claims, never gets in; who signs two closes of a
+  vote neither of which holds the other is shown with both.
 - Self-update from GitHub takes only a file whose `SHA256SUMS` carries the
   release signing key's signature (one maintainer key is pinned in
   `release.dart`) and, on Android, an APK signed by the installed copy's
