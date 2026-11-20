@@ -10,6 +10,22 @@ ahead without it. More in docs/RELEASES.md, section 3.5.
 
 ## Unreleased
 
+## 1.18.2 — 20.11.2026
+
+### What's new
+- [en] Zen's password suggestion now appears in Samsung Internet, Edge and Opera, and inside the keyboard.
+- [en] The known limits of recent versions are written down in the guide.
+- [pl] Podpowiedź haseł Zen pojawia się teraz w Samsung Internet, Edge i Operze oraz w klawiaturze.
+- [pl] Znane ograniczenia ostatnich wersji są opisane w przewodniku.
+
+### Fixes and changes
+**Read this first.** Nothing here was tried on a phone. Whether Android lets each browser use compatibility mode, and whether the keyboard shows Zen's row, only a phone shows.
+- **Samsung Internet, Edge and Opera now offer Zen's suggestion**: they never ask an autofill service themselves, so Zen stayed out of them. Zen now asks Android to serve them in compatibility mode and reads the page's address from the browser's own address bar, and only from the maker's signed copy. The bar usually shows no "https", so a login saved for an https address shows there only after the warning, under "Szukaj w hasłach".
+- **Zen's suggestion now really appears inside the keyboard on Android 11 and later**: 1.17.0 announced and built it, but the service's configuration never told Android that Zen offers suggestions in the keyboard, so only the drop-down under the field ever showed.
+- **A pyramid cell's vote whose members saw different votes now closes**: each member signed the close with the votes that had reached it, so one late vote left every member with a different close and none got a majority. The end is now fixed in the request, each member's app signs which votes reached it by the end plus ten minutes, and most of the cell sign one close with every vote most of them saw. A vote sent after the end with an earlier date does not count, even if one member claims it; anyone who signs two different closes is shown with both. The pyramid is not open.
+- **The known limits of recent versions are written where people read them**: in the "Limits" section of each guide page and in the security model.
+- **Correction to 1.17.0 on blocks in Dating**: that entry said a block of a person applied in every feature and that a new dating key no longer beat a block in Dating, which claimed more than was done. A block covers the dating keys the person's own phone told yours, and a new dating key that only a mutual friend vouches for is a new person to it, until their phone tells you. Documents: the known limits that follow from the decisions of 1.17.0 to 1.18.1 (a locked phone and very large groups, Bluetooth adverts, files that go unchanged, the ports of local links, calls, account devices, Dating, the pyramid's seal, battery with no network, the media vault sweep, recorded deletions) are written in the guide pages and the security model.
+
 ## 1.18.1 — 18.11.2026
 
 ### What's new

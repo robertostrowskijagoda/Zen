@@ -323,7 +323,7 @@ class _PasswordSetupPanelState extends ConsumerState<PasswordSetupPanel>
   Widget _browser(ZenColors zen, BrowserSetup b) {
     final String id = b.browser.packageName;
     final BrowserSwitchState? state = b.state;
-    final String? steps = b.needsAction ? b.steps : null;
+    final String? steps = b.shownSteps;
     return ZenCard(
       key: Key('password-setup-browser-$id'),
       child: Column(

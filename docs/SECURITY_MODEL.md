@@ -147,9 +147,10 @@ computer could break. So Zen does not rely on it for identity:
   does not hold it in the clear.
 - **Cutting a device off.** Every device of an account holds the account
   key, so the account key alone cannot decide which devices are yours.
-  Phones of this version (both sides need it; a friend on an older version
-  takes certificates and cut-offs by the account key alone, as before)
-  judge them by device keys and time (`device_trust.dart`):
+  Phones of this version (co-signatures need 1.18.0 or later on both
+  sides, the rule for a new friend's first device 1.18.1 or later on the
+  friend's side; a friend on an older version takes certificates and
+  cut-offs by the account key alone, as before) judge them by device keys and time (`device_trust.dart`):
   - A device you link (or copy the account to) from one of yours is
     **co-signed** by that device and counts with friends at once. Every
     device also marks its own certificate, which says the account
@@ -221,9 +222,15 @@ offer that lists H.264 first no longer gets a hardware H.264 call.
   as cards. The anonymous **request** for a vote is signed by a card from the
   cell's request list (a roster made when someone first asks, for the
   present head and voters; it waits up to 12 hours for an absent member);
-  the **vote** by a card from the vote's ballot, once. Both are hybrid
-  signatures: nobody outside the cell can forge them, and inside it nobody
-  learns whose card it was. Only the card registration between cellmates
+  the **vote** by a card from the vote's ballot, once, dated before the end
+  the signed request fixed. Both are hybrid signatures: nobody outside the
+  cell can forge them, and inside it nobody learns whose card it was. After
+  the end each member's app signs the votes that reached it by the end
+  plus ten minutes of clock tolerance, and the close, signed by most of
+  the ring, counts only votes most of those views list: one member alone
+  cannot add a vote it dates back. The limit: the views show which votes
+  reached whom in time, so a vote that reached only a few members hints
+  at whose it was among them. Only the card registration between cellmates
   uses a classical ring signature (below).
 - **The court** of the pyramid decides without names the same way: the
   judges a matter has by the rules (its ring) each register a one-time
@@ -547,7 +554,8 @@ friend list or device record names it only as a hint, see above).
   a block still finds it. **The honest limit:** an account costs nothing, so
   a new account, a new device key or a new dating key of the same person
   cannot be recognised; Zen refuses what it knows to be theirs, never the
-  person.
+  person. For Dating that means keys their own phone told yours (a new key
+  that only a mutual friend vouches for is not known to be theirs).
 - **What leaves with a file you send.** Photos, films and recordings sent in
   a chat leave without place, time and device data (EXIF and the like),
   whichever way they were picked (gallery, camera, drop, paste, recording);
@@ -726,19 +734,22 @@ filled. This version never offers to save what is typed elsewhere.
   up: the form stays fillable for minutes instead of one. An entry added
   this way is typed by the person for that page, so a page cannot make Zen
   save a login under an address of its choosing.
-- **The setup looks at browsers.** "Konfiguracja haseł" tells which of 21
+- **The setup looks at browsers.** "Konfiguracja haseł" tells which of 26
   known browsers are installed, so the manifest names them under
   `<queries>` (package visibility, no permission; Zen sees whether these
   packages are installed and nothing else about the others): `com.android.chrome`,
   `com.chrome.beta`, `com.chrome.dev`, `com.chrome.canary`,
   `org.chromium.chrome`, `com.brave.browser`, `com.vivaldi.browser`,
-  `com.microsoft.emmx`, `com.sec.android.app.sbrowser`, `com.opera.browser`,
-  `com.kiwibrowser.browser`, `org.mozilla.firefox`,
+  `com.microsoft.emmx`, `com.microsoft.emmx.beta`, `com.microsoft.emmx.dev`,
+  `com.microsoft.emmx.canary`, `com.sec.android.app.sbrowser`,
+  `com.sec.android.app.sbrowser.beta`, `com.opera.browser`,
+  `com.opera.browser.beta`, `com.kiwibrowser.browser`, `org.mozilla.firefox`,
   `org.mozilla.firefox_beta`, `org.mozilla.fenix`, `org.mozilla.focus`,
   `org.mozilla.klar`, `org.torproject.torbrowser`, `us.spotco.fennec_dos`,
   `org.mozilla.fennec_fdroid`, `org.ironfoxoss.ironfox` and
-  `com.duckduckgo.mobile.android`. For the Chromium family it reads the
-  browser's own provider
+  `com.duckduckgo.mobile.android`. For the Chromium family and the
+  browsers served in compatibility mode (below) it reads the browser's own
+  provider
   (`content://<package>.AutofillThirdPartyModeContentProvider/autofill_third_party_mode`)
   for its "Autofill using another service" switch, off the main thread
   (the browser may start for it), and takes anything unexpected for
@@ -770,6 +781,38 @@ filled. This version never offers to save what is typed elsewhere.
   their own name. Hosts are compared in their ASCII form, so addresses in
   other scripts match. A page that is not https matches only entries that
   say `http://`, and a port must be the same.
+- **Compatibility mode (Edge, Samsung Internet, Opera).** These browsers
+  hand no form to an autofill service themselves. Since 1.18.1 Zen's
+  service declares them as `<compatibility-package>` (with Beta, Dev and
+  Canary channels; `res/xml/zen_autofill_service.xml`, no version limit in
+  practice), and Android serves them in its compatibility mode where its
+  own list (the global setting `autofill_compat_mode_allowed_packages`,
+  which Zen cannot read) allows them. What it exposes: Android turns on
+  accessibility events inside that browser (Zen holds no accessibility
+  service) and builds the form Zen gets from the browser's accessibility
+  tree, the page's elements with their HTML ids, hints, texts and input
+  types, and the browser's own views; the address bar's text becomes the
+  bar's web domain and scheme (`Helper.sanitizeUrlBar` in the system
+  server) before typed text is stripped. Why it was not used before: the
+  page builds most of that tree, so the address is no longer the
+  browser's report of which page holds the form but the text of a view,
+  and a page can give an element the bar's id. What Zen does about it
+  (`compatibilityWebOrigin` in `ZenAutofillTrust.kt`): in a request
+  flagged `FLAG_COMPATIBILITY_MODE_REQUEST` no web domain on the form's
+  nodes counts; the page is the address bar's only when exactly one view
+  carries one of that browser's bar ids, it is a view of the browser's own
+  layout (`<package>:id/<id>`; a node the page made has no package), it
+  does not have the focus (then it shows what is typed), and it passes the
+  same rules as any page: the maker's signature (each package's keys are
+  pinned: Samsung Internet's two keys from Google's list, both named as
+  Samsung's in samsung.com's asset links; Edge's channels with Edge's key),
+  a plausible host, http or https. Anything else: no page, the browser is
+  matched by its package, and every login is behind the warning. What
+  stays weaker than in Chrome: the address is the tab's, not that of a
+  frame inside it; most bars show no scheme, so such a page counts as http
+  and an `https://` entry is offered only past the warning; Zen trusts the
+  browser to put the real address in its bar, as it trusts any known
+  browser's report.
 - **What a malicious app can and cannot do.** Any app with a login form
   gets the "Odblokuj Zen" suggestion and learns from it only that an
   autofill service answers. It cannot name a web page to be matched as
@@ -1033,10 +1076,14 @@ inbox.
   device at a treasurer's member address seals, so an honest treasurer
   with several devices never signs two seals of an era that would mark it
   as a cheater; a payee handed a final order whose number the treasurers
-  released counts it only once their agreed statement lists it. Open: the
-  close of a cell vote is still signed once per member and can stall when
-  members saw different votes (co-signing a larger close would let one
-  member list a vote dated back).
+  released counts it only once their agreed statement lists it. The close
+  of a cell vote no longer stalls when members saw different votes: every
+  vote has a fixed end in its signed request, each member's app signs the
+  votes that reached it by the end plus the ten minutes of clock tolerance
+  the seals use (its view), and the close lists every vote that the views
+  of most of the ring list, so a vote dated back and sent after the end,
+  which one member alone claims, never gets in; who signs two closes of a
+  vote neither of which holds the other is shown with both.
 - Self-update from GitHub takes only a file whose `SHA256SUMS` carries the
   release signing key's signature (one maintainer key is pinned in
   `release.dart`) and, on Android, an APK signed by the installed copy's
@@ -1066,5 +1113,63 @@ inbox.
   data is yours anyway, but it could make the copy smaller. Holders also
   see when and how much your copy changes. Someone with your unlocked phone
   can change who your close friends are, and with them who holds pieces.
+- A locked phone is quiet for a group whose members its notice kit cannot
+  list: the kit holds at most 20,000 member tags (`maxMemberTags`, one per
+  member device, all joined groups together) and a group goes in whole or as
+  unlisted (at most 2,000 of those; past that it is not named at all, with
+  the same result). For an unlisted group no message or call rings or is
+  told of while locked (the frames are kept for the app and show once it is
+  unlocked). The alternative, the capability's word "a friend, or a member
+  of some joined group", would let any friend make the phone ring by
+  claiming to speak in a group they are not in, which the app's own rule
+  never allows.
+- Bluetooth link adverts: an Android phone's advert carries no L2CAP
+  channel number (PSM); it is on GATT (`…0003`) and is read by any device
+  that connects, so an active party can read it. A Linux computer (no GATT
+  server) and a phone on 1.18.0 or older still advertise it (`"ZL"`); on
+  Linux it is the first free one from `0x80`, nearly the same on every
+  computer, so it does not tell one from another. That a Zen device is near
+  stays visible (the service UUID, the manufacturer data's `"ZG"`/`"ZL"`).
+- Outgoing photos, films and recordings are cleaned of place, time and
+  device data without re-encoding, so what the cleaner does not walk goes
+  unchanged: a file over 64 MB, an Ogg or WebM file, a HEIC/AVIF whose boxes
+  `heif_metadata.dart` does not understand, any other kind. The attach
+  sheet says so each time for a photo, a film or a recording, but it is a
+  warning, not a block, and the file may carry that data.
+- Local links over Wi-Fi use fixed ports: UDP 39319 for beacons and TCP
+  39320 to 39335 for links (a firewall rule can name them). A device
+  before 1.18.1 names a port the system gave it, which a newer device no
+  longer dials: such a pair links over the LAN only when the older device
+  dials, else through the internet until it is updated.
+- Account devices: someone who holds the account key and password cannot
+  be told from the owner beyond the 24-hour wait and the veto, and within
+  that day a thief who holds a stolen device can cut off the owner's device
+  that answers him (see "Cutting a device off"). A phone restored from the
+  account key alone is a device nobody co-signed, so friends hand it the
+  copy they hold only after it counts (24 hours) and at its next daily
+  search: about two days. Co-signatures need 1.18.0 or later on both sides,
+  the rule for a new friend's first device 1.18.1 or later on the friend's
+  side.
+- Dating, hiding: a profile hidden *only from* a direct friend is answered
+  to questions that come through that friend from further away, because
+  the phone must take his word about whose question it is (the first
+  phone on the way vouches for the asker's key); a friend with a modified
+  app can present his own question as someone else's and so is not hidden
+  from. Hiding him with his circle closes it (nothing that reaches the
+  profile through him is answered). Blocking recognises a dating key as a
+  person's only when that person's own phone told it (`date_key`, from
+  their address); a new dating key that a mutual friend vouches for, or
+  that reaches the phone otherwise, is a new person to a block. The 1.17.0
+  note on blocks said more for Dating than this.
+- Pyramid seals: a seal needs most of the era's treasurers (`n ~/ 2 + 1`),
+  which is all of them when there are two, so with two treasurers (or one)
+  a single one that does not sign holds the seal and with it the end of the
+  era; changes of the tree reach the money only after the seal that names
+  them. An operation counts by the same majority.
+- Synced deletions: besides the tombstones written again for 30 days (and
+  the bounded markers of the dating profile, the profile and the
+  meetings), each device keeps its own record of every deletion in the
+  synced states for good, with no value in it, and it only grows. It names
+  what was deleted, not what it held.
 
 Found something? Please report it privately: [SECURITY.md](../SECURITY.md).

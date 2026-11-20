@@ -205,8 +205,27 @@ void main() {
         'android/app/src/main/res/xml/zen_autofill_service.xml',
       ).readAsStringSync();
       expect(config, contains('<autofill-service'));
-      // No accessibility-based compatibility mode for browsers.
-      expect(config, isNot(contains('compatibility-package')));
+      // Compatibility mode only for the browsers that need it, each with a
+      // version limit Android can read (an unreadable entry ends the list).
+      final List<RegExpMatch> packages = RegExp(
+        r'<compatibility-package\s+android:name="([a-z0-9_.]+)"\s+'
+        r'android:maxLongVersionCode="([0-9]+)"\s*/>',
+      ).allMatches(config).toList();
+      expect(packages, isNotEmpty);
+      expect(
+        packages.length,
+        RegExp('<compatibility-package').allMatches(config).length,
+      );
+      expect(packages.map((RegExpMatch m) => m.group(1)).toSet(), <String>{
+        'com.sec.android.app.sbrowser',
+        'com.sec.android.app.sbrowser.beta',
+        'com.microsoft.emmx',
+        'com.microsoft.emmx.beta',
+        'com.microsoft.emmx.dev',
+        'com.microsoft.emmx.canary',
+        'com.opera.browser',
+        'com.opera.browser.beta',
+      });
     });
 
     test('the picker\'s activity is not open to other apps and has no '
@@ -251,6 +270,12 @@ void main() {
       }
       // The page's address only from a known browser; Zen's own forms never.
       expect(service, contains(RegExp(r'trustedWebOrigin\(\s*client,')));
+      // In compatibility mode only the address bar names the page.
+      expect(service, contains('FLAG_COMPATIBILITY_MODE_REQUEST'));
+      expect(
+        service,
+        contains(RegExp(r'compatibilityWebOrigin\(\s*client,\s*addressBars\(')),
+      );
       expect(service, contains('if (client == packageName)'));
       expect(
         service,

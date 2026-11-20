@@ -11,7 +11,9 @@ import java.security.MessageDigest
  * believed only from a browser Zen knows, and only when the installed
  * package is signed with that browser's own certificate: an app installed
  * from elsewhere under a browser's package name (one the phone does not
- * have) is filled like any other app, by its package alone. Every other app
+ * have) is filled like any other app, by its package alone. A browser
+ * served through Android's compatibility mode is believed only about what
+ * its own address bar shows ([compatibilityWebOrigin]). Every other app
  * is matched by its package, and an entry that names the app's certificate
  * (`android://<hash>@package/`) only an app signed with it ([appSigning]).
  */
@@ -49,7 +51,11 @@ const val SIGNING_CERTIFICATE_MIN_SDK = 28
  *   FeatureAndTrustDetection.kt (base64 there, the same digest);
  * * [M] the maker's own Digital Asset Links file,
  *   `https://<site>/.well-known/assetlinks.json` of accounts.firefox.com,
- *   brave.com, duckduckgo.com and www.opera.com;
+ *   brave.com, duckduckgo.com and www.opera.com; and (read on 2026-11-18)
+ *   of www.samsung.com and account.samsung.com, which name Samsung
+ *   Internet's two keys for Samsung's own apps (Samsung Account, Samsung
+ *   Members): proof that both keys are Samsung's, not that the browser is
+ *   signed with them, which [G] says;
  * * [D] Mozilla's page on Fenix's signing certificates,
  *   https://firefox-source-docs.mozilla.org/mobile/android/fenix/certificates.html;
  * * [F] the signer in F-Droid's repository index (index-v2.json of
@@ -62,11 +68,16 @@ const val SIGNING_CERTIFICATE_MIN_SDK = 28
  * * [R] IronFox's README (gitlab.com/ironfox-oss/IronFox), "SHA-256 Hash of
  *   Signing Certificate".
  *
+ * A beta or other channel of a browser that [G] alone names with a key
+ * confirmed above for the browser itself (Edge Beta, Dev and Canary) is
+ * believed too: a copy signed with that key is the maker's whatever its
+ * channel.
+ *
  * Not believed, with only one source: Chromium (`org.chromium.chrome`, [G]
- * alone, with the key GrapheneOS's Vanadium is signed with), Samsung
- * Internet ([G] alone), Kiwi ([A] alone). Left out for the same reason: a
- * second key of Chrome Beta and Chrome Dev ([G] alone), the DivestOS build
- * of Mull ([A] alone), a third key of DuckDuckGo ([M] alone).
+ * alone, with the key GrapheneOS's Vanadium is signed with), Kiwi ([A]
+ * alone). Left out for the same reason: a second key of Chrome Beta and
+ * Chrome Dev ([G] alone), the DivestOS build of Mull ([A] alone), a third
+ * key of DuckDuckGo ([M] alone).
  */
 val autofillBrowsers: Map<String, List<String>> = mapOf(
     // Chrome [G, A].
@@ -99,10 +110,30 @@ val autofillBrowsers: Map<String, List<String>> = mapOf(
     "com.microsoft.emmx" to listOf(
         "01:E1:99:97:10:A8:2C:27:49:B4:D5:0C:44:5D:C8:5D:67:0B:61:36:08:9D:0A:76:6A:73:82:7C:82:A1:EA:C9",
     ),
-    // Samsung Internet: no second source.
-    "com.sec.android.app.sbrowser" to listOf(),
-    // Opera [G, M].
+    // Edge Beta, Dev and Canary [G, with Edge's key].
+    "com.microsoft.emmx.beta" to listOf(
+        "01:E1:99:97:10:A8:2C:27:49:B4:D5:0C:44:5D:C8:5D:67:0B:61:36:08:9D:0A:76:6A:73:82:7C:82:A1:EA:C9",
+    ),
+    "com.microsoft.emmx.dev" to listOf(
+        "01:E1:99:97:10:A8:2C:27:49:B4:D5:0C:44:5D:C8:5D:67:0B:61:36:08:9D:0A:76:6A:73:82:7C:82:A1:EA:C9",
+    ),
+    "com.microsoft.emmx.canary" to listOf(
+        "01:E1:99:97:10:A8:2C:27:49:B4:D5:0C:44:5D:C8:5D:67:0B:61:36:08:9D:0A:76:6A:73:82:7C:82:A1:EA:C9",
+    ),
+    // Samsung Internet and its beta: two keys, both Samsung's [G, M].
+    "com.sec.android.app.sbrowser" to listOf(
+        "34:DF:0E:7A:9F:1C:F1:89:2E:45:C0:56:B4:97:3C:D8:1C:CF:14:8A:40:50:D1:1A:EA:4A:C5:A6:5F:90:0A:42",
+        "C8:A2:E9:BC:CF:59:7C:2F:B6:DC:66:BE:E2:93:FC:13:F2:FC:47:EC:77:BC:6B:2B:0D:52:C1:1F:51:19:2A:B8",
+    ),
+    "com.sec.android.app.sbrowser.beta" to listOf(
+        "34:DF:0E:7A:9F:1C:F1:89:2E:45:C0:56:B4:97:3C:D8:1C:CF:14:8A:40:50:D1:1A:EA:4A:C5:A6:5F:90:0A:42",
+        "C8:A2:E9:BC:CF:59:7C:2F:B6:DC:66:BE:E2:93:FC:13:F2:FC:47:EC:77:BC:6B:2B:0D:52:C1:1F:51:19:2A:B8",
+    ),
+    // Opera and Opera beta [G, M].
     "com.opera.browser" to listOf(
+        "5D:6A:FB:F8:7F:65:2A:F0:46:47:AD:A0:DF:63:4C:F2:23:70:90:0B:16:4B:09:D5:0B:D2:3A:A2:CB:52:85:B8",
+    ),
+    "com.opera.browser.beta" to listOf(
         "5D:6A:FB:F8:7F:65:2A:F0:46:47:AD:A0:DF:63:4C:F2:23:70:90:0B:16:4B:09:D5:0B:D2:3A:A2:CB:52:85:B8",
     ),
     // Kiwi: no second source.
@@ -228,6 +259,97 @@ fun trustedWebOrigin(
         return null
     }
     return AutofillWebOrigin(host, cleanScheme)
+}
+
+/**
+ * The browsers Zen asks Android to serve through its autofill
+ * compatibility mode (`<compatibility-package>` in
+ * res/xml/zen_autofill_service.xml, the same packages), each with the
+ * resource ids of its address bar's view.
+ *
+ * These browsers hand no form to an autofill service themselves. In
+ * compatibility mode Android builds the form from the browser's
+ * accessibility tree instead, and the page's address is only what the
+ * address bar shows: Android copies the bar's text into the bar's view as
+ * its web domain and scheme (Helper.sanitizeUrlBar in the system server)
+ * before it strips typed text from the form, so Zen reads those, never the
+ * text ([compatibilityWebOrigin]). Android does this only for a browser
+ * that is also on its own list (the `autofill_compat_mode_allowed_packages` setting, kept
+ * by Google on most phones), which names the address bar's ids for it;
+ * Zen cannot read that list. The ids here are those Bitwarden's
+ * accessibility service looks for (BrowserUtil.kt in bitwarden/android,
+ * read on 2026-11-18); a browser whose bar has another id gets no page
+ * from Zen, only the warning.
+ *
+ * Only browsers with a confirmed key in [autofillBrowsers]: the page's
+ * address is believed only from the maker's copy, as with any browser.
+ */
+val compatibilityBrowsers: Map<String, List<String>> = mapOf(
+    "com.sec.android.app.sbrowser" to listOf("location_bar_edit_text"),
+    "com.sec.android.app.sbrowser.beta" to listOf("location_bar_edit_text"),
+    "com.microsoft.emmx" to listOf("url_bar"),
+    "com.microsoft.emmx.beta" to listOf("url_bar"),
+    "com.microsoft.emmx.dev" to listOf("url_bar"),
+    "com.microsoft.emmx.canary" to listOf("url_bar"),
+    "com.opera.browser" to listOf("url_field"),
+    "com.opera.browser.beta" to listOf("url_field"),
+)
+
+/**
+ * Views with an address bar's id looked for in one form: two are already
+ * one too many ([compatibilityWebOrigin]), so the search stops there.
+ */
+const val MAX_ADDRESS_BARS = 2
+
+/**
+ * A view of a compatibility-mode form whose id is one of the browser's
+ * address bar ids ([isAddressBarId]), as the structure reports it: the id
+ * in its three parts (a view of the browser's own layout has all three;
+ * a node the page made has only [idEntry], from the HTML `id`), whether it
+ * has the focus, and the web domain and scheme Android put on it from its
+ * text.
+ */
+class AddressBarView(
+    val idEntry: String?,
+    val idPackage: String?,
+    val idType: String?,
+    val focused: Boolean,
+    val webDomain: String?,
+    val webScheme: String?,
+)
+
+/** Whether [idEntry] is one of [packageName]'s address bar ids. */
+fun isAddressBarId(packageName: String, idEntry: String?): Boolean =
+    idEntry != null && compatibilityBrowsers[packageName]?.contains(idEntry) == true
+
+/**
+ * The page of a compatibility-mode request from [packageName], read from
+ * its address bar ([bars]: every view of the form with one of its address
+ * bar ids, hidden ones too), when Zen can be sure of it; null otherwise,
+ * and the browser is matched by its package (every login only after the
+ * warning).
+ *
+ * Sure means: exactly one such view, a view of the browser's own layout
+ * (`<packageName>:id/<id>`; a page can give an element the same HTML `id`,
+ * but not a package), not being edited (with the focus the bar shows what
+ * is typed, not the page), with a web domain Android took from its text;
+ * then the same rules as for any browser's page ([trustedWebOrigin]):
+ * only the maker's copy, only a plausible host, only http or https. A bar
+ * that shows no scheme (most do not) gives none, so the page counts as
+ * http, as any page reported without one.
+ */
+fun compatibilityWebOrigin(
+    packageName: String,
+    bars: List<AddressBarView>,
+    lookup: SigningCertificateLookup,
+    sdkInt: Int,
+): AutofillWebOrigin? {
+    val ids = compatibilityBrowsers[packageName] ?: return null
+    val bar = bars.singleOrNull() ?: return null
+    if (bar.idEntry !in ids || bar.idPackage != packageName || bar.idType != "id" || bar.focused) {
+        return null
+    }
+    return trustedWebOrigin(packageName, bar.webDomain, bar.webScheme, lookup, sdkInt)
 }
 
 /**

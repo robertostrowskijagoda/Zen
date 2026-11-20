@@ -599,7 +599,8 @@
     "tests": [
       "test/pyramid_era_seal_test.dart",
       "test/pyramid_court_anonymity_test.dart",
-      "test/pyramid_security_test.dart"
+      "test/pyramid_security_test.dart",
+      "test/pyramid_vote_close_test.dart"
     ]
   },
   {

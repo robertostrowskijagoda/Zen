@@ -103,9 +103,19 @@ itself; the list of hidden people never travels in your profile.
 - A modified app of a dater learns, from each answer, whom the lantern's
   holder looks for (as it could with the earlier test, in three answers);
   answers per lantern and friend stay limited.
-- Under *only from them*, the first phone on the way says which key a hidden
-  friend told it, so a new key is noticed; a modified app that pretends to
-  pass on someone else's question through a mutual friend is not.
+- **A friend you hid *only from them* can still get to you with a modified
+  app.** Your phone refuses that friend's own questions, and for questions
+  that come through him from further away it relies on what he says about
+  them. A direct friend whose app is modified can present his own question
+  as someone else's, passed on, and your profile is then not hidden from him
+  alone. Hiding him *from them and their circle* stops it: nothing that
+  reaches you through that friend is answered.
+- **A block does not follow a new dating key that a mutual friend vouches
+  for.** Zen knows a dating key is a blocked person's only when that
+  person's own phone told it to yours; a new key that reaches you only
+  through a mutual friend looks like a new person, and the block does not
+  cover it until their phone tells you (see
+  [Chats](chats-and-delivery.md#blocking-a-person) for what a block covers).
 - Who sent a sealed box is still proven with X25519 alongside the
   post-quantum secret; what matters for authenticity (profiles,
   recommendations, *Yes*, messages) is signed or MACed post-quantum.
