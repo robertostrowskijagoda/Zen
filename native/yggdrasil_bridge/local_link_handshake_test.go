@@ -112,9 +112,15 @@ func TestAHelloSentBackToItsSenderIsRefused(t *testing.T) {
 	opening := make([]byte, localOpeningSize)
 	opening[0] = localHandshakeVersion
 	_, _ = rand.Read(opening[1:])
-	go func() { _ = writeLocalFrame(stranger, opening) }()
+	sent := make(chan error, 1)
+	go func() { sent <- writeLocalFrame(stranger, opening) }()
 	theirs, err := readLocalFrame(stranger, 1<<16)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The opening must be in before the hello: a pipe does not keep two
+	// writers in order.
+	if err := <-sent; err != nil {
 		t.Fatal(err)
 	}
 	reflected, _ := testRecordHello(t, peersT, keyT, theirs[1:])
