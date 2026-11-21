@@ -320,10 +320,17 @@ func testOpenings(t *testing.T, conn net.Conn) []byte {
 	opening := make([]byte, localOpeningSize)
 	opening[0] = localHandshakeVersion
 	_, _ = rand.Read(opening[1:])
-	go func() { _ = writeLocalFrame(conn, opening) }()
+	// Waited for: a pipe does not keep two writers in order, and the next
+	// frame must not overtake the opening.
+	sent := make(chan error, 1)
+	go func() { sent <- writeLocalFrame(conn, opening) }()
 	theirs, err := readLocalFrame(conn, 1<<16)
 	if err != nil || len(theirs) != localOpeningSize {
 		t.Errorf("opening: %d bytes, %v", len(theirs), err)
+		return nil
+	}
+	if err := <-sent; err != nil {
+		t.Errorf("opening: %v", err)
 		return nil
 	}
 	return theirs[1:]
