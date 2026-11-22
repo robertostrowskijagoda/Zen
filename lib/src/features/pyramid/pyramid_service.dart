@@ -786,6 +786,11 @@ final class PyramidService extends ChangeNotifier {
   /// they fold then ([PyramidState.fold]).
   final Map<String, int> _late = <String, int>{};
 
+  /// When this phone first kept each cell vote's vote (id → its time):
+  /// what its view of the vote lists ([PyrT.voteSeen]) is what came by the
+  /// end and [kPyrMaxSkewMs] more, also across a restart.
+  final Map<String, int> _voteAt = <String, int>{};
+
   /// When this run of the app took each record in (those read from disk
   /// count as long kept).
   final Map<String, int> _keptAt = <String, int>{};
@@ -1057,6 +1062,9 @@ final class PyramidService extends ChangeNotifier {
         _late
           ..clear()
           ..addAll(_ints(json['le']));
+        _voteAt
+          ..clear()
+          ..addAll(_ints(json['vat']));
         _payments.clear();
         // Sent again soon after a start (the treasurers may have missed it).
         _resentAt.clear();
@@ -1494,6 +1502,7 @@ final class PyramidService extends ChangeNotifier {
           'fol': ?_followSince,
           'cs': _consent,
           'le': _late,
+          'vat': _voteAt,
           // Orders waiting for treasurers survive a restart and are sent
           // again as they are (a new order would need a number some
           // treasurers have already promised to this one).
@@ -1745,6 +1754,9 @@ final class PyramidService extends ChangeNotifier {
       _late[r.id] = max(t, r.at);
     }
     _keptAt.putIfAbsent(r.id, () => t);
+    if (had == null && r.type == PyrT.vote) {
+      _voteAt.putIfAbsent(r.id, () => t);
+    }
     _records[r.id] = r;
     r.fileKeys();
     _recordsUnsaved.add(r.id);
@@ -2688,15 +2700,19 @@ final class PyramidService extends ChangeNotifier {
         roster.tokens[card.id] != card.pqId) {
       return;
     }
+    final int at = _now();
     final PyramidRecord request = await PyramidRecord(
       body: <String, dynamic>{
         't': PyrT.voteRequest,
         'py': s.id,
-        'at': _now(),
+        'at': at,
         'by': <String>[card.id],
         'cell': scope.cell,
         'head': scope.head,
         'n': _newId(),
+        // The end, fixed in the signed request: a vote dated from it on
+        // never counts.
+        'end': at + s.params.electionHours * 3600 * 1000,
       },
     ).signedBy(card);
     _pendingRequests.remove(scope.cell);
@@ -8131,21 +8147,79 @@ final class PyramidService extends ChangeNotifier {
     }
   }
 
-  /// Closes each cell vote this person is in the ring of, once it ended by
-  /// time ([PyrT.voteClose]): the votes that had come here, signed by the
-  /// app itself. Members who saw the same votes sign the same record, and
-  /// their signatures meet in it as it goes round; a vote dated back into
-  /// the vote afterwards is then refused on every phone.
+  /// Closes each cell vote this person is in the ring of, once it ended,
+  /// in two steps the app signs by itself:
+  /// - its view ([PyrT.voteSeen]), once, [kPyrMaxSkewMs] after the end:
+  ///   the votes dated before the end that reached this phone by then
+  ///   ([_voteAt]) — a vote that comes later is not in it, whatever its
+  ///   date;
+  /// - the close ([PyrT.voteClose]) with every vote most of the ring's
+  ///   views list ([PyramidState.closeVotes]), once no view still missing
+  ///   can change it, or [kPyrVoteViewsMs] later with the views it has;
+  ///   again only a close that holds every vote of the one it signed
+  ///   before (more views only add votes). Members with the same views
+  ///   sign the same record, and their signatures meet in it as it goes
+  ///   round, also when they saw different votes.
+  /// Of the account's devices only the one at its member address does it:
+  /// two devices that got different votes could sign two closes neither
+  /// of which holds the other ([PyramidState.voteCheaters]).
   Future<void> _closeDuties(PyramidState s, LedgerKeyPair me) async {
     final int t = _now();
+    final String addr = s.members[me.id]?.addr ?? '';
+    if (addr.isNotEmpty && _n(addr) != _n(host.ownAddress())) {
+      return;
+    }
+    _voteAt.removeWhere((String id, int _) {
+      final PyrElection? e = s.elections[_records[id]?.str('elect') ?? ''];
+      return e == null || t > e.deadline + kPyrMaxOrderAgeMs + kPyrMaxSkewMs;
+    });
     for (final PyrElection e in s.elections.values.toList()) {
       if (!e.closed ||
           e.close != null ||
-          e.allVoted ||
           !e.ring.contains(me.id) ||
           t < e.deadline + kPyrMaxSkewMs ||
           t > e.deadline + kPyrMaxOrderAgeMs) {
         continue;
+      }
+      final int inTime = e.deadline + kPyrMaxSkewMs;
+      final List<String> mine = <String>[
+        for (final MapEntry<String, int> v in _voteAt.entries)
+          if (v.value <= inTime)
+            if (_records[v.key] case final PyramidRecord r
+                when PyramidState.isVoteOf(e, r))
+              v.key,
+      ]..sort();
+      await _signOnce(
+        'vseen|${e.id}',
+        PyramidRecord(
+          body: <String, dynamic>{
+            't': PyrT.voteSeen,
+            'py': s.id,
+            'at': e.deadline,
+            'by': <String>[me.id],
+            'elect': e.id,
+            'votes': mine,
+          },
+        ),
+        me,
+      );
+      // The views signed now are in the state the next round.
+      final PyrElection now = state?.elections[e.id] ?? e;
+      final ({List<String> votes, bool decided})? close =
+          PyramidState.closeVotes(now, (String id) => _records[id]);
+      if (close == null || (!close.decided && t < inTime + kPyrVoteViewsMs)) {
+        continue;
+      }
+      final String slot = 'vclose|${e.id}';
+      final String? done = _signedOrders[slot];
+      if (done != null) {
+        final Object? had = _records[done]?.body['votes'];
+        if (had is! List ||
+            !close.votes.toSet().containsAll(had) ||
+            close.votes.length == had.length) {
+          continue;
+        }
+        _signedOrders.remove(slot);
       }
       final PyramidRecord bare = PyramidRecord(
         body: <String, dynamic>{
@@ -8154,10 +8228,10 @@ final class PyramidService extends ChangeNotifier {
           'at': e.deadline,
           'by': List<String>.of(e.ring)..sort(),
           'elect': e.id,
-          'votes': e.voteIds.values.toList()..sort(),
+          'votes': close.votes,
         },
       );
-      await _signOnce('vclose|${e.id}', bare, me);
+      await _signOnce(slot, bare, me);
     }
   }
 
@@ -8174,8 +8248,8 @@ final class PyramidService extends ChangeNotifier {
   /// slot is signed while one counts) or is of a sealed era (it counts
   /// there only if listed; either way another one for its span may
   /// be signed then); a release vote once the release counts (the next
-  /// one follows it); a seal once its era is sealed; a vote's close once
-  /// no close of it is signed any more. What is left: the spans of this
+  /// one follows it); a seal once its era is sealed; a vote's view and
+  /// close once no close of it is signed any more. What is left: the spans of this
   /// era signed and not (yet) counted, the release votes still gathering,
   /// the seals and closes in progress. Whether anything went.
   bool _pruneSigned(PyramidState s, PyrLedgerView? whole) {
@@ -8188,9 +8262,9 @@ final class PyramidService extends ChangeNotifier {
         final int? n = int.tryParse(key.split('|')[1]);
         return n != null && sealed.contains(n);
       }
-      if (key.startsWith('vclose|')) {
+      if (key.startsWith('vclose|') || key.startsWith('vseen|')) {
         final int? end =
-            at ?? s.elections[key.substring('vclose|'.length)]?.deadline;
+            at ?? s.elections[key.substring(key.indexOf('|') + 1)]?.deadline;
         return end != null && now > end + kPyrMaxOrderAgeMs + kPyrMaxSkewMs;
       }
       if (key.startsWith('rel|')) {
@@ -8209,8 +8283,9 @@ final class PyramidService extends ChangeNotifier {
 
   /// Signs [bare] (adding to the signatures already here) and takes it
   /// in, unless this account already signed another record for [slot]:
-  /// one close of a vote — two would contradict each other. (A seal of an
-  /// era is signed by dominance instead: `_sealDuty`.)
+  /// one view of a vote; a close of a vote, unless the next one holds
+  /// every vote of it (`_closeDuties`). (A seal of an era is signed by
+  /// dominance: `_sealDuty`.)
   Future<void> _signOnce(
     String slot,
     PyramidRecord bare,

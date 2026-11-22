@@ -269,7 +269,10 @@ wins on both (each change carries a counter, so the order of arrival does
 not matter); different changes are merged. Files travel on Wi-Fi or a
 wired network; over mobile data only when *Media only over Wi-Fi* is off —
 what waits comes as soon as it may. So any other device of the account
-can bring the whole account back.
+can bring the whole account back. **A limit:** each device keeps its own
+record of every deletion (no content in it) for good, so a returning
+device's old data is never taken over a newer deletion; that record only
+grows, slowly, and nothing removes it.
 
 **From another device.** On the device that has the account: Account and
 recovery → **Add a second device or move the account** (the screen is
@@ -304,6 +307,22 @@ friends again, and delete the old one. Set the account password
 ([below](#getting-your-account-back)) on every device: it protects the key on
 each of them, and a device that took the account without it offers to set
 one.
+
+**A device nobody vouched for waits a day.** A device you add from one of
+yours (a link, or *It's mine* in Devices) counts with your friends at once.
+One that none of your devices co-signed (restored from paper, a file or
+friends) counts only 24 hours after a friend first sees it, and any valid
+device of yours can stop it in that time with *Unlink*. What stays
+possible: someone who has your account key **and** your account password
+cannot be told from you beyond that day and that veto; and within a day a
+thief who holds a stolen device of yours can use it to cut off your own
+device that answers him. A phone restored from the account key alone may
+wait about two days before friends hand it what they hold for the account
+(the day it waits, then its next daily search). Both sides need Zen 1.18.0
+or later for the co-signatures, and the friend needs 1.18.1 or later for
+the rule that a new friend takes at once only the device it met you by and
+those that co-signed it; a friend on an older version decides as before,
+by the account key alone.
 
 **Full account copy (file).** Account and recovery → **Create a full
 account copy**. Tick what goes

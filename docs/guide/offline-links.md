@@ -63,11 +63,15 @@ on. Their phones form a group and the chat just works.
   there**: the advert carries Zen's service identifier. Nothing else in it
   stays the same from one advert to the next, so someone who stays around
   cannot tell your phone's adverts from another Zen phone's once the
-  phone's Bluetooth address changes. (Until 1.18.0 an Android phone also
+  phone's Bluetooth address changes. (Up to 1.18.0 an Android phone also
   put the number of the channel it listens on in the advert; that number
-  stayed the same for days and let them. Now a phone reads it only from a
-  friend's phone it is about to connect to; a device that connects to
-  yours can still read it.) On Wi-Fi a beacon likewise shows that a Zen
+  stayed the same for days and let them. Now an Android phone no longer
+  puts it there: it is read over Bluetooth only by a device that connects,
+  so anyone who actively connects to your phone can still read it. A
+  Linux computer still puts it in its advert, but it is nearly the same on
+  every Linux computer, so it does not tell one from another; a phone on
+  1.18.0 or older still does what it did.) That a Zen user is nearby stays
+  visible, whatever the phone. On Wi-Fi a beacon likewise shows that a Zen
   device is on the network.
 - Recorded link traffic stays unreadable, also for a future quantum
   computer (the link key mixes in ML-KEM-768).
@@ -80,6 +84,15 @@ on. Their phones form a group and the chat just works.
   (not read an old one). See the [security model](../SECURITY_MODEL.md).
 - Wi-Fi Direct on Windows links only with Windows; it works only when the
   phone is not on any Wi-Fi network.
+- Over Wi-Fi the links use a fixed range of ports: UDP 39319 for the
+  beacons and TCP 39320 to 39335 for the links themselves. If a firewall on
+  the computer or the network blocks them (a rule can name this range),
+  friends are not linked over that network and the chat goes through the
+  internet instead.
+- A device on a version before 1.18.1 names a port of its own, which a
+  newer device does not dial. Such a pair links over Wi-Fi only when the
+  older device dials; when it does not, they reach each other through the
+  internet, until the older one is updated.
 - Bluetooth is slow: calls may not work over it.
 - Apple Multipeer works only while Zen is on screen.
 - *Nearby* (people around you over Bluetooth) is a different feature: see

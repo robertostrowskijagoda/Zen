@@ -2217,7 +2217,7 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   `revoke`, `ban`, `unban`, `decision`, `post`, `comment`, `natpost`,
   `natgrant`, `natpin`, `badge`, `known`, `ref`, `tally`, `const`, `emit`,
   `emitrule`, `emitcancel`, `veto`, `kemkey`, `suit`, `verdict`, `appeal`,
-  `appans`, `bench`, `seal`, `vclose`, `alarm`, `offer`; `xfer`, `settle`
+  `appans`, `bench`, `seal`, `vclose`, `vseen`, `alarm`, `offer`; `xfer`, `settle`
   and `xrel` exist as kinds but the fold refuses them: transfers and
   releases are private (2.11). The genesis names the power key
   (`pk`) and the fingerprint of its ML-DSA half (`pq`; the original pyramid's
@@ -2247,8 +2247,9 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   voters counts only with more cards, holding every earlier one. `vreq`
   (asking for a cell vote) is signed by one request card (keyed form, `by` =
   the card) while the cell's head and voters are those of its roster, and
-  counted per card; a `vote` is signed by one ballot card and counts once
-  per card. Neither names a member; both are published through a friend
+  counted per card; it carries the vote's end `end` (its time plus the
+  rules' vote duration, nothing else counts). A `vote` is signed by one
+  ballot card, counts once per card and only dated before `end`. Neither names a member; both are published through a friend
   outside the cell.
   `kemkey` publishes a member's hybrid KEM key (from the pyramid key's
   seed, so it survives recovery) that private payments and statements are
@@ -2318,15 +2319,35 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   kinds (below) and a cell vote's ballot and votes, seen by a phone more
   than 30 minutes after their date, fold at the time that phone saw them,
   so they cannot turn a vote that ended; the closes then fix the same on
-  every phone. Changes of the tree fold at their own time (the seals keep
-  them from the money).
-- **Closing a cell vote** (`vclose` {`elect` the vote, `votes` the ids of
-  the votes that count}, dated at the vote's end, `by` its ring): once a
-  vote ended by time, each ring member's app signs the votes that had come
-  to it; equal views give equal records. The first close (by time, then
-  id) listing every member of the ring and signed by most of them counts;
-  a vote it does not list counts nowhere, whenever it comes. A vote where
-  every card voted before the end needs no close.
+  every phone (a vote the close lists folds at its own time everywhere).
+  Changes of the tree fold at their own time (the seals keep them from the
+  money).
+- **Closing a cell vote**, in two steps the ring members'
+  apps sign by themselves; the device at the member's address signs, not
+  the account's other devices. First the **view** (`vseen` {`elect` the
+  vote, `votes` sorted ids}, dated at the vote's end, `by` the one member,
+  signed by it): 10 minutes (`kPyrMaxSkewMs`, the tolerance for clocks the
+  seals use) after the end, the votes of the vote dated before the end
+  that reached this phone by the end plus those 10 minutes (the app keeps
+  when each vote came, also across a restart). A vote that comes later is
+  in no honest view, whatever its date. Several views of one member count
+  as one listing all of them. Then the **close** (`vclose` {`elect`,
+  `votes` sorted ids}, dated at the end, `by` the ring): every vote of the
+  vote (a card of its ballot, dated from the request to before the end,
+  for a member of the ring) that the views of most of the ring list and
+  whose record the app holds. The app signs it once no missing view can
+  change it (each vote listed is in by most views, or out even if every
+  missing view listed it), or an hour (`kPyrVoteViewsMs`) later with the
+  views it has; more views only add votes, and it signs a later close only
+  when it holds every vote of the one it signed before. So members who saw
+  different votes sign one close, and a vote dated back and sent after the
+  end, which one member alone lists, stays out. Of the closes listing every
+  member of the ring and signed by most of them, the one with the most
+  votes (then the lower id) counts; a vote it does not list counts
+  nowhere, whenever it comes, and one it lists counts on every phone. Who
+  signed two closes of one vote neither of which holds every vote of the
+  other is shown with both (`voteCheaters`), as for the seals. Every vote
+  gets a close, also one where every card voted.
 - Frames: `pyr_hello` (pyramids kept and fingerprints), `pyr_ids` (ids of a
   differing bucket), `pyr_want`, `pyr_rec` (one new record, passed on),
   `pyr_recs` (bulk), `pyr_prop` / `pyr_sig` (co-signing), `pyr_vote`,
@@ -2628,7 +2649,19 @@ From 1.12.0 on, older formats are kept readable (the rules are in
   address is a claim.
 - Local-link adverts and Bluetooth/Wi-Fi Direct records show that *a* Zen
   device with local links is nearby (and roughly how many devices it links
-  with), not whose it is.
+  with), not whose it is. The L2CAP channel number (PSM) is on GATT for an
+  Android phone, readable by anyone who connects; Linux computers and phones
+  on 1.18.0 or older still advertise it (see Transports in the local links entry).
+- LAN links use UDP 39319 and TCP 39320-39335, so a firewall rule can name
+  them. A device before 1.18.1 names a port of the system's choice that a
+  newer one does not dial: that pair links over the LAN only when the older
+  device dials, else through the internet.
+- A locked receiver's notice kit lists at most 20,000 member tags; a group
+  that does not fit is quiet while locked, so that no friend can make the
+  phone ring by claiming to speak in a group (SECURITY_MODEL.md, Honest
+  limits).
+- A seal of an era needs `n ~/ 2 + 1` of its `n` treasurers: with two, one
+  that does not sign holds it.
 
 ## 7. Open items for this document
 
