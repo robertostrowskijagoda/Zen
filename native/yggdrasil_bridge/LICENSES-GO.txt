@@ -478,7 +478,7 @@ IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
 OF SUCH DAMAGE.
 
 ========================================================================
-github.com/klauspost/compress v1.20.3
+github.com/klauspost/compress v1.20.4
 Kod źródłowy: https://github.com/klauspost/compress
 ========================================================================
 
@@ -1152,7 +1152,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 
 ========================================================================
-golang.org/x/sys v0.49.0
+golang.org/x/sys v0.50.0
 Kod źródłowy: https://go.googlesource.com/sys
 ========================================================================
 
