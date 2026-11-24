@@ -31,7 +31,7 @@ dependencies:
   qr_code_dart_scan: ^0.14.0
   # Its QR decoder, used directly for camera pictures on computers.
   zxing_lib: ^1.1.4
-  record: ^7.1.2
+  record: ^7.2.0
   zstandard: ^1.5.0
   flutter_local_notifications: ^22.3.3
   flutter_foreground_task: ^11.0.3
@@ -47,8 +47,8 @@ dependencies:
   # The own camera of the "Filmy" section (hold to record).
   camera: ^0.12.1
   # Its Windows backend (not endorsed by camera, so named here).
-  camera_windows: ^0.3.0+1
-  image: ^4.12.0
+  camera_windows: ^0.3.1
+  image: ^4.13.1
 
 dev_dependencies:
   flutter_test:
