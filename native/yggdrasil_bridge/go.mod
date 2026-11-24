@@ -11,7 +11,7 @@ require (
 	github.com/quic-go/quic-go v0.65.0
 	github.com/wlynxg/anet v0.0.5
 	github.com/yggdrasil-network/yggdrasil-go v0.5.15
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/sys v0.50.0
 )
 
@@ -23,7 +23,7 @@ require (
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/hjson/hjson-go/v4 v4.7.1 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 )
 
 // ironwood with two changes of Zen's (third_party/ironwood/ZEN.md): a
